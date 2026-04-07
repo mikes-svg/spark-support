@@ -3,8 +3,10 @@ import { useNavigate, Link } from 'react-router-dom';
 import {
   collection,
   getDocs,
+  getDoc,
   doc,
   setDoc,
+  addDoc,
   runTransaction,
   query,
   where,
@@ -89,14 +91,28 @@ export function SubmitRequestPage() {
         await uploadBytes(fileRef, file);
       }
 
-      // Queue notification email
+      // Queue notification email via Firebase Trigger Email extension
       if (assigneeId) {
-        await setDoc(doc(collection(db, 'mail')), {
-          to: assigneeId, // resolved to email by Cloud Function
-          ticketId,
-          type: 'new_ticket',
-          createdAt: serverTimestamp(),
-        });
+        const assigneeDoc = await getDoc(doc(db, 'profiles', assigneeId));
+        const assigneeEmail = assigneeDoc.data()?.email;
+        if (assigneeEmail) {
+          await addDoc(collection(db, 'mail'), {
+            to: assigneeEmail,
+            message: {
+              subject: `[Spark Support] New ${priority} ticket: ${title}`,
+              html: `
+                <p>A new support request has been assigned to you.</p>
+                <table>
+                  <tr><td><strong>Ticket</strong></td><td>${ticketId}</td></tr>
+                  <tr><td><strong>Type</strong></td><td>${type}</td></tr>
+                  <tr><td><strong>Priority</strong></td><td>${priority}</td></tr>
+                  <tr><td><strong>Title</strong></td><td>${title}</td></tr>
+                </table>
+                <p><a href="${window.location.origin}/tickets/${ticketId}">View ticket →</a></p>
+              `,
+            },
+          });
+        }
       }
 
       navigate('/');
