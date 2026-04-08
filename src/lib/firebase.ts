@@ -31,4 +31,4 @@ try {
   console.warn('Firebase not configured — running in mock/dev mode');
 }
 
-export { auth, db, storage, analytics };
+export { auth, db, storage, analytics, firebaseConfig };

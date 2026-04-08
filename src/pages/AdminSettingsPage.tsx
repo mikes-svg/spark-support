@@ -1,7 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { collection, query, getDocs, doc, updateDoc, deleteDoc, addDoc, serverTimestamp, orderBy } from 'firebase/firestore';
-import { db } from '../lib/firebase';
-import { Plus, Trash2, Edit2, Check, X } from 'lucide-react';
+import { collection, query, getDocs, doc, updateDoc, deleteDoc, addDoc, setDoc, serverTimestamp, orderBy } from 'firebase/firestore';
+import { initializeApp, deleteApp } from 'firebase/app';
+import { getAuth, createUserWithEmailAndPassword, signOut as firebaseSignOut, updateProfile } from 'firebase/auth';
+import { db, firebaseConfig } from '../lib/firebase';
+import { Plus, Trash2, Edit2, Check, X, UserPlus } from 'lucide-react';
 import { users as mockUsers, requestTypes as mockRTs } from '../mockData';
 
 interface Profile { id: string; name: string; email: string; photoURL: string; role: 'admin' | 'user'; }
@@ -13,6 +15,10 @@ export function AdminSettingsPage() {
   const [loading, setLoading] = useState(true);
   const [editingType, setEditingType] = useState<string | null>(null);
   const [editTypeName, setEditTypeName] = useState('');
+  const [showInviteModal, setShowInviteModal] = useState(false);
+  const [inviteForm, setInviteForm] = useState({ name: '', email: '', password: '', role: 'user' as 'admin' | 'user' });
+  const [inviting, setInviting] = useState(false);
+  const [inviteError, setInviteError] = useState('');
 
   useEffect(() => {
     if (!db) {
@@ -74,6 +80,42 @@ export function AdminSettingsPage() {
     await addDoc(collection(db, 'requestTypes'), { name: name.trim(), defaultAssigneeId: null, active: true, createdAt: serverTimestamp() });
   };
 
+  const handleInviteUser = async () => {
+    if (!inviteForm.name.trim() || !inviteForm.email.trim() || !inviteForm.password.trim()) return;
+    setInviting(true);
+    setInviteError('');
+    try {
+      // Use a secondary Firebase app so we don't sign out the current admin
+      const secondaryApp = initializeApp(firebaseConfig, `invite-${Date.now()}`);
+      const secondaryAuth = getAuth(secondaryApp);
+      const { user: newUser } = await createUserWithEmailAndPassword(secondaryAuth, inviteForm.email.trim(), inviteForm.password);
+      await updateProfile(newUser, { displayName: inviteForm.name.trim() });
+      await firebaseSignOut(secondaryAuth);
+      await deleteApp(secondaryApp);
+
+      const displayName = inviteForm.name.trim();
+      const photoURL = `https://ui-avatars.com/api/?name=${encodeURIComponent(displayName)}&background=1B4332&color=D4A843`;
+      const profileData = {
+        name: displayName,
+        email: inviteForm.email.trim(),
+        photoURL,
+        role: inviteForm.role,
+        createdAt: serverTimestamp(),
+      };
+      if (db) await setDoc(doc(db, 'profiles', newUser.uid), profileData);
+
+      const newProfile: Profile = { id: newUser.uid, ...profileData, role: inviteForm.role };
+      setProfiles((prev) => [...prev, newProfile].sort((a, b) => a.name.localeCompare(b.name)));
+      setShowInviteModal(false);
+      setInviteForm({ name: '', email: '', password: '', role: 'user' });
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Failed to create user.';
+      setInviteError(msg.includes('email-already-in-use') ? 'That email is already registered.' : msg);
+    } finally {
+      setInviting(false);
+    }
+  };
+
   const profilesMap = Object.fromEntries(profiles.map((p) => [p.id, p]));
 
   if (loading) return <div className="flex items-center justify-center py-20"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-brand-dark" /></div>;
@@ -86,6 +128,9 @@ export function AdminSettingsPage() {
             <h2 className="text-lg font-serif font-semibold text-gray-900">Manage Users</h2>
             <p className="mt-1 text-sm text-gray-500">Toggle admin access for portal users.</p>
           </div>
+          <button onClick={() => setShowInviteModal(true)} className="inline-flex items-center justify-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 shadow-sm transition-colors">
+            <UserPlus className="h-4 w-4 mr-2" />Add User
+          </button>
         </div>
         <div className="overflow-x-auto">
           <table className="min-w-full divide-y divide-gray-200">
@@ -165,6 +210,44 @@ export function AdminSettingsPage() {
           </table>
         </div>
       </div>
+      {showInviteModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md mx-4 overflow-hidden">
+            <div className="px-6 py-5 border-b border-gray-200 flex justify-between items-center">
+              <h3 className="text-lg font-serif font-semibold text-gray-900">Add New User</h3>
+              <button onClick={() => { setShowInviteModal(false); setInviteError(''); }} className="text-gray-400 hover:text-gray-600"><X className="h-5 w-5" /></button>
+            </div>
+            <div className="p-6 space-y-4">
+              {inviteError && <p className="text-sm text-red-600 bg-red-50 px-3 py-2 rounded-md">{inviteError}</p>}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Full Name</label>
+                <input type="text" value={inviteForm.name} onChange={(e) => setInviteForm((f) => ({ ...f, name: e.target.value }))} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-dark" placeholder="Jane Smith" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Email</label>
+                <input type="email" value={inviteForm.email} onChange={(e) => setInviteForm((f) => ({ ...f, email: e.target.value }))} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-dark" placeholder="jane@standifercapital.com" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Temporary Password</label>
+                <input type="text" value={inviteForm.password} onChange={(e) => setInviteForm((f) => ({ ...f, password: e.target.value }))} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-dark" placeholder="They can change it after logging in" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Role</label>
+                <select value={inviteForm.role} onChange={(e) => setInviteForm((f) => ({ ...f, role: e.target.value as 'admin' | 'user' }))} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-dark">
+                  <option value="user">User</option>
+                  <option value="admin">Administrator</option>
+                </select>
+              </div>
+            </div>
+            <div className="px-6 py-4 border-t border-gray-200 flex justify-end gap-3">
+              <button onClick={() => { setShowInviteModal(false); setInviteError(''); }} className="px-4 py-2 text-sm font-medium text-gray-700 hover:text-gray-900">Cancel</button>
+              <button onClick={handleInviteUser} disabled={inviting || !inviteForm.name || !inviteForm.email || !inviteForm.password} className="px-5 py-2 text-sm font-medium rounded-lg bg-brand-dark text-white hover:bg-[#153427] disabled:opacity-50 transition-colors">
+                {inviting ? 'Creating…' : 'Create User'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
