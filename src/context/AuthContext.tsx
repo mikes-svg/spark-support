@@ -33,22 +33,34 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
+function isAdminEmail(email: string): boolean {
+  const adminEmails = (import.meta.env.VITE_ADMIN_EMAILS || '').split(',').map((e: string) => e.trim().toLowerCase());
+  return adminEmails.length > 0 && adminEmails.includes(email.toLowerCase());
+}
+
 async function getOrCreateProfile(firebaseUser: FirebaseUser): Promise<Profile> {
-  const profileRef = doc(db, 'profiles', firebaseUser.uid);
+  const profileRef = doc(db!, 'profiles', firebaseUser.uid);
   const profileSnap = await getDoc(profileRef);
+  const email = firebaseUser.email || '';
 
   if (profileSnap.exists()) {
-    return { id: profileSnap.id, ...profileSnap.data() } as Profile;
+    const data = profileSnap.data();
+    // Promote to admin if in VITE_ADMIN_EMAILS but stored as user
+    if (data.role !== 'admin' && isAdminEmail(email)) {
+      await setDoc(profileRef, { role: 'admin' }, { merge: true });
+      return { id: profileSnap.id, ...data, role: 'admin' } as Profile;
+    }
+    return { id: profileSnap.id, ...data } as Profile;
   }
 
-  const displayName = firebaseUser.displayName || firebaseUser.email?.split('@')[0] || 'User';
+  const displayName = firebaseUser.displayName || email.split('@')[0] || 'User';
   const newProfile = {
     name: displayName,
-    email: firebaseUser.email || '',
+    email,
     photoURL:
       firebaseUser.photoURL ||
       `https://ui-avatars.com/api/?name=${encodeURIComponent(displayName)}&background=1B4332&color=D4A843`,
-    role: 'user' as const,
+    role: isAdminEmail(email) ? ('admin' as const) : ('user' as const),
     createdAt: serverTimestamp(),
   };
 
