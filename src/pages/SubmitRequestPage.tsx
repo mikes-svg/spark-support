@@ -1,29 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
-import {
-  collection,
-  getDocs,
-  getDoc,
-  doc,
-  setDoc,
-  addDoc,
-  runTransaction,
-  query,
-  where,
-  orderBy,
-  serverTimestamp,
-} from 'firebase/firestore';
+import { collection, getDocs, getDoc, doc, setDoc, addDoc, runTransaction, query, where, orderBy, serverTimestamp } from 'firebase/firestore';
 import { ref, uploadBytes } from 'firebase/storage';
 import { db, storage } from '../lib/firebase';
 import { useAuth } from '../context/AuthContext';
 import { UploadCloud } from 'lucide-react';
+import { requestTypes as mockRequestTypes } from '../mockData';
 
-interface RequestType {
-  id: string;
-  name: string;
-  defaultAssigneeId: string | null;
-  active: boolean;
-}
+interface RequestType { id: string; name: string; defaultAssigneeId: string | null; active: boolean; }
 
 export function SubmitRequestPage() {
   const navigate = useNavigate();
@@ -33,11 +17,13 @@ export function SubmitRequestPage() {
   const [requestTypes, setRequestTypes] = useState<RequestType[]>([]);
 
   useEffect(() => {
-    getDocs(
-      query(collection(db, 'requestTypes'), where('active', '==', true), orderBy('name'))
-    ).then((snap) => {
-      setRequestTypes(snap.docs.map((d) => ({ id: d.id, ...d.data() } as RequestType)));
-    });
+    if (!db) {
+      setRequestTypes(mockRequestTypes.map((rt) => ({ id: rt.id, name: rt.name, defaultAssigneeId: rt.defaultAssigneeId, active: rt.active })));
+      return;
+    }
+    getDocs(query(collection(db, 'requestTypes'), where('active', '==', true), orderBy('name')))
+      .then((snap) => { setRequestTypes(snap.docs.map((d) => ({ id: d.id, ...d.data() } as RequestType))); })
+      .catch(() => { setRequestTypes(mockRequestTypes.map((rt) => ({ id: rt.id, name: rt.name, defaultAssigneeId: rt.defaultAssigneeId, active: rt.active }))); });
   }, []);
 
   const handleFileDrop = (e: React.DragEvent<HTMLDivElement>) => {
@@ -60,8 +46,14 @@ export function SubmitRequestPage() {
     const selectedType = requestTypes.find((rt) => rt.name === type);
     const assigneeId = selectedType?.defaultAssigneeId || null;
 
+    if (!db) {
+      // Mock submit
+      await new Promise((r) => setTimeout(r, 600));
+      navigate('/');
+      return;
+    }
+
     try {
-      // Generate sequential ticket ID
       const counterRef = doc(db, 'meta', 'ticketCounter');
       const ticketId = await runTransaction(db, async (tx) => {
         const counterDoc = await tx.get(counterRef);
@@ -73,25 +65,18 @@ export function SubmitRequestPage() {
       const participants = [user.id, assigneeId].filter(Boolean) as string[];
 
       await setDoc(doc(db, 'tickets', ticketId), {
-        type,
-        title,
-        description,
-        status: 'Open',
-        priority,
-        assigneeId,
-        submitterId: user.id,
-        participants,
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
+        type, title, description, status: 'Open', priority,
+        assigneeId, submitterId: user.id, participants,
+        createdAt: serverTimestamp(), updatedAt: serverTimestamp(),
       });
 
-      // Upload attachments
-      for (const file of files) {
-        const fileRef = ref(storage, `attachments/${ticketId}/${file.name}`);
-        await uploadBytes(fileRef, file);
+      if (storage) {
+        for (const file of files) {
+          const fileRef = ref(storage, `attachments/${ticketId}/${file.name}`);
+          await uploadBytes(fileRef, file);
+        }
       }
 
-      // Queue notification email via Firebase Trigger Email extension
       if (assigneeId) {
         const assigneeDoc = await getDoc(doc(db, 'profiles', assigneeId));
         const assigneeEmail = assigneeDoc.data()?.email;
@@ -100,16 +85,7 @@ export function SubmitRequestPage() {
             to: assigneeEmail,
             message: {
               subject: `[Spark Support] New ${priority} ticket: ${title}`,
-              html: `
-                <p>A new support request has been assigned to you.</p>
-                <table>
-                  <tr><td><strong>Ticket</strong></td><td>${ticketId}</td></tr>
-                  <tr><td><strong>Type</strong></td><td>${type}</td></tr>
-                  <tr><td><strong>Priority</strong></td><td>${priority}</td></tr>
-                  <tr><td><strong>Title</strong></td><td>${title}</td></tr>
-                </table>
-                <p><a href="${window.location.origin}/tickets/${ticketId}">View ticket →</a></p>
-              `,
+              html: `<p>A new support request has been assigned to you.</p><p><strong>${ticketId}</strong> — ${title}</p><p><a href="${window.location.origin}/tickets/${ticketId}">View ticket →</a></p>`,
             },
           });
         }
@@ -127,40 +103,21 @@ export function SubmitRequestPage() {
       <div className="bg-white shadow-sm rounded-xl border border-gray-200 overflow-hidden">
         <div className="px-6 py-5 border-b border-gray-200 bg-gray-50/50">
           <h2 className="text-xl font-serif font-semibold text-gray-900">Submit New Request</h2>
-          <p className="mt-1 text-sm text-gray-500">
-            Please provide details about your request so we can route it correctly.
-          </p>
+          <p className="mt-1 text-sm text-gray-500">Please provide details about your request so we can route it correctly.</p>
         </div>
 
         <form onSubmit={handleSubmit} className="p-6 space-y-6">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
             <div>
-              <label htmlFor="type" className="block text-sm font-medium text-gray-700">
-                Request Type
-              </label>
-              <select
-                id="type"
-                name="type"
-                required
-                className="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-brand-dark focus:border-brand-dark sm:text-sm rounded-md border"
-              >
+              <label htmlFor="type" className="block text-sm font-medium text-gray-700">Request Type</label>
+              <select id="type" name="type" required className="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-brand-dark focus:border-brand-dark sm:text-sm rounded-md border">
                 <option value="">Select a type…</option>
-                {requestTypes.map((rt) => (
-                  <option key={rt.id} value={rt.name}>{rt.name}</option>
-                ))}
+                {requestTypes.map((rt) => <option key={rt.id} value={rt.name}>{rt.name}</option>)}
               </select>
             </div>
-
             <div>
-              <label htmlFor="priority" className="block text-sm font-medium text-gray-700">
-                Priority
-              </label>
-              <select
-                id="priority"
-                name="priority"
-                required
-                className="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-brand-dark focus:border-brand-dark sm:text-sm rounded-md border"
-              >
+              <label htmlFor="priority" className="block text-sm font-medium text-gray-700">Priority</label>
+              <select id="priority" name="priority" required className="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-brand-dark focus:border-brand-dark sm:text-sm rounded-md border">
                 <option value="Low">Low</option>
                 <option value="Medium">Medium</option>
                 <option value="High">High</option>
@@ -170,54 +127,24 @@ export function SubmitRequestPage() {
           </div>
 
           <div>
-            <label htmlFor="title" className="block text-sm font-medium text-gray-700">
-              Title
-            </label>
-            <input
-              type="text"
-              name="title"
-              id="title"
-              required
-              placeholder="Brief summary of the issue"
-              className="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-brand-dark focus:border-brand-dark sm:text-sm border p-2"
-            />
+            <label htmlFor="title" className="block text-sm font-medium text-gray-700">Title</label>
+            <input type="text" name="title" id="title" required placeholder="Brief summary of the issue" className="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-brand-dark focus:border-brand-dark sm:text-sm border p-2" />
           </div>
 
           <div>
-            <label htmlFor="description" className="block text-sm font-medium text-gray-700">
-              Description
-            </label>
-            <textarea
-              id="description"
-              name="description"
-              rows={5}
-              required
-              placeholder="Provide as much detail as possible…"
-              className="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-brand-dark focus:border-brand-dark sm:text-sm border p-2"
-            />
+            <label htmlFor="description" className="block text-sm font-medium text-gray-700">Description</label>
+            <textarea id="description" name="description" rows={5} required placeholder="Provide as much detail as possible…" className="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-brand-dark focus:border-brand-dark sm:text-sm border p-2" />
           </div>
 
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">Attachments</label>
-            <div
-              className="mt-1 flex justify-center px-6 pt-5 pb-6 border-2 border-gray-300 border-dashed rounded-md hover:bg-gray-50 transition-colors cursor-pointer"
-              onDragOver={(e) => e.preventDefault()}
-              onDrop={handleFileDrop}
-              onClick={() => document.getElementById('file-upload')?.click()}
-            >
+            <div className="mt-1 flex justify-center px-6 pt-5 pb-6 border-2 border-gray-300 border-dashed rounded-md hover:bg-gray-50 transition-colors cursor-pointer" onDragOver={(e) => e.preventDefault()} onDrop={handleFileDrop} onClick={() => document.getElementById('file-upload')?.click()}>
               <div className="space-y-1 text-center">
                 <UploadCloud className="mx-auto h-12 w-12 text-gray-400" />
                 <div className="flex text-sm text-gray-600 justify-center">
                   <label htmlFor="file-upload" className="relative cursor-pointer bg-white rounded-md font-medium text-brand-dark hover:text-brand-gold">
                     <span>Upload a file</span>
-                    <input
-                      id="file-upload"
-                      name="file-upload"
-                      type="file"
-                      className="sr-only"
-                      multiple
-                      onChange={(e) => { if (e.target.files) setFiles(Array.from(e.target.files)); }}
-                    />
+                    <input id="file-upload" name="file-upload" type="file" className="sr-only" multiple onChange={(e) => { if (e.target.files) setFiles(Array.from(e.target.files)); }} />
                   </label>
                   <p className="pl-1">or drag and drop</p>
                 </div>
@@ -228,8 +155,7 @@ export function SubmitRequestPage() {
               <ul className="mt-3 space-y-1">
                 {files.map((file, idx) => (
                   <li key={idx} className="text-sm text-gray-600 flex items-center">
-                    <span className="w-2 h-2 bg-brand-gold rounded-full mr-2" />
-                    {file.name}
+                    <span className="w-2 h-2 bg-brand-gold rounded-full mr-2" />{file.name}
                   </li>
                 ))}
               </ul>
@@ -237,14 +163,8 @@ export function SubmitRequestPage() {
           </div>
 
           <div className="pt-4 flex items-center justify-end gap-4 border-t border-gray-200">
-            <Link to="/" className="text-sm font-medium text-gray-700 hover:text-gray-900">
-              Cancel
-            </Link>
-            <button
-              type="submit"
-              disabled={isSubmitting}
-              className="inline-flex justify-center py-2 px-6 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-brand-dark hover:bg-[#153427] focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-brand-dark disabled:opacity-50 transition-colors"
-            >
+            <Link to="/" className="text-sm font-medium text-gray-700 hover:text-gray-900">Cancel</Link>
+            <button type="submit" disabled={isSubmitting} className="inline-flex justify-center py-2 px-6 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-brand-dark hover:bg-[#153427] focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-brand-dark disabled:opacity-50 transition-colors">
               {isSubmitting ? 'Submitting…' : 'Submit Request'}
             </button>
           </div>

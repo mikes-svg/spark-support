@@ -7,6 +7,16 @@ import {
 import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
 import { auth, db } from '../lib/firebase';
 
+// Set to true to bypass Firebase auth during development
+const DEV_MOCK_AUTH = false;
+const DEV_MOCK_USER: Profile = {
+  id: 'dev-user',
+  name: 'Dev Admin',
+  email: 'dev@standifercapital.com',
+  photoURL: 'https://ui-avatars.com/api/?name=Dev+Admin&background=1B4332&color=D4A843',
+  role: 'admin',
+};
+
 export interface Profile {
   id: string;
   name: string;
@@ -47,14 +57,33 @@ async function getOrCreateProfile(firebaseUser: FirebaseUser): Promise<Profile> 
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [user, setUser] = useState<Profile | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [user, setUser] = useState<Profile | null>(DEV_MOCK_AUTH ? DEV_MOCK_USER : null);
+  const [loading, setLoading] = useState(!DEV_MOCK_AUTH);
 
   useEffect(() => {
+    if (DEV_MOCK_AUTH) return;
+
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
       if (firebaseUser) {
-        const profile = await getOrCreateProfile(firebaseUser);
-        setUser(profile);
+        try {
+          const profile = await getOrCreateProfile(firebaseUser);
+          setUser(profile);
+        } catch (err) {
+          console.warn('Firestore profile fetch failed, using Firebase user data:', err);
+          // Fallback: build profile directly from Firebase Auth user
+          const displayName = firebaseUser.displayName || firebaseUser.email?.split('@')[0] || 'User';
+          const adminEmails = (import.meta.env.VITE_ADMIN_EMAILS || '').split(',').map((e: string) => e.trim().toLowerCase());
+          const isAdmin = adminEmails.length > 0 && adminEmails.includes((firebaseUser.email || '').toLowerCase());
+          setUser({
+            id: firebaseUser.uid,
+            name: displayName,
+            email: firebaseUser.email || '',
+            photoURL:
+              firebaseUser.photoURL ||
+              `https://ui-avatars.com/api/?name=${encodeURIComponent(displayName)}&background=1B4332&color=D4A843`,
+            role: isAdmin ? 'admin' : 'user',
+          });
+        }
       } else {
         setUser(null);
       }
@@ -65,6 +94,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const logout = async () => {
+    if (DEV_MOCK_AUTH) return;
     await signOut(auth);
     setUser(null);
   };
