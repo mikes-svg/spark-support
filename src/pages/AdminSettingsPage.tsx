@@ -17,6 +17,8 @@ export function AdminSettingsPage() {
   const [inviteForm, setInviteForm] = useState({ name: '', email: '', role: 'user' as 'admin' | 'user' });
   const [inviting, setInviting] = useState(false);
   const [inviteError, setInviteError] = useState('');
+  const [editingUser, setEditingUser] = useState<string | null>(null);
+  const [editUserName, setEditUserName] = useState('');
 
   useEffect(() => {
     if (!db) {
@@ -42,11 +44,24 @@ export function AdminSettingsPage() {
     fetchData();
   }, []);
 
-  const toggleRole = async (profile: Profile) => {
-    const newRole: 'admin' | 'user' = profile.role === 'admin' ? 'user' : 'admin';
+  const updateUserRole = async (profile: Profile, newRole: 'admin' | 'user') => {
+    if (newRole === profile.role) return;
     setProfiles((prev) => prev.map((p) => p.id === profile.id ? { ...p, role: newRole } : p));
     if (!db) return;
     await updateDoc(doc(db, 'profiles', profile.id), { role: newRole });
+  };
+
+  const saveUserName = async (profile: Profile) => {
+    if (!editUserName.trim() || editUserName.trim() === profile.name) {
+      setEditingUser(null);
+      return;
+    }
+    const newName = editUserName.trim();
+    const newPhotoURL = `https://ui-avatars.com/api/?name=${encodeURIComponent(newName)}&background=1B4332&color=D4A843`;
+    setProfiles((prev) => prev.map((p) => p.id === profile.id ? { ...p, name: newName, photoURL: newPhotoURL } : p));
+    setEditingUser(null);
+    if (!db) return;
+    await updateDoc(doc(db, 'profiles', profile.id), { name: newName, photoURL: newPhotoURL });
   };
 
   const toggleRequestTypeActive = async (rt: RequestType) => {
@@ -148,18 +163,38 @@ export function AdminSettingsPage() {
                   <td className="px-6 py-4 whitespace-nowrap">
                     <div className="flex items-center">
                       <img className="h-8 w-8 rounded-full mr-3" src={profile.photoURL} alt="" />
-                      <div className="text-sm font-medium text-gray-900">{profile.name}</div>
+                      {editingUser === profile.id ? (
+                        <div className="flex items-center gap-1">
+                          <input
+                            type="text"
+                            value={editUserName}
+                            onChange={(e) => setEditUserName(e.target.value)}
+                            onKeyDown={(e) => { if (e.key === 'Enter') saveUserName(profile); if (e.key === 'Escape') setEditingUser(null); }}
+                            className="border border-gray-300 rounded px-2 py-1 text-sm w-40 focus:outline-none focus:ring-2 focus:ring-brand-dark"
+                            autoFocus
+                          />
+                          <button onClick={() => saveUserName(profile)} className="text-green-600 hover:text-green-700"><Check className="h-4 w-4" /></button>
+                          <button onClick={() => setEditingUser(null)} className="text-gray-400 hover:text-gray-600"><X className="h-4 w-4" /></button>
+                        </div>
+                      ) : (
+                        <div className="text-sm font-medium text-gray-900">{profile.name}</div>
+                      )}
                     </div>
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{profile.email}</td>
                   <td className="px-6 py-4 whitespace-nowrap">
-                    <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${profile.role === 'admin' ? 'bg-brand-dark/10 text-brand-dark' : 'bg-gray-100 text-gray-600'}`}>
-                      {profile.role === 'admin' ? 'Administrator' : 'User'}
-                    </span>
+                    <select
+                      value={profile.role}
+                      onChange={(e) => updateUserRole(profile, e.target.value as 'admin' | 'user')}
+                      className="border border-gray-300 rounded-md px-2 py-1 text-xs font-medium focus:outline-none focus:ring-2 focus:ring-brand-dark bg-white"
+                    >
+                      <option value="user">User</option>
+                      <option value="admin">Administrator</option>
+                    </select>
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
-                    <button onClick={() => toggleRole(profile)} className="text-brand-dark hover:text-brand-gold text-xs font-medium transition-colors">
-                      {profile.role === 'admin' ? 'Revoke Admin' : 'Make Admin'}
+                    <button onClick={() => { setEditingUser(profile.id); setEditUserName(profile.name); }} className="text-gray-400 hover:text-brand-dark transition-colors">
+                      <Edit2 className="h-4 w-4" />
                     </button>
                   </td>
                 </tr>

@@ -4,11 +4,10 @@ import { signInWithEmailAndPassword, createUserWithEmailAndPassword, signInWithP
 import { auth, googleProvider } from '../lib/firebase';
 import { motion } from 'framer-motion';
 
-const ALLOWED_DOMAINS = ['standifercapital.com', 'sparkmanage.com'];
-
-function isAllowedDomain(email: string): boolean {
-  const domain = email.split('@')[1]?.toLowerCase();
-  return ALLOWED_DOMAINS.includes(domain);
+// TODO: Re-enable domain restrictions at launch
+// const ALLOWED_DOMAINS = ['standifercapital.com', 'sparkmanage.com'];
+function isAllowedDomain(_email: string): boolean {
+  return true;
 }
 
 export function LoginPage() {

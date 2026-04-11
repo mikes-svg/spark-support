@@ -27,7 +27,8 @@ try {
   db = getFirestore(app);
   storage = getStorage(app);
   googleProvider = new GoogleAuthProvider();
-  googleProvider.setCustomParameters({ hd: 'standifercapital.com sparkmanage.com' });
+  // TODO: Re-enable domain restriction at launch
+  // googleProvider.setCustomParameters({ hd: 'standifercapital.com sparkmanage.com' });
   // Analytics only works in browser (not SSR/test environments)
   isSupported().then((yes) => { if (yes && app) analytics = getAnalytics(app!); });
 } catch (e) {
