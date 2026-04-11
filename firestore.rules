@@ -13,8 +13,9 @@ service cloud.firestore {
 
     match /profiles/{userId} {
       allow read: if isSignedIn();
-      allow create: if request.auth.uid == userId;
+      allow create: if request.auth.uid == userId || isAdmin();
       allow update: if request.auth.uid == userId || isAdmin();
+      allow delete: if isAdmin();
     }
 
     match /tickets/{ticketId} {
