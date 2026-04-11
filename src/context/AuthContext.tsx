@@ -4,7 +4,7 @@ import {
   signOut,
   User as FirebaseUser,
 } from 'firebase/auth';
-import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
+import { doc, getDoc, setDoc, deleteDoc, collection, query, where, getDocs, serverTimestamp } from 'firebase/firestore';
 import { auth, db } from '../lib/firebase';
 
 // Set to true to bypass Firebase auth during development
@@ -53,6 +53,24 @@ async function getOrCreateProfile(firebaseUser: FirebaseUser): Promise<Profile> 
     return { id: profileSnap.id, ...data } as Profile;
   }
 
+  // Check if admin pre-registered this user by email (profile keyed by email slug)
+  const preRegQuery = query(collection(db!, 'profiles'), where('email', '==', email));
+  const preRegSnap = await getDocs(preRegQuery);
+  if (!preRegSnap.empty) {
+    const preRegDoc = preRegSnap.docs[0];
+    const data = preRegDoc.data();
+    // Migrate pre-registered profile to real UID
+    const role = isAdminEmail(email) ? 'admin' : (data.role || 'user');
+    const migratedProfile = { ...data, role, createdAt: serverTimestamp() };
+    await setDoc(profileRef, migratedProfile);
+    // Remove the old email-keyed doc
+    if (preRegDoc.id !== firebaseUser.uid) {
+      await deleteDoc(doc(db!, 'profiles', preRegDoc.id));
+    }
+    return { id: firebaseUser.uid, ...migratedProfile } as unknown as Profile;
+  }
+
+  // Brand new user — create fresh profile
   const displayName = firebaseUser.displayName || email.split('@')[0] || 'User';
   const newProfile = {
     name: displayName,
