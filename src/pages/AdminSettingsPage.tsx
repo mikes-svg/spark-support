@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { collection, query, getDocs, doc, updateDoc, deleteDoc, addDoc, setDoc, serverTimestamp, orderBy } from 'firebase/firestore';
 import { initializeApp, deleteApp } from 'firebase/app';
-import { getAuth, createUserWithEmailAndPassword, signOut as firebaseSignOut, updateProfile } from 'firebase/auth';
+import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut as firebaseSignOut, updateProfile } from 'firebase/auth';
 import { db, firebaseConfig } from '../lib/firebase';
 import { Plus, Trash2, Edit2, Check, X, UserPlus } from 'lucide-react';
 import { users as mockUsers, requestTypes as mockRTs } from '../mockData';
@@ -96,8 +96,23 @@ export function AdminSettingsPage() {
       // Use a secondary Firebase app so we don't sign out the current admin
       const secondaryApp = initializeApp(firebaseConfig, `invite-${Date.now()}`);
       const secondaryAuth = getAuth(secondaryApp);
-      const { user: newUser } = await createUserWithEmailAndPassword(secondaryAuth, inviteForm.email.trim(), 'Spark!!');
-      await updateProfile(newUser, { displayName: inviteForm.name.trim() });
+
+      let uid: string;
+      try {
+        const { user: newUser } = await createUserWithEmailAndPassword(secondaryAuth, inviteForm.email.trim(), 'Spark!!');
+        await updateProfile(newUser, { displayName: inviteForm.name.trim() });
+        uid = newUser.uid;
+      } catch (createErr: unknown) {
+        const code = (createErr as { code?: string }).code;
+        if (code === 'auth/email-already-in-use') {
+          // Auth account exists but may be missing a Firestore profile — sign in to get UID
+          const { user: existingUser } = await signInWithEmailAndPassword(secondaryAuth, inviteForm.email.trim(), 'Spark!!');
+          uid = existingUser.uid;
+        } else {
+          throw createErr;
+        }
+      }
+
       await firebaseSignOut(secondaryAuth);
       await deleteApp(secondaryApp);
 
@@ -110,15 +125,18 @@ export function AdminSettingsPage() {
         role: inviteForm.role,
         createdAt: serverTimestamp(),
       };
-      if (db) await setDoc(doc(db, 'profiles', newUser.uid), profileData);
+      if (db) await setDoc(doc(db, 'profiles', uid), profileData);
 
-      const newProfile: Profile = { id: newUser.uid, ...profileData, role: inviteForm.role };
-      setProfiles((prev) => [...prev, newProfile].sort((a, b) => a.name.localeCompare(b.name)));
+      const newProfile: Profile = { id: uid, ...profileData, role: inviteForm.role };
+      setProfiles((prev) => {
+        const filtered = prev.filter((p) => p.id !== uid);
+        return [...filtered, newProfile].sort((a, b) => a.name.localeCompare(b.name));
+      });
       setUserCreated(true);
       setInviteForm({ name: '', email: '', role: 'user' });
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Failed to create user.';
-      setInviteError(msg.includes('email-already-in-use') ? 'That email is already registered.' : msg);
+      setInviteError(msg.includes('invalid-credential') ? 'User exists with a different password. Have them sign in with Google SSO instead.' : msg);
     } finally {
       setInviting(false);
     }
@@ -262,7 +280,7 @@ export function AdminSettingsPage() {
                       <option value="admin">Administrator</option>
                     </select>
                   </div>
-                  <p className="text-xs text-gray-400">A 6-digit access code will be generated automatically.</p>
+                  <p className="text-xs text-gray-400">Default password is Spark. Users can also sign in with Google.</p>
                 </div>
                 <div className="px-6 py-4 border-t border-gray-200 flex justify-end gap-3">
                   <button onClick={() => { setShowInviteModal(false); setInviteError(''); }} className="px-4 py-2 text-sm font-medium text-gray-700 hover:text-gray-900">Cancel</button>

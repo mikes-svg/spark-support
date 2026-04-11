@@ -87,14 +87,9 @@ export function LoginPage() {
       >
         <div className="bg-white py-10 px-4 shadow-xl shadow-gray-200/50 sm:rounded-2xl sm:px-10 border border-gray-100">
           <div className="text-center mb-8">
-            <div className="mx-auto h-12 w-12 text-brand-gold mb-4">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83" />
-              </svg>
-            </div>
-            <h2 className="text-3xl font-serif font-bold text-gray-900 tracking-tight">Spark Support</h2>
-            <p className="mt-2 text-xs uppercase tracking-[0.2em] text-gray-500 font-semibold">
-              Standifer Capital · Internal Portal
+            <img src="/spark-logo.png" alt="Spark Management" className="mx-auto h-20 mb-4" />
+            <p className="text-xs uppercase tracking-[0.2em] text-gray-500 font-semibold">
+              Support Portal
             </p>
           </div>
 
