@@ -1,5 +1,5 @@
 import { initializeApp, FirebaseApp } from 'firebase/app';
-import { Auth, getAuth } from 'firebase/auth';
+import { Auth, getAuth, GoogleAuthProvider } from 'firebase/auth';
 import { Firestore, getFirestore } from 'firebase/firestore';
 import { FirebaseStorage, getStorage } from 'firebase/storage';
 import { Analytics, getAnalytics, isSupported } from 'firebase/analytics';
@@ -19,16 +19,19 @@ let auth: Auth | null = null;
 let db: Firestore | null = null;
 let storage: FirebaseStorage | null = null;
 let analytics: Analytics | null = null;
+let googleProvider: GoogleAuthProvider | null = null;
 
 try {
   app = initializeApp(firebaseConfig);
   auth = getAuth(app);
   db = getFirestore(app);
   storage = getStorage(app);
+  googleProvider = new GoogleAuthProvider();
+  googleProvider.setCustomParameters({ hd: 'standifercapital.com sparkmanage.com' });
   // Analytics only works in browser (not SSR/test environments)
   isSupported().then((yes) => { if (yes && app) analytics = getAnalytics(app!); });
 } catch (e) {
   console.warn('Firebase not configured — running in mock/dev mode');
 }
 
-export { auth, db, storage, analytics, firebaseConfig };
+export { auth, db, storage, analytics, firebaseConfig, googleProvider };

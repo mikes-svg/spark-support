@@ -16,9 +16,10 @@ export function AdminSettingsPage() {
   const [editingType, setEditingType] = useState<string | null>(null);
   const [editTypeName, setEditTypeName] = useState('');
   const [showInviteModal, setShowInviteModal] = useState(false);
-  const [inviteForm, setInviteForm] = useState({ name: '', email: '', password: '', role: 'user' as 'admin' | 'user' });
+  const [inviteForm, setInviteForm] = useState({ name: '', email: '', role: 'user' as 'admin' | 'user' });
   const [inviting, setInviting] = useState(false);
   const [inviteError, setInviteError] = useState('');
+  const [userCreated, setUserCreated] = useState(false);
 
   useEffect(() => {
     if (!db) {
@@ -65,6 +66,13 @@ export function AdminSettingsPage() {
     await updateDoc(doc(db, 'requestTypes', rt.id), { name: editTypeName.trim() });
   };
 
+  const updateDefaultAssignee = async (rt: RequestType, assigneeId: string) => {
+    const newAssigneeId = assigneeId || null;
+    setRequestTypes((prev) => prev.map((t) => t.id === rt.id ? { ...t, defaultAssigneeId: newAssigneeId } : t));
+    if (!db) return;
+    await updateDoc(doc(db, 'requestTypes', rt.id), { defaultAssigneeId: newAssigneeId });
+  };
+
   const deleteRequestType = async (id: string) => {
     setRequestTypes((prev) => prev.filter((t) => t.id !== id));
     if (!db) return;
@@ -81,14 +89,14 @@ export function AdminSettingsPage() {
   };
 
   const handleInviteUser = async () => {
-    if (!inviteForm.name.trim() || !inviteForm.email.trim() || !inviteForm.password.trim()) return;
+    if (!inviteForm.name.trim() || !inviteForm.email.trim()) return;
     setInviting(true);
     setInviteError('');
     try {
       // Use a secondary Firebase app so we don't sign out the current admin
       const secondaryApp = initializeApp(firebaseConfig, `invite-${Date.now()}`);
       const secondaryAuth = getAuth(secondaryApp);
-      const { user: newUser } = await createUserWithEmailAndPassword(secondaryAuth, inviteForm.email.trim(), inviteForm.password);
+      const { user: newUser } = await createUserWithEmailAndPassword(secondaryAuth, inviteForm.email.trim(), 'Spark!!');
       await updateProfile(newUser, { displayName: inviteForm.name.trim() });
       await firebaseSignOut(secondaryAuth);
       await deleteApp(secondaryApp);
@@ -106,8 +114,8 @@ export function AdminSettingsPage() {
 
       const newProfile: Profile = { id: newUser.uid, ...profileData, role: inviteForm.role };
       setProfiles((prev) => [...prev, newProfile].sort((a, b) => a.name.localeCompare(b.name)));
-      setShowInviteModal(false);
-      setInviteForm({ name: '', email: '', password: '', role: 'user' });
+      setUserCreated(true);
+      setInviteForm({ name: '', email: '', role: 'user' });
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Failed to create user.';
       setInviteError(msg.includes('email-already-in-use') ? 'That email is already registered.' : msg);
@@ -115,8 +123,6 @@ export function AdminSettingsPage() {
       setInviting(false);
     }
   };
-
-  const profilesMap = Object.fromEntries(profiles.map((p) => [p.id, p]));
 
   if (loading) return <div className="flex items-center justify-center py-20"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-brand-dark" /></div>;
 
@@ -181,7 +187,6 @@ export function AdminSettingsPage() {
             </thead>
             <tbody className="bg-white divide-y divide-gray-200">
               {requestTypes.map((type) => {
-                const defaultAssignee = type.defaultAssigneeId ? profilesMap[type.defaultAssigneeId] : null;
                 return (
                   <tr key={type.id}>
                     <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
@@ -193,7 +198,18 @@ export function AdminSettingsPage() {
                         </div>
                       ) : type.name}
                     </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{defaultAssignee ? defaultAssignee.name : 'Unassigned'}</td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                      <select
+                        value={type.defaultAssigneeId || ''}
+                        onChange={(e) => updateDefaultAssignee(type, e.target.value)}
+                        className="border border-gray-300 rounded-md px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-brand-dark min-w-[140px]"
+                      >
+                        <option value="">Unassigned</option>
+                        {profiles.filter((p) => p.role === 'admin').map((p) => (
+                          <option key={p.id} value={p.id}>{p.name}</option>
+                        ))}
+                      </select>
+                    </td>
                     <td className="px-6 py-4 whitespace-nowrap">
                       <button onClick={() => toggleRequestTypeActive(type)} className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium cursor-pointer ${type.active ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'}`}>
                         {type.active ? 'Active' : 'Inactive'}
@@ -214,37 +230,48 @@ export function AdminSettingsPage() {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md mx-4 overflow-hidden">
             <div className="px-6 py-5 border-b border-gray-200 flex justify-between items-center">
-              <h3 className="text-lg font-serif font-semibold text-gray-900">Add New User</h3>
-              <button onClick={() => { setShowInviteModal(false); setInviteError(''); }} className="text-gray-400 hover:text-gray-600"><X className="h-5 w-5" /></button>
+              <h3 className="text-lg font-serif font-semibold text-gray-900">{userCreated ? 'User Created' : 'Add New User'}</h3>
+              <button onClick={() => { setShowInviteModal(false); setInviteError(''); setUserCreated(false); }} className="text-gray-400 hover:text-gray-600"><X className="h-5 w-5" /></button>
             </div>
-            <div className="p-6 space-y-4">
-              {inviteError && <p className="text-sm text-red-600 bg-red-50 px-3 py-2 rounded-md">{inviteError}</p>}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Full Name</label>
-                <input type="text" value={inviteForm.name} onChange={(e) => setInviteForm((f) => ({ ...f, name: e.target.value }))} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-dark" placeholder="Jane Smith" />
+            {userCreated ? (
+              <div className="p-6 text-center space-y-4">
+                <p className="text-sm text-gray-600">The user can now log in with Google SSO or with their email and the default password <strong>Spark</strong>.</p>
+                <div className="bg-brand-dark/5 border border-brand-dark/20 rounded-xl py-6">
+                  <p className="text-xs text-gray-500 uppercase tracking-widest mb-2">Default Password</p>
+                  <p className="text-4xl font-mono font-bold text-brand-dark tracking-[0.3em]">Spark</p>
+                </div>
+                <p className="text-xs text-gray-400">Google Sign-In is recommended for the best experience.</p>
+                <button onClick={() => { setShowInviteModal(false); setUserCreated(false); }} className="w-full py-2.5 text-sm font-medium rounded-lg bg-brand-dark text-white hover:bg-[#153427] transition-colors">Done</button>
               </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Email</label>
-                <input type="email" value={inviteForm.email} onChange={(e) => setInviteForm((f) => ({ ...f, email: e.target.value }))} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-dark" placeholder="jane@standifercapital.com" />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Temporary Password</label>
-                <input type="text" value={inviteForm.password} onChange={(e) => setInviteForm((f) => ({ ...f, password: e.target.value }))} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-dark" placeholder="They can change it after logging in" />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Role</label>
-                <select value={inviteForm.role} onChange={(e) => setInviteForm((f) => ({ ...f, role: e.target.value as 'admin' | 'user' }))} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-dark">
-                  <option value="user">User</option>
-                  <option value="admin">Administrator</option>
-                </select>
-              </div>
-            </div>
-            <div className="px-6 py-4 border-t border-gray-200 flex justify-end gap-3">
-              <button onClick={() => { setShowInviteModal(false); setInviteError(''); }} className="px-4 py-2 text-sm font-medium text-gray-700 hover:text-gray-900">Cancel</button>
-              <button onClick={handleInviteUser} disabled={inviting || !inviteForm.name || !inviteForm.email || !inviteForm.password} className="px-5 py-2 text-sm font-medium rounded-lg bg-brand-dark text-white hover:bg-[#153427] disabled:opacity-50 transition-colors">
-                {inviting ? 'Creating…' : 'Create User'}
-              </button>
-            </div>
+            ) : (
+              <>
+                <div className="p-6 space-y-4">
+                  {inviteError && <p className="text-sm text-red-600 bg-red-50 px-3 py-2 rounded-md">{inviteError}</p>}
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Full Name</label>
+                    <input type="text" value={inviteForm.name} onChange={(e) => setInviteForm((f) => ({ ...f, name: e.target.value }))} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-dark" placeholder="Jane Smith" />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Email</label>
+                    <input type="email" value={inviteForm.email} onChange={(e) => setInviteForm((f) => ({ ...f, email: e.target.value }))} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-dark" placeholder="jane@standifercapital.com" />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Role</label>
+                    <select value={inviteForm.role} onChange={(e) => setInviteForm((f) => ({ ...f, role: e.target.value as 'admin' | 'user' }))} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-dark">
+                      <option value="user">User</option>
+                      <option value="admin">Administrator</option>
+                    </select>
+                  </div>
+                  <p className="text-xs text-gray-400">A 6-digit access code will be generated automatically.</p>
+                </div>
+                <div className="px-6 py-4 border-t border-gray-200 flex justify-end gap-3">
+                  <button onClick={() => { setShowInviteModal(false); setInviteError(''); }} className="px-4 py-2 text-sm font-medium text-gray-700 hover:text-gray-900">Cancel</button>
+                  <button onClick={handleInviteUser} disabled={inviting || !inviteForm.name || !inviteForm.email} className="px-5 py-2 text-sm font-medium rounded-lg bg-brand-dark text-white hover:bg-[#153427] disabled:opacity-50 transition-colors">
+                    {inviting ? 'Creating…' : 'Create User'}
+                  </button>
+                </div>
+              </>
+            )}
           </div>
         </div>
       )}
