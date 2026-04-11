@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { doc, getDoc, collection, query, where, orderBy, onSnapshot, addDoc, serverTimestamp } from 'firebase/firestore';
+import { doc, getDoc, collection, query, where, orderBy, onSnapshot, addDoc, updateDoc, serverTimestamp } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { StatusBadge, PriorityBadge } from '../components/Badges';
 import { useAuth } from '../context/AuthContext';
@@ -105,6 +105,39 @@ export function TicketDetailPage() {
     return () => { if (unsubscribe) unsubscribe(); };
   }, [id]);
 
+  const sendNotificationEmail = async (recipientId: string, subject: string, html: string) => {
+    if (!db || !recipientId) return;
+    try {
+      const recipientDoc = await getDoc(doc(db, 'profiles', recipientId));
+      const recipientEmail = recipientDoc.data()?.email;
+      if (recipientEmail) {
+        await addDoc(collection(db, 'mail'), { to: recipientEmail, message: { subject, html } });
+      }
+    } catch (err) {
+      console.error('Failed to send notification email:', err);
+    }
+  };
+
+  const handleStatusChange = async (newStatus: TicketStatus) => {
+    if (!ticket || !user || !db) return;
+    const oldStatus = ticket.status;
+    setTicket({ ...ticket, status: newStatus });
+    await updateDoc(doc(db, 'tickets', ticket.id), { status: newStatus, updatedAt: serverTimestamp() });
+
+    const ticketUrl = `${window.location.origin}/tickets/${ticket.id}`;
+    const subject = `[Spark Support] ${ticket.id} status changed to ${newStatus}`;
+    const html = `<p>Ticket <strong>${ticket.id}</strong> — ${ticket.title}</p><p>Status changed from <strong>${oldStatus}</strong> to <strong>${newStatus}</strong>.</p><p><a href="${ticketUrl}">View ticket →</a></p>`;
+
+    // Notify assignee (if not the one making the change)
+    if (ticket.assigneeId && ticket.assigneeId !== user.id) {
+      await sendNotificationEmail(ticket.assigneeId, subject, html);
+    }
+    // Notify submitter (if not the one making the change)
+    if (ticket.submitterId !== user.id) {
+      await sendNotificationEmail(ticket.submitterId, subject, html);
+    }
+  };
+
   const handleAddComment = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newComment.trim() || !user || !ticket) return;
@@ -117,6 +150,20 @@ export function TicketDetailPage() {
       return;
     }
     await addDoc(collection(db, 'comments'), { ticketId: ticket.id, userId: user.id, body, createdAt: serverTimestamp() });
+
+    const ticketUrl = `${window.location.origin}/tickets/${ticket.id}`;
+    const commenterName = profiles[user.id]?.name || user.name;
+    const subject = `[Spark Support] New comment on ${ticket.id}`;
+    const html = `<p><strong>${commenterName}</strong> commented on ticket <strong>${ticket.id}</strong> — ${ticket.title}:</p><blockquote style="border-left:3px solid #ccc;padding-left:12px;color:#555;">${body}</blockquote><p><a href="${ticketUrl}">View ticket →</a></p>`;
+
+    // Notify assignee (if not the commenter)
+    if (ticket.assigneeId && ticket.assigneeId !== user.id) {
+      await sendNotificationEmail(ticket.assigneeId, subject, html);
+    }
+    // Notify submitter (if not the commenter)
+    if (ticket.submitterId !== user.id) {
+      await sendNotificationEmail(ticket.submitterId, subject, html);
+    }
   };
 
   if (loading) return <div className="flex items-center justify-center py-20"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-brand-dark" /></div>;
@@ -134,7 +181,19 @@ export function TicketDetailPage() {
         <div>
           <div className="flex items-center gap-3 mb-1">
             <span className="font-mono text-sm text-gray-500">{ticket.id}</span>
-            <StatusBadge status={ticket.status} />
+            {user?.role === 'admin' && db ? (
+              <select
+                value={ticket.status}
+                onChange={(e) => handleStatusChange(e.target.value as TicketStatus)}
+                className="text-sm font-medium rounded-md border border-gray-300 bg-gray-50 px-2 py-1 focus:outline-none focus:ring-brand-dark focus:border-brand-dark"
+              >
+                {(['Open', 'In Progress', 'Resolved', 'Closed'] as TicketStatus[]).map((s) => (
+                  <option key={s} value={s}>{s}</option>
+                ))}
+              </select>
+            ) : (
+              <StatusBadge status={ticket.status} />
+            )}
             <PriorityBadge priority={ticket.priority} />
           </div>
           <h1 className="text-2xl font-serif font-bold text-gray-900">{ticket.title}</h1>
