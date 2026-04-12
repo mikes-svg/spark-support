@@ -196,7 +196,7 @@ export function TicketDetailPage() {
                 onChange={(e) => handleStatusChange(e.target.value as TicketStatus)}
                 className="text-sm font-medium rounded-md border border-gray-300 bg-gray-50 px-2 py-1 focus:outline-none focus:ring-brand-dark focus:border-brand-dark"
               >
-                {(['Open', 'In Progress', 'Resolved', 'Closed'] as TicketStatus[]).map((s) => (
+                {(['Open', 'In Progress', 'On Hold', 'Closed'] as TicketStatus[]).map((s) => (
                   <option key={s} value={s}>{s}</option>
                 ))}
               </select>
@@ -216,6 +216,20 @@ export function TicketDetailPage() {
               <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-widest mb-4">Description</h3>
               <div className="prose max-w-none text-gray-700 whitespace-pre-wrap">{ticket.description}</div>
             </div>
+            {user?.role === 'admin' && db && (
+              <div className="px-6 py-4 border-t border-gray-200 bg-gray-50/50 flex items-center gap-3">
+                <span className="text-xs font-medium text-gray-500 uppercase">Status</span>
+                <select
+                  value={ticket.status}
+                  onChange={(e) => handleStatusChange(e.target.value as TicketStatus)}
+                  className="text-sm font-medium rounded-md border border-gray-300 bg-white px-3 py-1.5 focus:outline-none focus:ring-brand-dark focus:border-brand-dark"
+                >
+                  {(['Open', 'In Progress', 'On Hold', 'Closed'] as TicketStatus[]).map((s) => (
+                    <option key={s} value={s}>{s}</option>
+                  ))}
+                </select>
+              </div>
+            )}
           </div>
 
           <div className="bg-white shadow-sm rounded-xl border border-gray-200 overflow-hidden flex flex-col h-[500px]">
@@ -299,7 +313,7 @@ export function TicketDetailPage() {
                     <p className="text-xs text-gray-500 flex items-center mt-1"><Clock className="w-3 h-3 mr-1" />{toDate(ticket.updatedAt).toLocaleString()}</p>
                   </div>
                 )}
-                {(ticket.status === 'Resolved' || ticket.status === 'Closed') && (
+                {(ticket.status === 'On Hold' || ticket.status === 'Closed') && (
                   <div className="relative pl-6">
                     <div className="absolute -left-[9px] top-1 w-4 h-4 rounded-full bg-emerald-500 border-4 border-white" />
                     <p className="text-sm font-medium text-gray-900">Status changed to {ticket.status}</p>

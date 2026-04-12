@@ -128,7 +128,7 @@ export function AdminDashboardPage() {
 
   const openCount = tickets.filter((t) => t.status === 'Open').length;
   const urgentCount = tickets.filter((t) => t.priority === 'Urgent').length;
-  const resolvedCount = tickets.filter((t) => t.status === 'Resolved').length;
+  const closedCount = tickets.filter((t) => t.status === 'Closed').length;
 
   return (
     <div className="space-y-6">
@@ -136,7 +136,7 @@ export function AdminDashboardPage() {
         {[
           { label: 'Total Open', value: loading ? '—' : openCount, Icon: Clock, color: 'bg-blue-100 text-blue-600' },
           { label: 'Urgent Priority', value: loading ? '—' : urgentCount, Icon: AlertCircle, color: 'bg-red-100 text-red-600' },
-          { label: 'Resolved This Week', value: loading ? '—' : resolvedCount, Icon: CheckCircle2, color: 'bg-emerald-100 text-emerald-600' },
+          { label: 'Closed This Week', value: loading ? '—' : closedCount, Icon: CheckCircle2, color: 'bg-emerald-100 text-emerald-600' },
           { label: 'Avg Resolution', value: '1.2 days', Icon: Clock, color: 'bg-brand-gold/20 text-brand-gold' },
         ].map(({ label, value, Icon, color }) => (
           <div key={label} className="bg-white overflow-hidden shadow-sm rounded-lg border border-gray-200">
@@ -155,7 +155,7 @@ export function AdminDashboardPage() {
         <div className="flex items-center text-gray-500 mr-2"><Filter className="w-5 h-5 mr-2" /><span className="text-sm font-medium">Filters:</span></div>
         <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="block pl-3 pr-10 py-2 text-sm border-gray-300 focus:outline-none focus:ring-brand-dark focus:border-brand-dark rounded-md border">
           <option value="All">All Statuses</option>
-          {['Open', 'In Progress', 'Resolved', 'Closed'].map((s) => <option key={s} value={s}>{s}</option>)}
+          {['Open', 'In Progress', 'On Hold', 'Closed'].map((s) => <option key={s} value={s}>{s}</option>)}
         </select>
         <select value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)} className="block pl-3 pr-10 py-2 text-sm border-gray-300 focus:outline-none focus:ring-brand-dark focus:border-brand-dark rounded-md border">
           <option value="">All Types</option>
@@ -203,7 +203,7 @@ export function AdminDashboardPage() {
                           value={ticket.status}
                           onChange={(e) => handleStatusChange(ticket, e.target.value as TicketStatus)}
                         >
-                          {(['Open', 'In Progress', 'Resolved', 'Closed'] as TicketStatus[]).map((s) => (
+                          {(['Open', 'In Progress', 'On Hold', 'Closed'] as TicketStatus[]).map((s) => (
                             <option key={s} value={s}>{s}</option>
                           ))}
                         </select>

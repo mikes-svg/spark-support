@@ -76,7 +76,7 @@ export function DashboardPage() {
 
   const openCount = tickets.filter((t) => t.status === 'Open').length;
   const inProgressCount = tickets.filter((t) => t.status === 'In Progress').length;
-  const resolvedCount = tickets.filter((t) => t.status === 'Resolved' || t.status === 'Closed').length;
+  const closedCount = tickets.filter((t) => t.status === 'Closed').length;
 
   const formatDate = (ts: Ticket['createdAt']) => {
     if (!ts) return '';
@@ -97,7 +97,7 @@ export function DashboardPage() {
         {[
           { label: 'Open Tickets', count: openCount, color: 'bg-blue-500' },
           { label: 'In Progress', count: inProgressCount, color: 'bg-amber-500' },
-          { label: 'Resolved', count: resolvedCount, color: 'bg-emerald-500' },
+          { label: 'Closed', count: closedCount, color: 'bg-emerald-500' },
         ].map(({ label, count, color }) => (
           <div key={label} className="bg-white overflow-hidden shadow-sm rounded-lg border border-gray-200 relative">
             <div className={`absolute left-0 top-0 bottom-0 w-1 ${color}`} />
