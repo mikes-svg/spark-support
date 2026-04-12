@@ -4,15 +4,17 @@ import { doc, getDoc, collection, query, where, orderBy, onSnapshot, addDoc, upd
 import { db } from '../lib/firebase';
 import { StatusBadge, PriorityBadge } from '../components/Badges';
 import { useAuth } from '../context/AuthContext';
-import { Paperclip, Send, ArrowLeft, Clock } from 'lucide-react';
+import { Paperclip, Send, ArrowLeft, Clock, FileText, Image } from 'lucide-react';
 import { tickets as mockTickets, users as mockUsers, comments as mockComments } from '../mockData';
 import type { TicketStatus, TicketPriority } from '../mockData';
 
 interface Profile { id: string; name: string; photoURL: string; }
+interface Attachment { name: string; url: string; }
 interface Ticket {
   id: string; type: string; title: string; description: string;
   status: TicketStatus; priority: TicketPriority;
   assigneeId: string | null; submitterId: string;
+  attachments?: Attachment[];
   createdAt: { toDate: () => Date } | string;
   updatedAt: { toDate: () => Date } | string;
 }
@@ -216,6 +218,29 @@ export function TicketDetailPage() {
               <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-widest mb-4">Description</h3>
               <div className="prose max-w-none text-gray-700 whitespace-pre-wrap">{ticket.description}</div>
             </div>
+            {ticket.attachments && ticket.attachments.length > 0 && (
+              <div className="px-6 py-4 border-t border-gray-200">
+                <h4 className="text-xs font-medium text-gray-500 uppercase mb-3">Attachments</h4>
+                <div className="space-y-2">
+                  {ticket.attachments.map((att, idx) => {
+                    const isImage = /\.(jpg|jpeg|png|gif|webp)$/i.test(att.name);
+                    return (
+                      <div key={idx}>
+                        {isImage && (
+                          <a href={att.url} target="_blank" rel="noopener noreferrer" className="block mb-2">
+                            <img src={att.url} alt={att.name} className="max-h-48 rounded-lg border border-gray-200" />
+                          </a>
+                        )}
+                        <a href={att.url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-2 text-sm text-brand-dark hover:text-brand-gold transition-colors">
+                          {isImage ? <Image className="w-4 h-4" /> : <FileText className="w-4 h-4" />}
+                          {att.name}
+                        </a>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
             {user?.role === 'admin' && db && (
               <div className="px-6 py-4 border-t border-gray-200 bg-gray-50/50 flex items-center gap-3">
                 <span className="text-xs font-medium text-gray-500 uppercase">Status</span>

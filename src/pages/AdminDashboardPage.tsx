@@ -1,10 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { collection, query, orderBy, getDocs, doc, getDoc, updateDoc, addDoc, serverTimestamp, where } from 'firebase/firestore';
+import { collection, query, orderBy, getDocs, doc, getDoc, updateDoc, deleteDoc, addDoc, serverTimestamp, where } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { StatusBadge, PriorityBadge } from '../components/Badges';
 import { useAuth } from '../context/AuthContext';
-import { Filter, AlertCircle, CheckCircle2, Clock } from 'lucide-react';
+import { Filter, AlertCircle, CheckCircle2, Clock, Trash2 } from 'lucide-react';
 import { tickets as mockTickets, users as mockUsers, requestTypes as mockRTs } from '../mockData';
 import type { TicketStatus, TicketPriority } from '../mockData';
 
@@ -113,6 +113,19 @@ export function AdminDashboardPage() {
     }
   };
 
+  const handlePriorityChange = async (ticket: Ticket, newPriority: TicketPriority) => {
+    setTickets((prev) => prev.map((t) => t.id === ticket.id ? { ...t, priority: newPriority } : t));
+    if (!db) return;
+    await updateDoc(doc(db, 'tickets', ticket.id), { priority: newPriority, updatedAt: serverTimestamp() });
+  };
+
+  const handleDeleteTicket = async (ticket: Ticket) => {
+    if (!window.confirm(`Delete ticket ${ticket.id}? This cannot be undone.`)) return;
+    setTickets((prev) => prev.filter((t) => t.id !== ticket.id));
+    if (!db) return;
+    await deleteDoc(doc(db, 'tickets', ticket.id));
+  };
+
   const filteredTickets = tickets.filter((t) => {
     if (statusFilter !== 'All' && t.status !== statusFilter) return false;
     if (typeFilter && t.type !== typeFilter) return false;
@@ -208,7 +221,17 @@ export function AdminDashboardPage() {
                           ))}
                         </select>
                       </div>
-                      <div className="block"><PriorityBadge priority={ticket.priority} /></div>
+                      <div className="block">
+                        <select
+                          className="text-sm font-medium rounded-md border border-gray-300 bg-gray-50 px-2 py-1 focus:outline-none focus:ring-brand-dark focus:border-brand-dark"
+                          value={ticket.priority}
+                          onChange={(e) => handlePriorityChange(ticket, e.target.value as TicketPriority)}
+                        >
+                          {(['Low', 'Medium', 'High', 'Urgent'] as TicketPriority[]).map((p) => (
+                            <option key={p} value={p}>{p}</option>
+                          ))}
+                        </select>
+                      </div>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
                       <select className="block w-full pl-3 pr-8 py-1.5 text-sm border-gray-300 focus:outline-none focus:ring-brand-dark focus:border-brand-dark rounded-md border bg-gray-50" value={ticket.assigneeId || ''} onChange={(e) => handleAssigneeChange(ticket, e.target.value)}>
@@ -216,8 +239,9 @@ export function AdminDashboardPage() {
                         {adminProfiles.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
                       </select>
                     </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
+                    <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium space-x-3">
                       <button onClick={() => navigate(`/tickets/${ticket.id}`)} className="text-brand-dark hover:text-brand-gold transition-colors">View</button>
+                      <button onClick={() => handleDeleteTicket(ticket)} className="text-red-400 hover:text-red-600 transition-colors"><Trash2 className="h-4 w-4 inline" /></button>
                     </td>
                   </tr>
                 );

@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { collection, getDocs, getDoc, doc, setDoc, addDoc, runTransaction, serverTimestamp } from 'firebase/firestore';
-import { ref, uploadBytes } from 'firebase/storage';
+import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { db, storage } from '../lib/firebase';
 import { useAuth } from '../context/AuthContext';
 import { UploadCloud } from 'lucide-react';
@@ -72,36 +72,59 @@ export function SubmitRequestPage() {
 
       const participants = [user.id, assigneeId].filter(Boolean) as string[];
 
-      await setDoc(doc(db, 'tickets', ticketId), {
-        type, title, description, status: 'Open', priority,
-        assigneeId, submitterId: user.id, participants,
-        createdAt: serverTimestamp(), updatedAt: serverTimestamp(),
-      });
-
-      if (storage) {
+      // Upload attachments first to get URLs
+      const attachments: { name: string; url: string }[] = [];
+      if (storage && files.length > 0) {
         for (const file of files) {
-          const fileRef = ref(storage, `attachments/${ticketId}/${file.name}`);
-          await uploadBytes(fileRef, file);
+          try {
+            const fileRef = ref(storage, `attachments/${ticketId}/${file.name}`);
+            await uploadBytes(fileRef, file);
+            const url = await getDownloadURL(fileRef);
+            attachments.push({ name: file.name, url });
+          } catch (uploadErr) {
+            console.error('File upload failed:', uploadErr);
+          }
         }
       }
 
+      await setDoc(doc(db, 'tickets', ticketId), {
+        type, title, description, status: 'Open', priority,
+        assigneeId, submitterId: user.id, participants,
+        attachments,
+        createdAt: serverTimestamp(), updatedAt: serverTimestamp(),
+      });
+
+      // Send notification to assignee (non-blocking)
       if (assigneeId) {
-        const assigneeDoc = await getDoc(doc(db, 'profiles', assigneeId));
-        const assigneeEmail = assigneeDoc.data()?.email;
-        if (assigneeEmail) {
-          await addDoc(collection(db, 'mail'), {
-            to: assigneeEmail,
-            message: {
-              subject: `[Spark Support] New ${priority} ticket: ${title}`,
-              html: `<p>A new support request has been assigned to you.</p><p><strong>${ticketId}</strong> — ${title}</p><p><a href="${window.location.origin}/tickets/${ticketId}">View ticket →</a></p>`,
-            },
-          });
-        }
+        getDoc(doc(db, 'profiles', assigneeId)).then((assigneeDoc) => {
+          const assigneeEmail = assigneeDoc.data()?.email;
+          if (assigneeEmail) {
+            addDoc(collection(db, 'mail'), {
+              to: assigneeEmail,
+              message: {
+                subject: `[Spark Support] New ${priority} ticket: ${title}`,
+                html: `<p>A new support request has been assigned to you.</p><p><strong>${ticketId}</strong> — ${title}</p><p><a href="${window.location.origin}/tickets/${ticketId}">View ticket →</a></p>`,
+              },
+            });
+          }
+        }).catch(() => {});
+      }
+
+      // Send confirmation to submitter (non-blocking)
+      if (user.email) {
+        addDoc(collection(db, 'mail'), {
+          to: user.email,
+          message: {
+            subject: `[Spark Support] Your ticket ${ticketId} has been submitted`,
+            html: `<p>Your support request has been received.</p><p><strong>${ticketId}</strong> — ${title}</p><p><a href="${window.location.origin}/tickets/${ticketId}">View ticket →</a></p>`,
+          },
+        }).catch(() => {});
       }
 
       navigate('/');
     } catch (err) {
       console.error('Failed to submit ticket:', err);
+    } finally {
       setIsSubmitting(false);
     }
   };
