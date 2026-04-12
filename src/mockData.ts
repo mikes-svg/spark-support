@@ -1,5 +1,5 @@
 export type Role = 'admin' | 'user';
-export type TicketStatus = 'Open' | 'In Progress' | 'Resolved' | 'Closed';
+export type TicketStatus = 'Open' | 'In Progress' | 'On Hold' | 'Closed';
 export type TicketPriority = 'Low' | 'Medium' | 'High' | 'Urgent';
 
 export interface User {
@@ -110,7 +110,7 @@ export const tickets: Ticket[] = [
   type: 'Supplies',
   title: 'Need more printer toner',
   description: 'The main office printer is low on black toner.',
-  status: 'Resolved',
+  status: 'Closed',
   priority: 'Low',
   assigneeId: 'u2',
   submitterId: 'u5',

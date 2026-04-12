@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { collection, query, orderBy, getDocs, doc, getDoc, updateDoc, serverTimestamp, where } from 'firebase/firestore';
+import { collection, query, orderBy, getDocs, doc, getDoc, updateDoc, addDoc, serverTimestamp, where } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { StatusBadge, PriorityBadge } from '../components/Badges';
+import { useAuth } from '../context/AuthContext';
 import { Filter, AlertCircle, CheckCircle2, Clock } from 'lucide-react';
 import { tickets as mockTickets, users as mockUsers, requestTypes as mockRTs } from '../mockData';
 import type { TicketStatus, TicketPriority } from '../mockData';
@@ -23,6 +24,7 @@ function mockProfileMap(): Record<string, Profile> {
 
 export function AdminDashboardPage() {
   const navigate = useNavigate();
+  const { user } = useAuth();
   const [tickets, setTickets] = useState<Ticket[]>([]);
   const [profiles, setProfiles] = useState<Record<string, Profile>>({});
   const [adminProfiles, setAdminProfiles] = useState<Profile[]>([]);
@@ -73,11 +75,42 @@ export function AdminDashboardPage() {
     fetchData();
   }, []);
 
+  const sendNotificationEmail = async (recipientId: string, subject: string, html: string) => {
+    if (!db || !recipientId) return;
+    try {
+      const recipientDoc = await getDoc(doc(db, 'profiles', recipientId));
+      const recipientEmail = recipientDoc.data()?.email;
+      if (recipientEmail) {
+        await addDoc(collection(db, 'mail'), { to: recipientEmail, message: { subject, html } });
+      }
+    } catch (err) {
+      console.error('Failed to send notification email:', err);
+    }
+  };
+
   const handleAssigneeChange = async (ticket: Ticket, newAssigneeId: string) => {
     const updatedParticipants = [...new Set([...ticket.participants.filter((p) => p !== ticket.assigneeId), ...(newAssigneeId ? [newAssigneeId] : [])])];
     setTickets((prev) => prev.map((t) => t.id === ticket.id ? { ...t, assigneeId: newAssigneeId || null, participants: updatedParticipants } : t));
     if (!db) return;
     await updateDoc(doc(db, 'tickets', ticket.id), { assigneeId: newAssigneeId || null, participants: updatedParticipants, updatedAt: serverTimestamp() });
+  };
+
+  const handleStatusChange = async (ticket: Ticket, newStatus: TicketStatus) => {
+    const oldStatus = ticket.status;
+    setTickets((prev) => prev.map((t) => t.id === ticket.id ? { ...t, status: newStatus } : t));
+    if (!db || !user) return;
+    await updateDoc(doc(db, 'tickets', ticket.id), { status: newStatus, updatedAt: serverTimestamp() });
+
+    const ticketUrl = `${window.location.origin}/tickets/${ticket.id}`;
+    const subject = `[Spark Support] ${ticket.id} status changed to ${newStatus}`;
+    const html = `<p>Ticket <strong>${ticket.id}</strong> — ${ticket.title}</p><p>Status changed from <strong>${oldStatus}</strong> to <strong>${newStatus}</strong>.</p><p><a href="${ticketUrl}">View ticket →</a></p>`;
+
+    if (ticket.assigneeId && ticket.assigneeId !== user.id) {
+      await sendNotificationEmail(ticket.assigneeId, subject, html);
+    }
+    if (ticket.submitterId !== user.id) {
+      await sendNotificationEmail(ticket.submitterId, subject, html);
+    }
   };
 
   const filteredTickets = tickets.filter((t) => {
@@ -95,7 +128,7 @@ export function AdminDashboardPage() {
 
   const openCount = tickets.filter((t) => t.status === 'Open').length;
   const urgentCount = tickets.filter((t) => t.priority === 'Urgent').length;
-  const resolvedCount = tickets.filter((t) => t.status === 'Resolved').length;
+  const closedCount = tickets.filter((t) => t.status === 'Closed').length;
 
   return (
     <div className="space-y-6">
@@ -103,7 +136,7 @@ export function AdminDashboardPage() {
         {[
           { label: 'Total Open', value: loading ? '—' : openCount, Icon: Clock, color: 'bg-blue-100 text-blue-600' },
           { label: 'Urgent Priority', value: loading ? '—' : urgentCount, Icon: AlertCircle, color: 'bg-red-100 text-red-600' },
-          { label: 'Resolved This Week', value: loading ? '—' : resolvedCount, Icon: CheckCircle2, color: 'bg-emerald-100 text-emerald-600' },
+          { label: 'Closed This Week', value: loading ? '—' : closedCount, Icon: CheckCircle2, color: 'bg-emerald-100 text-emerald-600' },
           { label: 'Avg Resolution', value: '1.2 days', Icon: Clock, color: 'bg-brand-gold/20 text-brand-gold' },
         ].map(({ label, value, Icon, color }) => (
           <div key={label} className="bg-white overflow-hidden shadow-sm rounded-lg border border-gray-200">
@@ -122,7 +155,7 @@ export function AdminDashboardPage() {
         <div className="flex items-center text-gray-500 mr-2"><Filter className="w-5 h-5 mr-2" /><span className="text-sm font-medium">Filters:</span></div>
         <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="block pl-3 pr-10 py-2 text-sm border-gray-300 focus:outline-none focus:ring-brand-dark focus:border-brand-dark rounded-md border">
           <option value="All">All Statuses</option>
-          {['Open', 'In Progress', 'Resolved', 'Closed'].map((s) => <option key={s} value={s}>{s}</option>)}
+          {['Open', 'In Progress', 'On Hold', 'Closed'].map((s) => <option key={s} value={s}>{s}</option>)}
         </select>
         <select value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)} className="block pl-3 pr-10 py-2 text-sm border-gray-300 focus:outline-none focus:ring-brand-dark focus:border-brand-dark rounded-md border">
           <option value="">All Types</option>
@@ -164,7 +197,17 @@ export function AdminDashboardPage() {
                       <div className="text-xs text-gray-500">{ticket.type} · {formatDate(ticket.createdAt)}</div>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap space-y-2">
-                      <div className="block"><StatusBadge status={ticket.status} /></div>
+                      <div className="block">
+                        <select
+                          className="text-sm font-medium rounded-md border border-gray-300 bg-gray-50 px-2 py-1 focus:outline-none focus:ring-brand-dark focus:border-brand-dark"
+                          value={ticket.status}
+                          onChange={(e) => handleStatusChange(ticket, e.target.value as TicketStatus)}
+                        >
+                          {(['Open', 'In Progress', 'On Hold', 'Closed'] as TicketStatus[]).map((s) => (
+                            <option key={s} value={s}>{s}</option>
+                          ))}
+                        </select>
+                      </div>
                       <div className="block"><PriorityBadge priority={ticket.priority} /></div>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
