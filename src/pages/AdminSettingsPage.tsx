@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { collection, query, getDocs, doc, updateDoc, deleteDoc, addDoc, setDoc, serverTimestamp, orderBy } from 'firebase/firestore';
+import { collection, getDocs, doc, updateDoc, deleteDoc, addDoc, setDoc, serverTimestamp } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { Plus, Trash2, Edit2, Check, X, UserPlus } from 'lucide-react';
 import { users as mockUsers, requestTypes as mockRTs } from '../mockData';
@@ -31,8 +31,8 @@ export function AdminSettingsPage() {
       try {
         const profilesSnap = await getDocs(collection(db!, 'profiles'));
         setProfiles(profilesSnap.docs.map((d) => ({ id: d.id, ...d.data() } as Profile)));
-        const rtSnap = await getDocs(query(collection(db!, 'requestTypes'), orderBy('name')));
-        setRequestTypes(rtSnap.docs.map((d) => ({ id: d.id, ...d.data() } as RequestType)));
+        const rtSnap = await getDocs(collection(db!, 'requestTypes'));
+        setRequestTypes(rtSnap.docs.map((d) => ({ id: d.id, ...d.data() } as RequestType)).sort((a, b) => a.name.localeCompare(b.name)));
       } catch (err) {
         console.warn('Firestore unavailable, using mock data:', err);
         setProfiles(mockUsers.map((u) => ({ id: u.id, name: u.name, email: u.email, photoURL: u.avatar, role: u.role })));

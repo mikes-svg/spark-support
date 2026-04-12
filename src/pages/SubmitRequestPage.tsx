@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
-import { collection, getDocs, getDoc, doc, setDoc, addDoc, runTransaction, query, orderBy, serverTimestamp } from 'firebase/firestore';
+import { collection, getDocs, getDoc, doc, setDoc, addDoc, runTransaction, serverTimestamp } from 'firebase/firestore';
 import { ref, uploadBytes } from 'firebase/storage';
 import { db, storage } from '../lib/firebase';
 import { useAuth } from '../context/AuthContext';
@@ -18,12 +18,20 @@ export function SubmitRequestPage() {
 
   useEffect(() => {
     if (!db) {
-      setRequestTypes(mockRequestTypes.map((rt) => ({ id: rt.id, name: rt.name, defaultAssigneeId: rt.defaultAssigneeId, active: rt.active })));
+      setRequestTypes(mockRequestTypes.map((rt) => ({ id: rt.id, name: rt.name, defaultAssigneeId: rt.defaultAssigneeId, active: rt.active })).filter((rt) => rt.active));
       return;
     }
-    getDocs(query(collection(db, 'requestTypes'), orderBy('name')))
-      .then((snap) => { setRequestTypes(snap.docs.map((d) => ({ id: d.id, ...d.data() } as RequestType)).filter((rt) => rt.active)); })
-      .catch(() => { setRequestTypes(mockRequestTypes.map((rt) => ({ id: rt.id, name: rt.name, defaultAssigneeId: rt.defaultAssigneeId, active: rt.active })).filter((rt) => rt.active)); });
+    getDocs(collection(db, 'requestTypes'))
+      .then((snap) => {
+        const types = snap.docs
+          .map((d) => ({ id: d.id, ...d.data() } as RequestType))
+          .filter((rt) => rt.active)
+          .sort((a, b) => a.name.localeCompare(b.name));
+        setRequestTypes(types);
+      })
+      .catch((err) => {
+        console.error('Failed to fetch request types:', err);
+      });
   }, []);
 
   const handleFileDrop = (e: React.DragEvent<HTMLDivElement>) => {
