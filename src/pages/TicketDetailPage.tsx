@@ -84,9 +84,10 @@ export function TicketDetailPage() {
 
     let unsubscribe: (() => void) | undefined;
     try {
-    const commentsQuery = query(collection(db!, 'comments'), where('ticketId', '==', id), orderBy('createdAt', 'asc'));
+    const commentsQuery = query(collection(db!, 'comments'), where('ticketId', '==', id));
     unsubscribe = onSnapshot(commentsQuery, async (snap) => {
       const comments = snap.docs.map((d) => ({ id: d.id, ...d.data() } as Comment));
+      comments.sort((a, b) => toDate(a.createdAt).getTime() - toDate(b.createdAt).getTime());
       setTicketComments(comments);
       const commentUserIds = [...new Set(comments.map((c) => c.userId))];
       const missing = commentUserIds.filter((uid) => !profiles[uid]);
@@ -98,6 +99,8 @@ export function TicketDetailPage() {
           return updated;
         });
       }
+    }, (err) => {
+      console.warn('Firestore comments listener error:', err);
     });
     } catch (err) {
       console.warn('Firestore comments listener failed:', err);
@@ -149,7 +152,13 @@ export function TicketDetailPage() {
       setTicketComments((prev) => [...prev, mockNew]);
       return;
     }
-    await addDoc(collection(db, 'comments'), { ticketId: ticket.id, userId: user.id, body, createdAt: serverTimestamp() });
+    try {
+      await addDoc(collection(db, 'comments'), { ticketId: ticket.id, userId: user.id, body, createdAt: serverTimestamp() });
+    } catch (err) {
+      console.error('Failed to add comment:', err);
+      setNewComment(body);
+      return;
+    }
 
     const ticketUrl = `${window.location.origin}/tickets/${ticket.id}`;
     const commenterName = profiles[user.id]?.name || user.name;
