@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Navigate } from 'react-router-dom';
 import { signInWithEmailAndPassword, createUserWithEmailAndPassword, signInWithPopup } from 'firebase/auth';
 import { auth, googleProvider } from '../lib/firebase';
+import { useAuth } from '../context/AuthContext';
 import { motion } from 'framer-motion';
 
 // TODO: Re-enable domain restrictions at launch
@@ -11,13 +12,18 @@ function isAllowedDomain(_email: string): boolean {
 }
 
 export function LoginPage() {
-  const navigate = useNavigate();
+  const { user: authedUser } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [ssoLoading, setSsoLoading] = useState(false);
   const [showPasswordLogin, setShowPasswordLogin] = useState(false);
+
+  // Redirect once auth state is set (avoids race with navigate)
+  if (authedUser) {
+    return <Navigate to="/" replace />;
+  }
 
   const handleGoogleSSO = async () => {
     if (!auth || !googleProvider) return;
@@ -31,7 +37,7 @@ export function LoginPage() {
         setError('Access restricted to @standifercapital.com and @sparkmanage.com accounts.');
         return;
       }
-      navigate('/');
+      // Navigation handled reactively by auth state change above
     } catch (err: unknown) {
       const code = (err as { code?: string }).code;
       if (code !== 'auth/popup-closed-by-user' && code !== 'auth/cancelled-popup-request') {
@@ -55,12 +61,12 @@ export function LoginPage() {
     const firebasePassword = password.trim() + '!!';
     try {
       await signInWithEmailAndPassword(auth!, email.trim(), firebasePassword);
-      navigate('/');
+      // Navigation handled reactively by auth state change above
     } catch {
       // Account may not exist yet — auto-create for allowed domains
       try {
         await createUserWithEmailAndPassword(auth!, email.trim(), firebasePassword);
-        navigate('/');
+        // Navigation handled reactively by auth state change above
       } catch (createErr: unknown) {
         const code = (createErr as { code?: string }).code;
         if (code === 'auth/email-already-in-use') {
