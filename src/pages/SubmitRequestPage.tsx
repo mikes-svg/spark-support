@@ -1,11 +1,11 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
-import { collection, getDocs, getDoc, doc, setDoc, addDoc, runTransaction, query, where, orderBy, serverTimestamp } from 'firebase/firestore';
+import { getDoc, doc, setDoc, addDoc, runTransaction, collection, serverTimestamp } from 'firebase/firestore';
 import { ref, uploadBytes } from 'firebase/storage';
 import { db, storage } from '../lib/firebase';
 import { useAuth } from '../context/AuthContext';
-import { UploadCloud } from 'lucide-react';
-import { requestTypes as mockRequestTypes } from '../mockData';
+import { UploadCloud, X } from 'lucide-react';
+import { getOrSeedRequestTypes } from '../lib/seedRequestTypes';
 
 interface RequestType { id: string; name: string; defaultAssigneeId: string | null; active: boolean; }
 
@@ -15,25 +15,30 @@ export function SubmitRequestPage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [files, setFiles] = useState<File[]>([]);
   const [requestTypes, setRequestTypes] = useState<RequestType[]>([]);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    if (!db) {
-      setRequestTypes(mockRequestTypes.map((rt) => ({ id: rt.id, name: rt.name, defaultAssigneeId: rt.defaultAssigneeId, active: rt.active })));
-      return;
-    }
-    getDocs(query(collection(db, 'requestTypes'), where('active', '==', true), orderBy('name')))
-      .then((snap) => { setRequestTypes(snap.docs.map((d) => ({ id: d.id, ...d.data() } as RequestType))); })
-      .catch(() => { setRequestTypes(mockRequestTypes.map((rt) => ({ id: rt.id, name: rt.name, defaultAssigneeId: rt.defaultAssigneeId, active: rt.active }))); });
+    getOrSeedRequestTypes()
+      .then((types) => setRequestTypes((types as RequestType[]).filter((t) => t.active)))
+      .catch((err) => console.error('Failed to fetch request types:', err));
   }, []);
+
+  const addFiles = (newFiles: FileList | File[]) => {
+    setFiles((prev) => [...prev, ...Array.from(newFiles)]);
+  };
+
+  const removeFile = (index: number) => {
+    setFiles((prev) => prev.filter((_, i) => i !== index));
+  };
 
   const handleFileDrop = (e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault();
-    if (e.dataTransfer.files?.length) setFiles(Array.from(e.dataTransfer.files));
+    if (e.dataTransfer.files?.length) addFiles(e.dataTransfer.files);
   };
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-    if (!user) return;
+    if (!user || !db) return;
     setIsSubmitting(true);
 
     const form = e.currentTarget;
@@ -45,13 +50,6 @@ export function SubmitRequestPage() {
 
     const selectedType = requestTypes.find((rt) => rt.name === type);
     const assigneeId = selectedType?.defaultAssigneeId || null;
-
-    if (!db) {
-      // Mock submit
-      await new Promise((r) => setTimeout(r, 600));
-      navigate('/');
-      return;
-    }
 
     try {
       const counterRef = doc(db, 'meta', 'ticketCounter');
@@ -77,6 +75,16 @@ export function SubmitRequestPage() {
         }
       }
 
+      // Email submitter confirmation
+      await addDoc(collection(db, 'mail'), {
+        to: user.email,
+        message: {
+          subject: `Your request ${ticketId} has been submitted`,
+          html: `<p>Your support request has been submitted successfully.</p><p><strong>${ticketId}</strong> — ${title}</p><p>Priority: ${priority} · Type: ${type}</p><p><a href="${window.location.origin}/tickets/${ticketId}">View ticket →</a></p>`,
+        },
+      });
+
+      // Email assignee
       if (assigneeId) {
         const assigneeDoc = await getDoc(doc(db, 'profiles', assigneeId));
         const assigneeEmail = assigneeDoc.data()?.email;
@@ -84,7 +92,7 @@ export function SubmitRequestPage() {
           await addDoc(collection(db, 'mail'), {
             to: assigneeEmail,
             message: {
-              subject: `[Spark Support] New ${priority} ticket: ${title}`,
+              subject: `New ${priority} ticket: ${title}`,
               html: `<p>A new support request has been assigned to you.</p><p><strong>${ticketId}</strong> — ${title}</p><p><a href="${window.location.origin}/tickets/${ticketId}">View ticket →</a></p>`,
             },
           });
@@ -137,25 +145,28 @@ export function SubmitRequestPage() {
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">Attachments</label>
-            <div className="mt-1 flex justify-center px-6 pt-5 pb-6 border-2 border-gray-300 border-dashed rounded-md hover:bg-gray-50 transition-colors cursor-pointer" onDragOver={(e) => e.preventDefault()} onDrop={handleFileDrop} onClick={() => document.getElementById('file-upload')?.click()}>
+            <span className="block text-sm font-medium text-gray-700 mb-2">Attachments</span>
+            <div className="mt-1 flex justify-center px-6 pt-5 pb-6 border-2 border-gray-300 border-dashed rounded-md hover:bg-gray-50 transition-colors cursor-pointer" onDragOver={(e) => e.preventDefault()} onDrop={handleFileDrop} onClick={() => fileInputRef.current?.click()}>
               <div className="space-y-1 text-center">
                 <UploadCloud className="mx-auto h-12 w-12 text-gray-400" />
                 <div className="flex text-sm text-gray-600 justify-center">
-                  <label htmlFor="file-upload" className="relative cursor-pointer bg-white rounded-md font-medium text-brand-dark hover:text-brand-gold">
-                    <span>Upload a file</span>
-                    <input id="file-upload" name="file-upload" type="file" className="sr-only" multiple onChange={(e) => { if (e.target.files) setFiles(Array.from(e.target.files)); }} />
-                  </label>
+                  <span className="relative cursor-pointer bg-white rounded-md font-medium text-brand-dark hover:text-brand-gold">Upload files</span>
                   <p className="pl-1">or drag and drop</p>
                 </div>
                 <p className="text-xs text-gray-500">PNG, JPG, PDF up to 10MB</p>
               </div>
             </div>
+            <input ref={fileInputRef} type="file" className="hidden" multiple onChange={(e) => { if (e.target.files && e.target.files.length > 0) { const picked = Array.from(e.target.files); setFiles((prev) => [...prev, ...picked]); } e.target.value = ''; }} />
             {files.length > 0 && (
               <ul className="mt-3 space-y-1">
                 {files.map((file, idx) => (
-                  <li key={idx} className="text-sm text-gray-600 flex items-center">
-                    <span className="w-2 h-2 bg-brand-gold rounded-full mr-2" />{file.name}
+                  <li key={idx} className="text-sm text-gray-600 flex items-center justify-between group">
+                    <span className="flex items-center">
+                      <span className="w-2 h-2 bg-brand-gold rounded-full mr-2" />{file.name}
+                    </span>
+                    <button type="button" onClick={() => removeFile(idx)} className="text-gray-300 hover:text-red-500 transition-colors opacity-0 group-hover:opacity-100">
+                      <X className="h-3.5 w-3.5" />
+                    </button>
                   </li>
                 ))}
               </ul>
