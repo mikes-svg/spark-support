@@ -2,7 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { collection, query, getDocs, doc, updateDoc, deleteDoc, addDoc, setDoc, serverTimestamp, orderBy } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { Plus, Trash2, Edit2, Check, X, UserPlus } from 'lucide-react';
-import { users as mockUsers, requestTypes as mockRTs } from '../mockData';
+import { ConfirmModal } from '../components/ConfirmModal';
+import { getOrSeedRequestTypes } from '../lib/seedRequestTypes';
 
 interface Profile { id: string; name: string; email: string; photoURL: string; role: 'admin' | 'user'; }
 interface RequestType { id: string; name: string; defaultAssigneeId: string | null; active: boolean; }
@@ -21,22 +22,15 @@ export function AdminSettingsPage() {
   const [editUserName, setEditUserName] = useState('');
 
   useEffect(() => {
-    if (!db) {
-      setProfiles(mockUsers.map((u) => ({ id: u.id, name: u.name, email: u.email, photoURL: u.avatar, role: u.role })));
-      setRequestTypes(mockRTs.map((rt) => ({ id: rt.id, name: rt.name, defaultAssigneeId: rt.defaultAssigneeId, active: rt.active })));
-      setLoading(false);
-      return;
-    }
+    if (!db) { setLoading(false); return; }
     async function fetchData() {
       try {
         const profilesSnap = await getDocs(collection(db!, 'profiles'));
         setProfiles(profilesSnap.docs.map((d) => ({ id: d.id, ...d.data() } as Profile)));
-        const rtSnap = await getDocs(query(collection(db!, 'requestTypes'), orderBy('name')));
-        setRequestTypes(rtSnap.docs.map((d) => ({ id: d.id, ...d.data() } as RequestType)));
+        const types = await getOrSeedRequestTypes();
+        setRequestTypes(types as RequestType[]);
       } catch (err) {
-        console.warn('Firestore unavailable, using mock data:', err);
-        setProfiles(mockUsers.map((u) => ({ id: u.id, name: u.name, email: u.email, photoURL: u.avatar, role: u.role })));
-        setRequestTypes(mockRTs.map((rt) => ({ id: rt.id, name: rt.name, defaultAssigneeId: rt.defaultAssigneeId, active: rt.active })));
+        console.error('Failed to fetch settings data:', err);
       } finally {
         setLoading(false);
       }
@@ -49,6 +43,15 @@ export function AdminSettingsPage() {
     setProfiles((prev) => prev.map((p) => p.id === profile.id ? { ...p, role: newRole } : p));
     if (!db) return;
     await updateDoc(doc(db, 'profiles', profile.id), { role: newRole });
+  };
+
+  const [deleteTarget, setDeleteTarget] = useState<Profile | null>(null);
+
+  const deleteUser = async () => {
+    if (!deleteTarget) return;
+    setProfiles((prev) => prev.filter((p) => p.id !== deleteTarget.id));
+    if (db) await deleteDoc(doc(db, 'profiles', deleteTarget.id));
+    setDeleteTarget(null);
   };
 
   const saveUserName = async (profile: Profile) => {
@@ -105,7 +108,6 @@ export function AdminSettingsPage() {
     setInviting(true);
     setInviteError('');
     try {
-      // Check if a profile with this email already exists
       const existing = profiles.find((p) => p.email.toLowerCase() === inviteForm.email.trim().toLowerCase());
       if (existing) {
         setInviteError('A user with this email already exists.');
@@ -122,7 +124,6 @@ export function AdminSettingsPage() {
         createdAt: serverTimestamp(),
       };
 
-      // Use email as temporary doc ID; will be linked to real UID on first login
       const profileId = inviteForm.email.trim().toLowerCase().replace(/[^a-z0-9]/g, '_');
       if (db) await setDoc(doc(db, 'profiles', profileId), profileData);
 
@@ -192,9 +193,12 @@ export function AdminSettingsPage() {
                       <option value="admin">Administrator</option>
                     </select>
                   </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
-                    <button onClick={() => { setEditingUser(profile.id); setEditUserName(profile.name); }} className="text-gray-400 hover:text-brand-dark transition-colors">
+                  <td className="px-6 py-4 whitespace-nowrap text-sm font-medium space-x-3">
+                    <button onClick={() => { setEditingUser(profile.id); setEditUserName(profile.name); }} className="text-gray-400 hover:text-brand-dark transition-colors inline-block">
                       <Edit2 className="h-4 w-4" />
+                    </button>
+                    <button onClick={() => setDeleteTarget(profile)} className="text-red-400 hover:text-red-600 transition-colors inline-block">
+                      <Trash2 className="h-4 w-4" />
                     </button>
                   </td>
                 </tr>
@@ -295,6 +299,15 @@ export function AdminSettingsPage() {
           </div>
         </div>
       )}
+      <ConfirmModal
+        open={!!deleteTarget}
+        title="Delete User"
+        message={deleteTarget ? `Delete "${deleteTarget.name}" (${deleteTarget.email})? This cannot be undone.` : ''}
+        confirmLabel="Delete"
+        danger
+        onConfirm={deleteUser}
+        onCancel={() => setDeleteTarget(null)}
+      />
     </div>
   );
 }

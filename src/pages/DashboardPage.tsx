@@ -5,8 +5,7 @@ import { db } from '../lib/firebase';
 import { useAuth } from '../context/AuthContext';
 import { StatusBadge } from '../components/Badges';
 import { Plus } from 'lucide-react';
-import { tickets as mockTickets, users as mockUsers } from '../mockData';
-import type { TicketStatus, TicketPriority } from '../mockData';
+import type { TicketStatus, TicketPriority } from '../types';
 
 interface Ticket {
   id: string;
@@ -22,13 +21,6 @@ interface Ticket {
 
 interface Profile { id: string; name: string; photoURL: string; }
 
-function mockProfileMap(): Record<string, Profile> {
-  const map: Record<string, Profile> = {};
-  mockUsers.forEach((u) => { map[u.id] = { id: u.id, name: u.name, photoURL: u.avatar }; });
-  map['dev-user'] = { id: 'dev-user', name: 'Dev Admin', photoURL: 'https://ui-avatars.com/api/?name=Dev+Admin&background=1B4332&color=D4A843' };
-  return map;
-}
-
 export function DashboardPage() {
   const { user } = useAuth();
   const navigate = useNavigate();
@@ -37,19 +29,7 @@ export function DashboardPage() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    if (!user) return;
-
-    if (!db) {
-      const all = mockTickets.map((t) => ({
-        ...t,
-        assigneeId: t.assigneeId ?? null,
-        participants: [t.submitterId, t.assigneeId].filter(Boolean) as string[],
-      }));
-      setTickets(all as Ticket[]);
-      setProfiles(mockProfileMap());
-      setLoading(false);
-      return;
-    }
+    if (!user || !db) { setLoading(false); return; }
 
     async function fetchTickets() {
       try {
@@ -63,10 +43,7 @@ export function DashboardPage() {
         profileDocs.forEach((p) => { if (p.exists()) profileMap[p.id] = { id: p.id, ...p.data() } as Profile; });
         setProfiles(profileMap);
       } catch (err) {
-        console.warn('Firestore unavailable, using mock data:', err);
-        const all = mockTickets.map((t) => ({ ...t, assigneeId: t.assigneeId ?? null, participants: [t.submitterId, t.assigneeId].filter(Boolean) as string[] }));
-        setTickets(all as Ticket[]);
-        setProfiles(mockProfileMap());
+        console.error('Failed to fetch tickets:', err);
       } finally {
         setLoading(false);
       }
@@ -76,7 +53,7 @@ export function DashboardPage() {
 
   const openCount = tickets.filter((t) => t.status === 'Open').length;
   const inProgressCount = tickets.filter((t) => t.status === 'In Progress').length;
-  const closedCount = tickets.filter((t) => t.status === 'Closed').length;
+  const resolvedCount = tickets.filter((t) => t.status === 'Resolved').length;
 
   const formatDate = (ts: Ticket['createdAt']) => {
     if (!ts) return '';
@@ -97,7 +74,7 @@ export function DashboardPage() {
         {[
           { label: 'Open Tickets', count: openCount, color: 'bg-blue-500' },
           { label: 'In Progress', count: inProgressCount, color: 'bg-amber-500' },
-          { label: 'Closed', count: closedCount, color: 'bg-emerald-500' },
+          { label: 'Resolved', count: resolvedCount, color: 'bg-emerald-500' },
         ].map(({ label, count, color }) => (
           <div key={label} className="bg-white overflow-hidden shadow-sm rounded-lg border border-gray-200 relative">
             <div className={`absolute left-0 top-0 bottom-0 w-1 ${color}`} />

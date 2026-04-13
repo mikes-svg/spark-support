@@ -34,16 +34,9 @@ function SidebarContent({ onClose }: { onClose: () => void }) {
     <div className="w-64 bg-brand-dark text-white flex flex-col h-full">
       <div className="p-6 flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <div className="relative">
-            <div className="absolute -top-3 left-1/2 -translate-x-1/2 w-6 h-6 text-brand-gold">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83" />
-              </svg>
-            </div>
-            <span className="font-serif text-2xl font-bold tracking-tight mt-2 block">spark</span>
-          </div>
-          <div className="flex flex-col mt-2">
-            <span className="text-[10px] uppercase tracking-widest text-brand-gold font-semibold leading-none">Management</span>
+          <img src="/spark-logo.png" alt="Spark Management" className="h-10 brightness-0 invert" />
+          <div className="flex flex-col">
+            <span className="text-[10px] uppercase tracking-widest text-brand-gold font-semibold leading-none">Support</span>
             <span className="text-[10px] uppercase tracking-widest text-gray-400 mt-1 leading-none">Portal</span>
           </div>
         </div>

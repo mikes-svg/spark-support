@@ -1,8 +1,16 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { signInWithEmailAndPassword, createUserWithEmailAndPassword, signInWithPopup } from 'firebase/auth';
 import { auth, googleProvider } from '../lib/firebase';
+import { useAuth } from '../context/AuthContext';
 import { motion } from 'framer-motion';
+import { Shield, User } from 'lucide-react';
+
+// Test account credentials
+const TEST_ACCOUNTS = {
+  admin: { email: 'admin@sparktest.com', password: 'Sparkadmin', label: 'Test Admin', icon: Shield },
+  user: { email: 'user@sparktest.com', password: 'Sparkuser', label: 'Test User', icon: User },
+};
 
 // TODO: Re-enable domain restrictions at launch
 // const ALLOWED_DOMAINS = ['standifercapital.com', 'sparkmanage.com'];
@@ -12,12 +20,50 @@ function isAllowedDomain(_email: string): boolean {
 
 export function LoginPage() {
   const navigate = useNavigate();
+  const { user } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [ssoLoading, setSsoLoading] = useState(false);
-  const [showPasswordLogin, setShowPasswordLogin] = useState(false);
+  const [testLoading, setTestLoading] = useState<string | null>(null);
+
+  // Redirect when auth state resolves after login
+  useEffect(() => {
+    if (user) navigate('/', { replace: true });
+  }, [user, navigate]);
+
+  const doPasswordLogin = async (loginEmail: string, loginPassword: string) => {
+    // Firebase requires 6+ char passwords; pad internally
+    const firebasePassword = loginPassword.trim() + '!!';
+    try {
+      await signInWithEmailAndPassword(auth!, loginEmail, firebasePassword);
+      // navigate handled by useEffect watching user state
+      return true;
+    } catch {
+      // Account may not exist yet — auto-create
+      try {
+        await createUserWithEmailAndPassword(auth!, loginEmail, firebasePassword);
+        return true;
+      } catch (createErr: unknown) {
+        const code = (createErr as { code?: string }).code;
+        if (code === 'auth/email-already-in-use') {
+          setError('Invalid password.');
+        } else {
+          setError('Sign in failed. Please try again.');
+        }
+        return false;
+      }
+    }
+  };
+
+  const handleTestLogin = async (role: 'admin' | 'user') => {
+    const account = TEST_ACCOUNTS[role];
+    setTestLoading(role);
+    setError('');
+    await doPasswordLogin(account.email, account.password);
+    setTestLoading(null);
+  };
 
   const handleGoogleSSO = async () => {
     if (!auth || !googleProvider) return;
@@ -31,7 +77,7 @@ export function LoginPage() {
         setError('Access restricted to @standifercapital.com and @sparkmanage.com accounts.');
         return;
       }
-      navigate('/');
+      // navigate handled by useEffect watching user state
     } catch (err: unknown) {
       const code = (err as { code?: string }).code;
       if (code !== 'auth/popup-closed-by-user' && code !== 'auth/cancelled-popup-request') {
@@ -51,27 +97,8 @@ export function LoginPage() {
     }
     setLoading(true);
     setError('');
-    // Firebase requires 6+ char passwords; pad internally so users can type "Spark"
-    const firebasePassword = password.trim() + '!!';
-    try {
-      await signInWithEmailAndPassword(auth!, email.trim(), firebasePassword);
-      navigate('/');
-    } catch {
-      // Account may not exist yet — auto-create for allowed domains
-      try {
-        await createUserWithEmailAndPassword(auth!, email.trim(), firebasePassword);
-        navigate('/');
-      } catch (createErr: unknown) {
-        const code = (createErr as { code?: string }).code;
-        if (code === 'auth/email-already-in-use') {
-          setError('Invalid password.');
-        } else {
-          setError('Sign in failed. Please try again.');
-        }
-      }
-    } finally {
-      setLoading(false);
-    }
+    await doPasswordLogin(email.trim(), password.trim());
+    setLoading(false);
   };
 
   return (
@@ -119,59 +146,82 @@ export function LoginPage() {
             Sign in with Google
           </button>
 
-          {/* TODO: Remove password fallback at launch */}
-          {!showPasswordLogin ? (
+          {/* Password login */}
+          <div className="relative my-6">
+            <div className="absolute inset-0 flex items-center">
+              <div className="w-full border-t border-gray-200" />
+            </div>
+            <div className="relative flex justify-center text-xs">
+              <span className="px-3 bg-white text-gray-400 uppercase tracking-wider">or sign in with password</span>
+            </div>
+          </div>
+
+          <form onSubmit={handlePasswordLogin} className="space-y-4">
+            <div>
+              <label htmlFor="email" className="block text-sm font-medium text-gray-700 mb-1">Email</label>
+              <input
+                id="email"
+                type="email"
+                autoComplete="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-dark focus:border-transparent"
+                placeholder="you@standifercapital.com"
+              />
+            </div>
+            <div>
+              <label htmlFor="password" className="block text-sm font-medium text-gray-700 mb-1">Password</label>
+              <input
+                id="password"
+                type="password"
+                autoComplete="current-password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-dark focus:border-transparent"
+                placeholder="Enter password"
+              />
+            </div>
             <button
-              onClick={() => setShowPasswordLogin(true)}
-              className="mt-4 w-full text-center text-xs text-gray-300 hover:text-gray-400 transition-colors"
+              type="submit"
+              disabled={loading || !email || !password}
+              className="w-full flex justify-center py-3 px-4 rounded-lg shadow-sm bg-brand-dark text-sm font-medium text-white hover:bg-brand-dark/90 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-brand-dark transition-colors disabled:opacity-50"
             >
-              Use password
+              {loading ? 'Signing in…' : 'Sign In'}
             </button>
-          ) : (
-            <>
-              <div className="relative my-6">
-                <div className="absolute inset-0 flex items-center">
-                  <div className="w-full border-t border-gray-200" />
-                </div>
-                <div className="relative flex justify-center text-xs">
-                  <span className="px-3 bg-white text-gray-400 uppercase tracking-wider">password login</span>
-                </div>
-              </div>
-              <form onSubmit={handlePasswordLogin} className="space-y-4">
-                <div>
-                  <label htmlFor="email" className="block text-sm font-medium text-gray-700 mb-1">Email</label>
-                  <input
-                    id="email"
-                    type="email"
-                    autoComplete="email"
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-dark focus:border-transparent"
-                    placeholder="you@standifercapital.com"
-                  />
-                </div>
-                <div>
-                  <label htmlFor="password" className="block text-sm font-medium text-gray-700 mb-1">Password</label>
-                  <input
-                    id="password"
-                    type="password"
-                    autoComplete="current-password"
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-dark focus:border-transparent"
-                    placeholder="Enter password"
-                  />
-                </div>
+          </form>
+
+          {/* Quick test account buttons */}
+          <div className="relative my-6">
+            <div className="absolute inset-0 flex items-center">
+              <div className="w-full border-t border-gray-200" />
+            </div>
+            <div className="relative flex justify-center text-xs">
+              <span className="px-3 bg-white text-gray-400 uppercase tracking-wider">test accounts</span>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            {(['admin', 'user'] as const).map((role) => {
+              const account = TEST_ACCOUNTS[role];
+              const Icon = account.icon;
+              const isLoading = testLoading === role;
+              return (
                 <button
-                  type="submit"
-                  disabled={loading || !email || !password}
-                  className="w-full flex justify-center py-3 px-4 rounded-lg shadow-sm bg-brand-dark text-sm font-medium text-white hover:bg-brand-dark/90 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-brand-dark transition-colors disabled:opacity-50"
+                  key={role}
+                  onClick={() => handleTestLogin(role)}
+                  disabled={!!testLoading}
+                  className="flex items-center justify-center gap-2 py-2.5 px-3 rounded-lg border border-gray-200 text-sm font-medium text-gray-600 hover:bg-gray-50 hover:border-gray-300 transition-colors disabled:opacity-50"
                 >
-                  {loading ? 'Signing in…' : 'Sign In'}
+                  {isLoading ? (
+                    <div className="h-4 w-4 border-2 border-gray-300 border-t-gray-600 rounded-full animate-spin" />
+                  ) : (
+                    <Icon className="h-4 w-4" />
+                  )}
+                  {account.label}
                 </button>
-              </form>
-            </>
-          )}
+              );
+            })}
+          </div>
         </div>
       </motion.div>
     </div>
