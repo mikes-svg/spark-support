@@ -44,6 +44,7 @@ export function TicketDetailPage() {
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [uploading, setUploading] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [adminProfiles, setAdminProfiles] = useState<Profile[]>([]);
 
   useEffect(() => {
     if (!id || !db) { setLoading(false); return; }
@@ -66,6 +67,11 @@ export function TicketDetailPage() {
       }
     }
     fetchTicket();
+
+    // Load admin profiles for assignee dropdown
+    getDocs(query(collection(db!, 'profiles'), where('role', '==', 'admin')))
+      .then((snap) => setAdminProfiles(snap.docs.map((d) => ({ id: d.id, ...d.data() } as Profile))))
+      .catch(() => {});
 
     // Load attachments
     if (storage) {
@@ -164,6 +170,32 @@ export function TicketDetailPage() {
     if (!ticket || !db) return;
     setTicket({ ...ticket, priority: newPriority });
     await updateDoc(doc(db, 'tickets', ticket.id), { priority: newPriority, updatedAt: serverTimestamp() });
+  };
+
+  const handleAssigneeChange = async (newAssigneeId: string) => {
+    if (!ticket || !db) return;
+    const oldAssigneeId = ticket.assigneeId;
+    const assigneeId = newAssigneeId || null;
+    const updatedParticipants = [...new Set([
+      ...((ticket as any).participants || [ticket.submitterId]).filter((p: string) => p !== oldAssigneeId),
+      ...(assigneeId ? [assigneeId] : []),
+    ])];
+    setTicket({ ...ticket, assigneeId } as Ticket);
+    await updateDoc(doc(db, 'tickets', ticket.id), { assigneeId, participants: updatedParticipants, updatedAt: serverTimestamp() });
+
+    // Email the new assignee
+    if (assigneeId && assigneeId !== oldAssigneeId) {
+      const assigneeDoc = await getDoc(doc(db, 'profiles', assigneeId));
+      const assigneeData = assigneeDoc.data();
+      if (assigneeData?.email) {
+        await sendEmail(assigneeData.email, `${ticket.id} has been assigned to you`,
+          `<p>Ticket <strong>${ticket.id}</strong> — ${ticket.title} — has been assigned to you.</p><p><a href="${window.location.origin}/tickets/${ticket.id}">View ticket →</a></p>`);
+      }
+      // Update local profiles if we don't have this person yet
+      if (!profiles[assigneeId] && assigneeData) {
+        setProfiles((prev) => ({ ...prev, [assigneeId]: { id: assigneeId, name: assigneeData.name, photoURL: assigneeData.photoURL } }));
+      }
+    }
   };
 
   const handleDeleteTicket = async () => {
@@ -323,7 +355,12 @@ export function TicketDetailPage() {
               </div>
               <div>
                 <span className="block text-xs font-medium text-gray-500 uppercase mb-1">Assignee</span>
-                {assignee ? (
+                {isAdmin ? (
+                  <select value={ticket.assigneeId || ''} onChange={(e) => handleAssigneeChange(e.target.value)} className="block w-full pl-3 pr-8 py-1.5 text-sm border-gray-300 focus:outline-none focus:ring-brand-dark focus:border-brand-dark rounded-md border bg-gray-50">
+                    <option value="">Unassigned</option>
+                    {adminProfiles.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+                  </select>
+                ) : assignee ? (
                   <div className="flex items-center gap-2 mt-1">
                     <img src={assignee.photoURL} alt="" className="w-6 h-6 rounded-full" />
                     <span className="text-sm text-gray-900">{assignee.name}</span>
