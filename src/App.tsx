@@ -13,13 +13,16 @@ import { SubmitRequestPage } from './pages/SubmitRequestPage';
 import { TicketDetailPage } from './pages/TicketDetailPage';
 import { AdminDashboardPage } from './pages/AdminDashboardPage';
 import { AdminSettingsPage } from './pages/AdminSettingsPage';
+import { TeamPage } from './pages/TeamPage';
 
 function ProtectedRoute({
   children,
   requireAdmin = false,
+  requireSuperadmin = false,
 }: {
   children: React.ReactNode;
   requireAdmin?: boolean;
+  requireSuperadmin?: boolean;
 }) {
   const { user, loading } = useAuth();
 
@@ -34,7 +37,10 @@ function ProtectedRoute({
   if (!user) {
     return <Navigate to="/login" replace />;
   }
-  if (requireAdmin && user.role !== 'admin') {
+  if (requireSuperadmin && user.role !== 'superadmin') {
+    return <Navigate to="/" replace />;
+  }
+  if (requireAdmin && user.role !== 'admin' && user.role !== 'superadmin') {
     return <Navigate to="/" replace />;
   }
   return <>{children}</>;
@@ -68,9 +74,17 @@ export function App() {
               }
             />
             <Route
-              path="admin/settings"
+              path="admin/team"
               element={
                 <ProtectedRoute requireAdmin>
+                  <TeamPage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="admin/settings"
+              element={
+                <ProtectedRoute requireSuperadmin>
                   <AdminSettingsPage />
                 </ProtectedRoute>
               }

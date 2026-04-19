@@ -19,6 +19,7 @@ interface SidebarProps {
 function SidebarContent({ onClose }: { onClose: () => void }) {
   const { user, logout } = useAuth();
   const isAdmin = user?.role === 'admin' || user?.role === 'superadmin';
+  const isSuperadmin = user?.role === 'superadmin';
 
   const navItems = [
     { to: '/', icon: LayoutDashboard, label: 'My Tickets', exact: true },
@@ -27,7 +28,8 @@ function SidebarContent({ onClose }: { onClose: () => void }) {
 
   const adminItems = [
     { to: '/admin', icon: TicketIcon, label: 'All Tickets', exact: true },
-    { to: '/admin/settings', icon: Settings, label: 'Settings' },
+    { to: '/admin/team', icon: Users, label: 'Team' },
+    ...(isSuperadmin ? [{ to: '/admin/settings', icon: Settings, label: 'Settings' }] : []),
   ];
 
   return (

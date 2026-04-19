@@ -13,6 +13,7 @@ export function Layout() {
     if (pathname === '/submit') return 'Submit Request';
     if (pathname.startsWith('/tickets/')) return 'Ticket Details';
     if (pathname === '/admin') return 'All Tickets';
+    if (pathname === '/admin/team') return 'Team';
     if (pathname === '/admin/settings') return 'Settings';
     return 'Portal';
   };

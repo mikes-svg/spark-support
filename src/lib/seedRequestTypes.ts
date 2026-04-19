@@ -8,16 +8,21 @@ export async function getOrSeedRequestTypes() {
   const snap = await getDocs(query(collection(db, 'requestTypes'), orderBy('name')));
   if (snap.size > 0) return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
 
-  // Seed defaults
+  // Seed defaults (only superadmins have write permission; fails silently otherwise)
   const results = [];
   for (const name of DEFAULT_TYPES) {
-    const docRef = await addDoc(collection(db, 'requestTypes'), {
-      name,
-      defaultAssigneeId: null,
-      active: true,
-      createdAt: serverTimestamp(),
-    });
-    results.push({ id: docRef.id, name, defaultAssigneeId: null, active: true });
+    try {
+      const docRef = await addDoc(collection(db, 'requestTypes'), {
+        name,
+        defaultAssigneeIds: [],
+        active: true,
+        createdAt: serverTimestamp(),
+      });
+      results.push({ id: docRef.id, name, defaultAssigneeIds: [], active: true });
+    } catch {
+      // Permission denied — skip seeding
+      break;
+    }
   }
   return results;
 }
