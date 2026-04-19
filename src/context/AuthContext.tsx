@@ -40,10 +40,31 @@ function roleForEmail(email: string, existingRole?: string): Role {
   return (existingRole as Role) || 'user';
 }
 
+/**
+ * Find any email-slug duplicate profiles (pre-reg docs from admin invites) and
+ * delete them, since the canonical profile is keyed by Firebase UID.
+ */
+async function cleanupDuplicateProfiles(uid: string, lowerEmail: string) {
+  if (!lowerEmail || !db) return;
+  const all = await getDocs(collection(db, 'profiles'));
+  const dupes = all.docs.filter((d) => {
+    if (d.id === uid) return false;
+    return (d.data().email || '').toLowerCase() === lowerEmail;
+  });
+  for (const d of dupes) {
+    await deleteDoc(doc(db!, 'profiles', d.id));
+  }
+}
+
 async function getOrCreateProfile(firebaseUser: FirebaseUser): Promise<Profile> {
   const profileRef = doc(db!, 'profiles', firebaseUser.uid);
   const profileSnap = await getDoc(profileRef);
   const email = (firebaseUser.email || '').toLowerCase();
+
+  // Always check for and clean up duplicate email-keyed profiles, even if a UID
+  // profile already exists. Handles the case where an admin re-invites a user
+  // who has already signed in with Google.
+  await cleanupDuplicateProfiles(firebaseUser.uid, email);
 
   if (profileSnap.exists()) {
     const data = profileSnap.data();
@@ -69,9 +90,7 @@ async function getOrCreateProfile(firebaseUser: FirebaseUser): Promise<Profile> 
     return { id: profileSnap.id, ...data } as Profile;
   }
 
-  // Check if admin pre-registered this user by email. Fetch ALL profiles so we can
-  // match case-insensitively against legacy mixed-case data. (Firestore queries are
-  // case-sensitive; we lowercase on write but need to handle old records too.)
+  // First-time sign-in: check for a pre-registered profile to inherit role from
   const allProfilesSnap = await getDocs(collection(db!, 'profiles'));
   const preRegDocs = allProfilesSnap.docs.filter((d) => {
     const docEmail = (d.data().email || '').toLowerCase();
@@ -79,11 +98,9 @@ async function getOrCreateProfile(firebaseUser: FirebaseUser): Promise<Profile> 
   });
 
   if (preRegDocs.length > 0) {
-    // Use the first match for migration; delete any other duplicates
     const preRegDoc = preRegDocs[0];
     const data = preRegDoc.data();
     const role = roleForEmail(email, data.role);
-    // Prefer Google's name and photo over the pre-registered values
     const migratedProfile = {
       ...data,
       name: firebaseUser.displayName || data.name,
@@ -93,7 +110,6 @@ async function getOrCreateProfile(firebaseUser: FirebaseUser): Promise<Profile> 
       createdAt: serverTimestamp(),
     };
     await setDoc(profileRef, migratedProfile);
-    // Remove all pre-reg / duplicate email-keyed docs
     for (const d of preRegDocs) {
       await deleteDoc(doc(db!, 'profiles', d.id));
     }
