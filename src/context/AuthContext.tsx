@@ -43,32 +43,59 @@ function roleForEmail(email: string, existingRole?: string): Role {
 async function getOrCreateProfile(firebaseUser: FirebaseUser): Promise<Profile> {
   const profileRef = doc(db!, 'profiles', firebaseUser.uid);
   const profileSnap = await getDoc(profileRef);
-  const email = firebaseUser.email || '';
+  const email = (firebaseUser.email || '').toLowerCase();
 
   if (profileSnap.exists()) {
     const data = profileSnap.data();
+    const updates: Record<string, unknown> = {};
+
     // Promote to superadmin/admin if email is in env whitelist but stored role is lower
     const envRole = isSuperadminEmail(email) ? 'superadmin' : isAdminEmail(email) ? 'admin' : null;
     if (envRole && data.role !== envRole && (envRole === 'superadmin' || data.role === 'user' || !data.role)) {
-      await setDoc(profileRef, { role: envRole }, { merge: true });
-      return { id: profileSnap.id, ...data, role: envRole } as Profile;
+      updates.role = envRole;
+    }
+
+    // Sync Google photo: replace auto-generated ui-avatars with real Google photo
+    const hasGooglePhoto = !!firebaseUser.photoURL;
+    const hasPlaceholder = !data.photoURL || data.photoURL.includes('ui-avatars.com');
+    if (hasGooglePhoto && hasPlaceholder) {
+      updates.photoURL = firebaseUser.photoURL;
+    }
+
+    if (Object.keys(updates).length > 0) {
+      await setDoc(profileRef, updates, { merge: true });
+      return { id: profileSnap.id, ...data, ...updates } as Profile;
     }
     return { id: profileSnap.id, ...data } as Profile;
   }
 
-  // Check if admin pre-registered this user by email (profile keyed by email slug)
-  const preRegQuery = query(collection(db!, 'profiles'), where('email', '==', email));
-  const preRegSnap = await getDocs(preRegQuery);
-  if (!preRegSnap.empty) {
-    const preRegDoc = preRegSnap.docs[0];
+  // Check if admin pre-registered this user by email. Fetch ALL profiles so we can
+  // match case-insensitively against legacy mixed-case data. (Firestore queries are
+  // case-sensitive; we lowercase on write but need to handle old records too.)
+  const allProfilesSnap = await getDocs(collection(db!, 'profiles'));
+  const preRegDocs = allProfilesSnap.docs.filter((d) => {
+    const docEmail = (d.data().email || '').toLowerCase();
+    return docEmail === email && d.id !== firebaseUser.uid;
+  });
+
+  if (preRegDocs.length > 0) {
+    // Use the first match for migration; delete any other duplicates
+    const preRegDoc = preRegDocs[0];
     const data = preRegDoc.data();
-    // Migrate pre-registered profile to real UID
     const role = roleForEmail(email, data.role);
-    const migratedProfile = { ...data, role, createdAt: serverTimestamp() };
+    // Prefer Google's name and photo over the pre-registered values
+    const migratedProfile = {
+      ...data,
+      name: firebaseUser.displayName || data.name,
+      photoURL: firebaseUser.photoURL || data.photoURL,
+      email,
+      role,
+      createdAt: serverTimestamp(),
+    };
     await setDoc(profileRef, migratedProfile);
-    // Remove the old email-keyed doc
-    if (preRegDoc.id !== firebaseUser.uid) {
-      await deleteDoc(doc(db!, 'profiles', preRegDoc.id));
+    // Remove all pre-reg / duplicate email-keyed docs
+    for (const d of preRegDocs) {
+      await deleteDoc(doc(db!, 'profiles', d.id));
     }
     return { id: firebaseUser.uid, ...migratedProfile } as unknown as Profile;
   }

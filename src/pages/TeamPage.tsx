@@ -134,8 +134,9 @@ export function TeamPage() {
       }
       const displayName = inviteForm.name.trim();
       const photoURL = `https://ui-avatars.com/api/?name=${encodeURIComponent(displayName)}&background=1B4332&color=D4A843`;
-      const profileData = { name: displayName, email: inviteForm.email.trim(), photoURL, role: inviteForm.role, createdAt: serverTimestamp() };
-      const profileId = inviteForm.email.trim().toLowerCase().replace(/[^a-z0-9]/g, '_');
+      const emailLower = inviteForm.email.trim().toLowerCase();
+      const profileData = { name: displayName, email: emailLower, photoURL, role: inviteForm.role, createdAt: serverTimestamp() };
+      const profileId = emailLower.replace(/[^a-z0-9]/g, '_');
       if (db) await setDoc(doc(db, 'profiles', profileId), profileData);
       const newProfile: Profile = { id: profileId, ...profileData, role: inviteForm.role };
       setProfiles((prev) => [...prev, newProfile].sort((a, b) => a.name.localeCompare(b.name)));
