@@ -6,8 +6,15 @@ import { db, storage } from '../lib/firebase';
 import { useAuth } from '../context/AuthContext';
 import { UploadCloud, X } from 'lucide-react';
 import { getOrSeedRequestTypes } from '../lib/seedRequestTypes';
+import { getDefaultAssigneeIds } from '../types';
 
-interface RequestType { id: string; name: string; defaultAssigneeId: string | null; active: boolean; }
+interface RequestType {
+  id: string;
+  name: string;
+  defaultAssigneeIds?: string[];
+  defaultAssigneeId?: string | null;
+  active: boolean;
+}
 
 export function SubmitRequestPage() {
   const navigate = useNavigate();
@@ -49,7 +56,7 @@ export function SubmitRequestPage() {
     const description = data.get('description') as string;
 
     const selectedType = requestTypes.find((rt) => rt.name === type);
-    const assigneeId = selectedType?.defaultAssigneeId || null;
+    const assigneeIds = selectedType ? getDefaultAssigneeIds(selectedType) : [];
 
     try {
       const counterRef = doc(db, 'meta', 'ticketCounter');
@@ -60,11 +67,11 @@ export function SubmitRequestPage() {
         return `TKT-${String(count).padStart(4, '0')}`;
       });
 
-      const participants = [user.id, assigneeId].filter(Boolean) as string[];
+      const participants = [...new Set([user.id, ...assigneeIds])];
 
       await setDoc(doc(db, 'tickets', ticketId), {
         type, title, description, status: 'Open', priority,
-        assigneeId, submitterId: user.id, participants,
+        assigneeIds, submitterId: user.id, participants,
         createdAt: serverTimestamp(), updatedAt: serverTimestamp(),
       });
 
@@ -84,8 +91,8 @@ export function SubmitRequestPage() {
         },
       });
 
-      // Email assignee
-      if (assigneeId) {
+      // Email each assignee
+      for (const assigneeId of assigneeIds) {
         const assigneeDoc = await getDoc(doc(db, 'profiles', assigneeId));
         const assigneeEmail = assigneeDoc.data()?.email;
         if (assigneeEmail) {

@@ -7,13 +7,17 @@ import { StatusBadge, PriorityBadge } from '../components/Badges';
 import { useAuth } from '../context/AuthContext';
 import { Send, ArrowLeft, Clock, Trash2, UploadCloud, FileText } from 'lucide-react';
 import { ConfirmModal } from '../components/ConfirmModal';
+import { AssigneeSelector } from '../components/AssigneeSelector';
+import { getAssigneeIds } from '../types';
 import type { TicketStatus, TicketPriority } from '../types';
 
-interface Profile { id: string; name: string; photoURL: string; }
+interface Profile { id: string; name: string; photoURL: string; email?: string; }
 interface Ticket {
   id: string; type: string; title: string; description: string;
   status: TicketStatus; priority: TicketPriority;
-  assigneeId: string | null; submitterId: string;
+  assigneeIds?: string[]; assigneeId?: string | null;
+  submitterId: string;
+  participants?: string[];
   createdAt: { toDate: () => Date } | string;
   updatedAt: { toDate: () => Date } | string;
 }
@@ -55,7 +59,8 @@ export function TicketDetailPage() {
         if (!ticketDoc.exists()) { setLoading(false); return; }
         const ticketData = { id: ticketDoc.id, ...ticketDoc.data() } as Ticket;
         setTicket(ticketData);
-        const profileIds = [ticketData.submitterId, ticketData.assigneeId].filter(Boolean) as string[];
+        const assigneeIds = getAssigneeIds(ticketData);
+        const profileIds = [ticketData.submitterId, ...assigneeIds].filter(Boolean) as string[];
         const profileDocs = await Promise.all(profileIds.map((pid) => getDoc(doc(db!, 'profiles', pid))));
         const profileMap: Record<string, Profile> = {};
         profileDocs.forEach((p) => { if (p.exists()) profileMap[p.id] = { id: p.id, ...p.data() } as Profile; });
@@ -120,15 +125,19 @@ export function TicketDetailPage() {
     setNewComment('');
     await addDoc(collection(db, 'comments'), { ticketId: ticket.id, userId: user.id, body, createdAt: serverTimestamp() });
 
-    // Email the other party
-    const isSubmitter = user.id === ticket.submitterId;
-    const recipientId = isSubmitter ? ticket.assigneeId : ticket.submitterId;
-    if (recipientId) {
+    // Email other parties (all participants except the commenter)
+    const currentAssigneeIds = getAssigneeIds(ticket);
+    const allParticipants = [...new Set([ticket.submitterId, ...currentAssigneeIds])];
+    const recipientIds = allParticipants.filter((pid) => pid !== user.id);
+    for (const recipientId of recipientIds) {
       const recipientDoc = await getDoc(doc(db, 'profiles', recipientId));
       const recipientEmail = recipientDoc.data()?.email;
       if (recipientEmail) {
-        await sendEmail(recipientEmail, `New comment on ${ticket.id}: ${ticket.title}`,
-          `<p><strong>${user.name}</strong> commented on <strong>${ticket.id}</strong>:</p><p>${body}</p><p><a href="${window.location.origin}/tickets/${ticket.id}">View ticket →</a></p><hr style="margin:16px 0;border:none;border-top:1px solid #e5e7eb"/><p style="color:#9ca3af;font-size:12px">Please do not reply to this email. To respond, <a href="${window.location.origin}/tickets/${ticket.id}">click here to view the ticket</a> and add your comment there.</p>`);
+        await sendEmail(
+          recipientEmail,
+          `New comment on ${ticket.id}: ${ticket.title}`,
+          `<p><strong>${user.name}</strong> commented on <strong>${ticket.id}</strong>:</p><p>${body}</p><p><a href="${window.location.origin}/tickets/${ticket.id}">View ticket →</a></p><hr style="margin:16px 0;border:none;border-top:1px solid #e5e7eb"/><p style="color:#9ca3af;font-size:12px">Please do not reply to this email. To respond, <a href="${window.location.origin}/tickets/${ticket.id}">click here to view the ticket</a> and add your comment there.</p>`
+        );
       }
     }
   };
@@ -157,7 +166,6 @@ export function TicketDetailPage() {
     setTicket({ ...ticket, status: newStatus });
     await updateDoc(doc(db, 'tickets', ticket.id), { status: newStatus, updatedAt: serverTimestamp() });
 
-    // Email submitter about status change
     const submitterDoc = await getDoc(doc(db, 'profiles', ticket.submitterId));
     const submitterEmail = submitterDoc.data()?.email;
     if (submitterEmail) {
@@ -172,28 +180,30 @@ export function TicketDetailPage() {
     await updateDoc(doc(db, 'tickets', ticket.id), { priority: newPriority, updatedAt: serverTimestamp() });
   };
 
-  const handleAssigneeChange = async (newAssigneeId: string) => {
+  const handleAssigneesChange = async (newAssigneeIds: string[]) => {
     if (!ticket || !db) return;
-    const oldAssigneeId = ticket.assigneeId;
-    const assigneeId = newAssigneeId || null;
-    const updatedParticipants = [...new Set([
-      ...((ticket as any).participants || [ticket.submitterId]).filter((p: string) => p !== oldAssigneeId),
-      ...(assigneeId ? [assigneeId] : []),
-    ])];
-    setTicket({ ...ticket, assigneeId } as Ticket);
-    await updateDoc(doc(db, 'tickets', ticket.id), { assigneeId, participants: updatedParticipants, updatedAt: serverTimestamp() });
+    const oldAssigneeIds = getAssigneeIds(ticket);
+    const added = newAssigneeIds.filter((id) => !oldAssigneeIds.includes(id));
+    const participants = [...new Set([ticket.submitterId, ...newAssigneeIds])];
 
-    // Email the new assignee
-    if (assigneeId && assigneeId !== oldAssigneeId) {
-      const assigneeDoc = await getDoc(doc(db, 'profiles', assigneeId));
+    setTicket({ ...ticket, assigneeIds: newAssigneeIds, assigneeId: null, participants } as Ticket);
+    await updateDoc(doc(db, 'tickets', ticket.id), {
+      assigneeIds: newAssigneeIds,
+      assigneeId: null,
+      participants,
+      updatedAt: serverTimestamp(),
+    });
+
+    // Email every newly added assignee
+    for (const addedId of added) {
+      const assigneeDoc = await getDoc(doc(db, 'profiles', addedId));
       const assigneeData = assigneeDoc.data();
       if (assigneeData?.email) {
         await sendEmail(assigneeData.email, `${ticket.id} has been assigned to you`,
           `<p>Ticket <strong>${ticket.id}</strong> — ${ticket.title} — has been assigned to you.</p><p><a href="${window.location.origin}/tickets/${ticket.id}">View ticket →</a></p>`);
       }
-      // Update local profiles if we don't have this person yet
-      if (!profiles[assigneeId] && assigneeData) {
-        setProfiles((prev) => ({ ...prev, [assigneeId]: { id: assigneeId, name: assigneeData.name, photoURL: assigneeData.photoURL } }));
+      if (!profiles[addedId] && assigneeData) {
+        setProfiles((prev) => ({ ...prev, [addedId]: { id: addedId, name: assigneeData.name, photoURL: assigneeData.photoURL, email: assigneeData.email } }));
       }
     }
   };
@@ -219,7 +229,8 @@ export function TicketDetailPage() {
   if (loading) return <div className="flex items-center justify-center py-20"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-brand-dark" /></div>;
   if (!ticket) return <div className="text-center py-12 text-gray-500">Ticket not found.</div>;
 
-  const assignee = ticket.assigneeId ? profiles[ticket.assigneeId] : null;
+  const assigneeIds = getAssigneeIds(ticket);
+  const assignees = assigneeIds.map((id) => profiles[id]).filter(Boolean);
   const submitter = profiles[ticket.submitterId];
   const isAdmin = user?.role === 'admin';
 
@@ -253,7 +264,6 @@ export function TicketDetailPage() {
             </div>
           </div>
 
-          {/* Attachments */}
           <div className="bg-white shadow-sm rounded-xl border border-gray-200 overflow-hidden">
             <div className="px-6 py-4 border-b border-gray-200 bg-gray-50/50 flex items-center justify-between">
               <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-widest">Attachments</h3>
@@ -354,16 +364,17 @@ export function TicketDetailPage() {
                 </div>
               </div>
               <div>
-                <span className="block text-xs font-medium text-gray-500 uppercase mb-1">Assignee</span>
+                <span className="block text-xs font-medium text-gray-500 uppercase mb-1">Assignees</span>
                 {isAdmin ? (
-                  <select value={ticket.assigneeId || ''} onChange={(e) => handleAssigneeChange(e.target.value)} className="block w-full pl-3 pr-8 py-1.5 text-sm border-gray-300 focus:outline-none focus:ring-brand-dark focus:border-brand-dark rounded-md border bg-gray-50">
-                    <option value="">Unassigned</option>
-                    {adminProfiles.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-                  </select>
-                ) : assignee ? (
-                  <div className="flex items-center gap-2 mt-1">
-                    <img src={assignee.photoURL} alt="" className="w-6 h-6 rounded-full" />
-                    <span className="text-sm text-gray-900">{assignee.name}</span>
+                  <AssigneeSelector value={assigneeIds} onChange={handleAssigneesChange} admins={adminProfiles} />
+                ) : assignees.length > 0 ? (
+                  <div className="flex flex-wrap gap-2 mt-1">
+                    {assignees.map((a) => (
+                      <div key={a.id} className="flex items-center gap-1.5 bg-gray-100 rounded-full pl-1 pr-2 py-0.5">
+                        <img src={a.photoURL} alt="" className="w-5 h-5 rounded-full" />
+                        <span className="text-xs text-gray-900">{a.name}</span>
+                      </div>
+                    ))}
                   </div>
                 ) : <span className="text-sm text-gray-500 italic">Unassigned</span>}
               </div>
@@ -385,14 +396,7 @@ export function TicketDetailPage() {
                 {ticket.status !== 'Open' && (
                   <div className="relative pl-6">
                     <div className="absolute -left-[9px] top-1 w-4 h-4 rounded-full bg-amber-500 border-4 border-white" />
-                    <p className="text-sm font-medium text-gray-900">Status changed to In Progress</p>
-                    <p className="text-xs text-gray-500 flex items-center mt-1"><Clock className="w-3 h-3 mr-1" />{toDate(ticket.updatedAt).toLocaleString()}</p>
-                  </div>
-                )}
-                {ticket.status === 'Resolved' && (
-                  <div className="relative pl-6">
-                    <div className="absolute -left-[9px] top-1 w-4 h-4 rounded-full bg-emerald-500 border-4 border-white" />
-                    <p className="text-sm font-medium text-gray-900">Status changed to {ticket.status}</p>
+                    <p className="text-sm font-medium text-gray-900">Status: {ticket.status}</p>
                     <p className="text-xs text-gray-500 flex items-center mt-1"><Clock className="w-3 h-3 mr-1" />{toDate(ticket.updatedAt).toLocaleString()}</p>
                   </div>
                 )}

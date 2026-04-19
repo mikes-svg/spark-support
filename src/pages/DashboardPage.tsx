@@ -5,6 +5,7 @@ import { db } from '../lib/firebase';
 import { useAuth } from '../context/AuthContext';
 import { StatusBadge } from '../components/Badges';
 import { Plus } from 'lucide-react';
+import { getAssigneeIds } from '../types';
 import type { TicketStatus, TicketPriority } from '../types';
 
 interface Ticket {
@@ -13,7 +14,8 @@ interface Ticket {
   title: string;
   status: TicketStatus;
   priority: TicketPriority;
-  assigneeId: string | null;
+  assigneeIds?: string[];
+  assigneeId?: string | null;
   submitterId: string;
   createdAt: { toDate: () => Date } | string;
   participants: string[];
@@ -37,7 +39,8 @@ export function DashboardPage() {
         const snap = await getDocs(q);
         const ticketList = snap.docs.map((d) => ({ id: d.id, ...d.data() } as Ticket));
         setTickets(ticketList);
-        const profileIds = [...new Set([...ticketList.map((t) => t.submitterId), ...ticketList.map((t) => t.assigneeId).filter(Boolean)])] as string[];
+        const allAssignees = ticketList.flatMap((t) => getAssigneeIds(t));
+        const profileIds = [...new Set([...ticketList.map((t) => t.submitterId), ...allAssignees])] as string[];
         const profileDocs = await Promise.all(profileIds.map((id) => getDoc(doc(db!, 'profiles', id))));
         const profileMap: Record<string, Profile> = {};
         profileDocs.forEach((p) => { if (p.exists()) profileMap[p.id] = { id: p.id, ...p.data() } as Profile; });
@@ -104,7 +107,7 @@ export function DashboardPage() {
                 <tr><td colSpan={6} className="px-6 py-12 text-center text-sm text-gray-400">Loading…</td></tr>
               ) : tickets.length > 0 ? (
                 tickets.map((ticket) => {
-                  const assignee = ticket.assigneeId ? profiles[ticket.assigneeId] : null;
+                  const assignees = getAssigneeIds(ticket).map((id) => profiles[id]).filter(Boolean);
                   return (
                     <tr key={ticket.id} onClick={() => navigate(`/tickets/${ticket.id}`)} className="hover:bg-gray-50 cursor-pointer transition-colors">
                       <td className="px-6 py-4 whitespace-nowrap text-sm font-mono text-gray-500">{ticket.id}</td>
@@ -112,10 +115,16 @@ export function DashboardPage() {
                       <td className="px-6 py-4 text-sm font-medium text-gray-900 max-w-xs truncate">{ticket.title}</td>
                       <td className="px-6 py-4 whitespace-nowrap"><StatusBadge status={ticket.status} /></td>
                       <td className="px-6 py-4 whitespace-nowrap">
-                        {assignee ? (
-                          <div className="flex items-center">
-                            <img className="h-6 w-6 rounded-full mr-2" src={assignee.photoURL} alt="" />
-                            <span className="text-sm text-gray-900">{assignee.name.split(' ')[0]}</span>
+                        {assignees.length > 0 ? (
+                          <div className="flex items-center -space-x-2">
+                            {assignees.slice(0, 3).map((a) => (
+                              <img key={a.id} className="h-6 w-6 rounded-full border-2 border-white" src={a.photoURL} alt={a.name} title={a.name} />
+                            ))}
+                            {assignees.length > 3 && (
+                              <span className="flex items-center justify-center h-6 w-6 rounded-full bg-gray-200 text-[10px] font-medium text-gray-600 border-2 border-white">
+                                +{assignees.length - 3}
+                              </span>
+                            )}
                           </div>
                         ) : <span className="text-sm text-gray-400 italic">Unassigned</span>}
                       </td>

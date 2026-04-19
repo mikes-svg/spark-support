@@ -3,10 +3,18 @@ import { collection, query, getDocs, doc, updateDoc, deleteDoc, addDoc, setDoc, 
 import { db } from '../lib/firebase';
 import { Plus, Trash2, Edit2, Check, X, UserPlus } from 'lucide-react';
 import { ConfirmModal } from '../components/ConfirmModal';
+import { AssigneeSelector } from '../components/AssigneeSelector';
 import { getOrSeedRequestTypes } from '../lib/seedRequestTypes';
+import { getDefaultAssigneeIds } from '../types';
 
 interface Profile { id: string; name: string; email: string; photoURL: string; role: 'admin' | 'user'; }
-interface RequestType { id: string; name: string; defaultAssigneeId: string | null; active: boolean; }
+interface RequestType {
+  id: string;
+  name: string;
+  defaultAssigneeIds?: string[];
+  defaultAssigneeId?: string | null; // legacy
+  active: boolean;
+}
 
 export function AdminSettingsPage() {
   const [profiles, setProfiles] = useState<Profile[]>([]);
@@ -81,11 +89,10 @@ export function AdminSettingsPage() {
     await updateDoc(doc(db, 'requestTypes', rt.id), { name: editTypeName.trim() });
   };
 
-  const updateDefaultAssignee = async (rt: RequestType, assigneeId: string) => {
-    const newAssigneeId = assigneeId || null;
-    setRequestTypes((prev) => prev.map((t) => t.id === rt.id ? { ...t, defaultAssigneeId: newAssigneeId } : t));
+  const updateDefaultAssignees = async (rt: RequestType, assigneeIds: string[]) => {
+    setRequestTypes((prev) => prev.map((t) => t.id === rt.id ? { ...t, defaultAssigneeIds: assigneeIds, defaultAssigneeId: null } : t));
     if (!db) return;
-    await updateDoc(doc(db, 'requestTypes', rt.id), { defaultAssigneeId: newAssigneeId });
+    await updateDoc(doc(db, 'requestTypes', rt.id), { defaultAssigneeIds: assigneeIds, defaultAssigneeId: null });
   };
 
   const deleteRequestType = async (id: string) => {
@@ -97,10 +104,10 @@ export function AdminSettingsPage() {
   const addRequestType = async () => {
     const name = window.prompt('Enter new request type name:');
     if (!name?.trim()) return;
-    const newType: RequestType = { id: `rt-${Date.now()}`, name: name.trim(), defaultAssigneeId: null, active: true };
+    const newType: RequestType = { id: `rt-${Date.now()}`, name: name.trim(), defaultAssigneeIds: [], active: true };
     setRequestTypes((prev) => [...prev, newType].sort((a, b) => a.name.localeCompare(b.name)));
     if (!db) return;
-    await addDoc(collection(db, 'requestTypes'), { name: name.trim(), defaultAssigneeId: null, active: true, createdAt: serverTimestamp() });
+    await addDoc(collection(db, 'requestTypes'), { name: name.trim(), defaultAssigneeIds: [], active: true, createdAt: serverTimestamp() });
   };
 
   const handleInviteUser = async () => {
@@ -221,7 +228,7 @@ export function AdminSettingsPage() {
         <div className="overflow-x-auto">
           <table className="min-w-full divide-y divide-gray-200">
             <thead className="bg-white">
-              <tr>{['Type Name', 'Default Assignee', 'Status', 'Actions'].map((h) => <th key={h} scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">{h}</th>)}</tr>
+              <tr>{['Type Name', 'Default Assignees', 'Status', 'Actions'].map((h) => <th key={h} scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">{h}</th>)}</tr>
             </thead>
             <tbody className="bg-white divide-y divide-gray-200">
               {requestTypes.map((type) => {
@@ -236,17 +243,12 @@ export function AdminSettingsPage() {
                         </div>
                       ) : type.name}
                     </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                      <select
-                        value={type.defaultAssigneeId || ''}
-                        onChange={(e) => updateDefaultAssignee(type, e.target.value)}
-                        className="border border-gray-300 rounded-md px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-brand-dark min-w-[140px]"
-                      >
-                        <option value="">Unassigned</option>
-                        {profiles.filter((p) => p.role === 'admin').map((p) => (
-                          <option key={p.id} value={p.id}>{p.name}</option>
-                        ))}
-                      </select>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 min-w-[200px]">
+                      <AssigneeSelector
+                        value={getDefaultAssigneeIds(type)}
+                        onChange={(ids) => updateDefaultAssignees(type, ids)}
+                        admins={profiles.filter((p) => p.role === 'admin')}
+                      />
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
                       <button onClick={() => toggleRequestTypeActive(type)} className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium cursor-pointer ${type.active ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'}`}>
