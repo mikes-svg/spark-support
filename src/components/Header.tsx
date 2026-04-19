@@ -33,10 +33,7 @@ export function Header({ title, onMenuClick }: HeaderProps) {
             <span className="absolute top-1.5 right-1.5 block h-2.5 w-2.5 rounded-full bg-brand-gold ring-2 ring-white" />
           </button>
           <div className="hidden md:flex items-center gap-3 border-l border-gray-200 pl-4">
-            <div className="text-right">
-              <p className="text-sm font-medium text-gray-900">{user?.name}</p>
-              <p className="text-xs text-gray-500">Standifer Capital</p>
-            </div>
+            <p className="text-sm font-medium text-gray-900">{user?.name}</p>
             <img
               className="h-8 w-8 rounded-full bg-gray-50"
               src={user?.photoURL}
