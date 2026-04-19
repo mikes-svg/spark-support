@@ -40,17 +40,37 @@ function roleForEmail(email: string, existingRole?: string): Role {
   return (existingRole as Role) || 'user';
 }
 
+const ROLE_RANK: Record<string, number> = { user: 0, admin: 1, superadmin: 2 };
+
 /**
  * Find any email-slug duplicate profiles (pre-reg docs from admin invites) and
- * delete them, since the canonical profile is keyed by Firebase UID.
+ * delete them. If any duplicate holds a higher role than the UID profile,
+ * promote the UID profile first so role assignments from late pre-registrations
+ * are still honored.
  */
 async function cleanupDuplicateProfiles(uid: string, lowerEmail: string) {
   if (!lowerEmail || !db) return;
   const all = await getDocs(collection(db, 'profiles'));
+  const uidDoc = all.docs.find((d) => d.id === uid);
   const dupes = all.docs.filter((d) => {
     if (d.id === uid) return false;
     return (d.data().email || '').toLowerCase() === lowerEmail;
   });
+
+  if (dupes.length === 0) return;
+
+  // Promote UID profile if any pre-reg set a higher role
+  if (uidDoc) {
+    const currentRank = ROLE_RANK[uidDoc.data().role] ?? 0;
+    const highestDupeRole = dupes
+      .map((d) => d.data().role)
+      .filter((r) => r && ROLE_RANK[r] !== undefined)
+      .sort((a, b) => ROLE_RANK[b] - ROLE_RANK[a])[0];
+    if (highestDupeRole && (ROLE_RANK[highestDupeRole] ?? 0) > currentRank) {
+      await setDoc(doc(db!, 'profiles', uid), { role: highestDupeRole }, { merge: true });
+    }
+  }
+
   for (const d of dupes) {
     await deleteDoc(doc(db!, 'profiles', d.id));
   }
