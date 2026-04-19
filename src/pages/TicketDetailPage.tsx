@@ -74,7 +74,7 @@ export function TicketDetailPage() {
     fetchTicket();
 
     // Load admin profiles for assignee dropdown
-    getDocs(query(collection(db!, 'profiles'), where('role', '==', 'admin')))
+    getDocs(query(collection(db!, 'profiles'), where('role', 'in', ['admin', 'superadmin'])))
       .then((snap) => setAdminProfiles(snap.docs.map((d) => ({ id: d.id, ...d.data() } as Profile))))
       .catch(() => {});
 
@@ -232,7 +232,8 @@ export function TicketDetailPage() {
   const assigneeIds = getAssigneeIds(ticket);
   const assignees = assigneeIds.map((id) => profiles[id]).filter(Boolean);
   const submitter = profiles[ticket.submitterId];
-  const isAdmin = user?.role === 'admin';
+  const isAdmin = user?.role === 'admin' || user?.role === 'superadmin';
+  const isSuperadmin = user?.role === 'superadmin';
 
   return (
     <div className="space-y-6">
@@ -248,7 +249,7 @@ export function TicketDetailPage() {
           </div>
           <h1 className="text-2xl font-serif font-bold text-gray-900">{ticket.title}</h1>
         </div>
-        {isAdmin && (
+        {isSuperadmin && (
           <button onClick={() => setShowDeleteConfirm(true)} className="p-2 text-red-400 hover:text-red-600 bg-white rounded-full shadow-sm border border-gray-200 transition-colors" title="Delete ticket">
             <Trash2 className="w-5 h-5" />
           </button>

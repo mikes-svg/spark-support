@@ -6,13 +6,14 @@ import {
 } from 'firebase/auth';
 import { doc, getDoc, setDoc, deleteDoc, collection, query, where, getDocs, serverTimestamp } from 'firebase/firestore';
 import { auth, db } from '../lib/firebase';
+import type { Role } from '../types';
 
 export interface Profile {
   id: string;
   name: string;
   email: string;
   photoURL: string;
-  role: 'admin' | 'user';
+  role: Role;
 }
 
 interface AuthContextType {
@@ -23,9 +24,20 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
+function isSuperadminEmail(email: string): boolean {
+  const superEmails = (import.meta.env.VITE_SUPERADMIN_EMAILS || '').split(',').map((e: string) => e.trim().toLowerCase()).filter(Boolean);
+  return superEmails.includes(email.toLowerCase());
+}
+
 function isAdminEmail(email: string): boolean {
-  const adminEmails = (import.meta.env.VITE_ADMIN_EMAILS || '').split(',').map((e: string) => e.trim().toLowerCase());
-  return adminEmails.length > 0 && adminEmails.includes(email.toLowerCase());
+  const adminEmails = (import.meta.env.VITE_ADMIN_EMAILS || '').split(',').map((e: string) => e.trim().toLowerCase()).filter(Boolean);
+  return adminEmails.includes(email.toLowerCase());
+}
+
+function roleForEmail(email: string, existingRole?: string): Role {
+  if (isSuperadminEmail(email)) return 'superadmin';
+  if (isAdminEmail(email)) return 'admin';
+  return (existingRole as Role) || 'user';
 }
 
 async function getOrCreateProfile(firebaseUser: FirebaseUser): Promise<Profile> {
@@ -35,10 +47,11 @@ async function getOrCreateProfile(firebaseUser: FirebaseUser): Promise<Profile> 
 
   if (profileSnap.exists()) {
     const data = profileSnap.data();
-    // Promote to admin if in VITE_ADMIN_EMAILS but stored as user
-    if (data.role !== 'admin' && isAdminEmail(email)) {
-      await setDoc(profileRef, { role: 'admin' }, { merge: true });
-      return { id: profileSnap.id, ...data, role: 'admin' } as Profile;
+    // Promote to superadmin/admin if email is in env whitelist but stored role is lower
+    const envRole = isSuperadminEmail(email) ? 'superadmin' : isAdminEmail(email) ? 'admin' : null;
+    if (envRole && data.role !== envRole && (envRole === 'superadmin' || data.role === 'user' || !data.role)) {
+      await setDoc(profileRef, { role: envRole }, { merge: true });
+      return { id: profileSnap.id, ...data, role: envRole } as Profile;
     }
     return { id: profileSnap.id, ...data } as Profile;
   }
@@ -50,7 +63,7 @@ async function getOrCreateProfile(firebaseUser: FirebaseUser): Promise<Profile> 
     const preRegDoc = preRegSnap.docs[0];
     const data = preRegDoc.data();
     // Migrate pre-registered profile to real UID
-    const role = isAdminEmail(email) ? 'admin' : (data.role || 'user');
+    const role = roleForEmail(email, data.role);
     const migratedProfile = { ...data, role, createdAt: serverTimestamp() };
     await setDoc(profileRef, migratedProfile);
     // Remove the old email-keyed doc
@@ -68,7 +81,7 @@ async function getOrCreateProfile(firebaseUser: FirebaseUser): Promise<Profile> 
     photoURL:
       firebaseUser.photoURL ||
       `https://ui-avatars.com/api/?name=${encodeURIComponent(displayName)}&background=1B4332&color=D4A843`,
-    role: isAdminEmail(email) ? ('admin' as const) : ('user' as const),
+    role: roleForEmail(email),
     createdAt: serverTimestamp(),
   };
 
@@ -89,7 +102,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         } catch (err) {
           console.warn('Firestore profile fetch failed, using Firebase user data:', err);
           const displayName = firebaseUser.displayName || firebaseUser.email?.split('@')[0] || 'User';
-          const isAdmin = isAdminEmail(firebaseUser.email || '');
           setUser({
             id: firebaseUser.uid,
             name: displayName,
@@ -97,7 +109,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             photoURL:
               firebaseUser.photoURL ||
               `https://ui-avatars.com/api/?name=${encodeURIComponent(displayName)}&background=1B4332&color=D4A843`,
-            role: isAdmin ? 'admin' : 'user',
+            role: roleForEmail(firebaseUser.email || ''),
           });
         }
       } else {

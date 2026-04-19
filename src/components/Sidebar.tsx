@@ -18,7 +18,7 @@ interface SidebarProps {
 
 function SidebarContent({ onClose }: { onClose: () => void }) {
   const { user, logout } = useAuth();
-  const isAdmin = user?.role === 'admin';
+  const isAdmin = user?.role === 'admin' || user?.role === 'superadmin';
 
   const navItems = [
     { to: '/', icon: LayoutDashboard, label: 'My Tickets', exact: true },

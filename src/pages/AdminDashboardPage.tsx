@@ -47,7 +47,7 @@ export function AdminDashboardPage() {
       const profileMap: Record<string, Profile> = {};
       profileDocs.forEach((p) => { if (p.exists()) profileMap[p.id] = { id: p.id, ...p.data() } as Profile; });
       setProfiles(profileMap);
-      const adminSnap = await getDocs(query(collection(db, 'profiles'), where('role', '==', 'admin')));
+      const adminSnap = await getDocs(query(collection(db, 'profiles'), where('role', 'in', ['admin', 'superadmin'])));
       setAdminProfiles(adminSnap.docs.map((d) => ({ id: d.id, ...d.data() } as Profile)));
     } catch (err) {
       console.error('Failed to fetch admin data:', err);

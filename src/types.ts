@@ -1,4 +1,14 @@
-export type Role = 'admin' | 'user';
+export type Role = 'superadmin' | 'admin' | 'user';
+
+/** True for admin or superadmin — i.e. anyone who can access admin pages. */
+export function isAdminRole(role?: string | null): boolean {
+  return role === 'admin' || role === 'superadmin';
+}
+
+/** True only for superadmin — the only role that can delete tickets. */
+export function isSuperadminRole(role?: string | null): boolean {
+  return role === 'superadmin';
+}
 export type TicketStatus = 'Open' | 'In Progress' | 'On Hold' | 'Resolved';
 export type TicketPriority = 'Low' | 'Medium' | 'High' | 'Urgent';
 
