@@ -42,38 +42,10 @@ function roleForEmail(email: string, existingRole?: string): Role {
 
 const ROLE_RANK: Record<string, number> = { user: 0, admin: 1, superadmin: 2 };
 
-/**
- * Find any email-slug duplicate profiles (pre-reg docs from admin invites) and
- * delete them. If any duplicate holds a higher role than the UID profile,
- * promote the UID profile first so role assignments from late pre-registrations
- * are still honored.
- */
-async function cleanupDuplicateProfiles(uid: string, lowerEmail: string) {
-  if (!lowerEmail || !db) return;
-  const all = await getDocs(collection(db, 'profiles'));
-  const uidDoc = all.docs.find((d) => d.id === uid);
-  const dupes = all.docs.filter((d) => {
-    if (d.id === uid) return false;
-    return (d.data().email || '').toLowerCase() === lowerEmail;
-  });
-
-  if (dupes.length === 0) return;
-
-  // Promote UID profile if any pre-reg set a higher role
-  if (uidDoc) {
-    const currentRank = ROLE_RANK[uidDoc.data().role] ?? 0;
-    const highestDupeRole = dupes
-      .map((d) => d.data().role)
-      .filter((r) => r && ROLE_RANK[r] !== undefined)
-      .sort((a, b) => ROLE_RANK[b] - ROLE_RANK[a])[0];
-    if (highestDupeRole && (ROLE_RANK[highestDupeRole] ?? 0) > currentRank) {
-      await setDoc(doc(db!, 'profiles', uid), { role: highestDupeRole }, { merge: true });
-    }
-  }
-
-  for (const d of dupes) {
-    await deleteDoc(doc(db!, 'profiles', d.id));
-  }
+function highestRole(roles: (string | undefined)[]): string | undefined {
+  const valid = roles.filter((r): r is string => !!r && ROLE_RANK[r] !== undefined);
+  if (valid.length === 0) return undefined;
+  return valid.sort((a, b) => ROLE_RANK[b] - ROLE_RANK[a])[0];
 }
 
 async function getOrCreateProfile(firebaseUser: FirebaseUser): Promise<Profile> {
@@ -81,75 +53,80 @@ async function getOrCreateProfile(firebaseUser: FirebaseUser): Promise<Profile> 
   const profileSnap = await getDoc(profileRef);
   const email = (firebaseUser.email || '').toLowerCase();
 
-  // Always check for and clean up duplicate email-keyed profiles, even if a UID
-  // profile already exists. Handles the case where an admin re-invites a user
-  // who has already signed in with Google.
-  await cleanupDuplicateProfiles(firebaseUser.uid, email);
+  // Find any pre-reg / duplicate docs by email (case-insensitive)
+  const allProfilesSnap = await getDocs(collection(db!, 'profiles'));
+  const dupes = allProfilesSnap.docs.filter((d) => {
+    if (d.id === firebaseUser.uid) return false;
+    return (d.data().email || '').toLowerCase() === email;
+  });
 
+  // ─── Existing UID profile path ───────────────────────────────────────
   if (profileSnap.exists()) {
     const data = profileSnap.data();
     const updates: Record<string, unknown> = {};
 
-    // Promote to superadmin/admin if email is in env whitelist but stored role is lower
+    // Apply highest role from env whitelist OR from any pre-reg dupe (whichever is higher)
     const envRole = isSuperadminEmail(email) ? 'superadmin' : isAdminEmail(email) ? 'admin' : null;
-    if (envRole && data.role !== envRole && (envRole === 'superadmin' || data.role === 'user' || !data.role)) {
-      updates.role = envRole;
+    const candidateRoles = [data.role, envRole, ...dupes.map((d) => d.data().role)];
+    const newRole = highestRole(candidateRoles);
+    if (newRole && newRole !== data.role && (ROLE_RANK[newRole] ?? 0) > (ROLE_RANK[data.role] ?? 0)) {
+      updates.role = newRole;
     }
 
-    // Sync Google photo: replace auto-generated ui-avatars with real Google photo
-    const hasGooglePhoto = !!firebaseUser.photoURL;
-    const hasPlaceholder = !data.photoURL || data.photoURL.includes('ui-avatars.com');
-    if (hasGooglePhoto && hasPlaceholder) {
+    // Sync Google photo if current is placeholder
+    if (firebaseUser.photoURL && (!data.photoURL || data.photoURL.includes('ui-avatars.com'))) {
       updates.photoURL = firebaseUser.photoURL;
+    }
+
+    // Sync Google name if current looks generated/placeholder
+    if (firebaseUser.displayName && firebaseUser.displayName !== data.name) {
+      const emailPrefix = email.split('@')[0];
+      const looksGenerated = !data.name
+        || data.name.toLowerCase() === emailPrefix.toLowerCase()
+        || data.name.toLowerCase() === emailPrefix.replace(/[._-]+/g, ' ').toLowerCase()
+        // Also overwrite if current name matches a dupe's name (means it was set by a pre-reg)
+        || dupes.some((d) => (d.data().name || '').toLowerCase() === data.name.toLowerCase());
+      if (looksGenerated) {
+        updates.name = firebaseUser.displayName;
+      }
     }
 
     if (Object.keys(updates).length > 0) {
       await setDoc(profileRef, updates, { merge: true });
-      return { id: profileSnap.id, ...data, ...updates } as Profile;
     }
-    return { id: profileSnap.id, ...data } as Profile;
-  }
-
-  // First-time sign-in: check for a pre-registered profile to inherit role from
-  const allProfilesSnap = await getDocs(collection(db!, 'profiles'));
-  const preRegDocs = allProfilesSnap.docs.filter((d) => {
-    const docEmail = (d.data().email || '').toLowerCase();
-    return docEmail === email && d.id !== firebaseUser.uid;
-  });
-
-  if (preRegDocs.length > 0) {
-    const preRegDoc = preRegDocs[0];
-    const data = preRegDoc.data();
-    const role = roleForEmail(email, data.role);
-    const migratedProfile = {
-      ...data,
-      name: firebaseUser.displayName || data.name,
-      photoURL: firebaseUser.photoURL || data.photoURL,
-      email,
-      role,
-      createdAt: serverTimestamp(),
-    };
-    await setDoc(profileRef, migratedProfile);
-    for (const d of preRegDocs) {
+    // Delete dupes
+    for (const d of dupes) {
       await deleteDoc(doc(db!, 'profiles', d.id));
     }
-    return { id: firebaseUser.uid, ...migratedProfile } as unknown as Profile;
+    return { id: profileSnap.id, ...data, ...updates } as Profile;
   }
 
-  // Brand new user — create fresh profile
-  const displayName = firebaseUser.displayName || email.split('@')[0] || 'User';
+  // ─── First-time sign-in path ─────────────────────────────────────────
+  // Inherit role from highest pre-reg dupe (or env), prefer Google name/photo
+  const dupeRole = highestRole(dupes.map((d) => d.data().role));
+  const role = roleForEmail(email, dupeRole);
+
+  const fallbackName = email.split('@')[0].split(/[._-]/).filter(Boolean).map((p) => p[0].toUpperCase() + p.slice(1).toLowerCase()).join(' ') || email;
+  const displayName = firebaseUser.displayName || fallbackName;
+  const photoURL = firebaseUser.photoURL || `https://ui-avatars.com/api/?name=${encodeURIComponent(displayName)}&background=1B4332&color=D4A843`;
+
   const newProfile = {
     name: displayName,
     email,
-    photoURL:
-      firebaseUser.photoURL ||
-      `https://ui-avatars.com/api/?name=${encodeURIComponent(displayName)}&background=1B4332&color=D4A843`,
-    role: roleForEmail(email),
+    photoURL,
+    role,
     createdAt: serverTimestamp(),
   };
-
   await setDoc(profileRef, newProfile);
+
+  // Clean up dupes
+  for (const d of dupes) {
+    await deleteDoc(doc(db!, 'profiles', d.id));
+  }
+
   return { id: firebaseUser.uid, ...newProfile, createdAt: undefined } as unknown as Profile;
+
+  // Brand new user — create fresh profile
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
