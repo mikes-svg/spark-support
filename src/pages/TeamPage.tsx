@@ -75,6 +75,7 @@ export function TeamPage() {
   const [editingUser, setEditingUser] = useState<string | null>(null);
   const [editUserName, setEditUserName] = useState('');
   const [deleteTarget, setDeleteTarget] = useState<Profile | null>(null);
+  const [roleChange, setRoleChange] = useState<{ profile: Profile; newRole: Profile['role'] } | null>(null);
   const [showBulkModal, setShowBulkModal] = useState(false);
   const [bulkEmails, setBulkEmails] = useState('');
   const [bulkRole, setBulkRole] = useState<Profile['role']>('user');
@@ -95,12 +96,21 @@ export function TeamPage() {
     })();
   }, []);
 
-  const updateUserRole = async (profile: Profile, newRole: Profile['role']) => {
+  const requestRoleChange = (profile: Profile, newRole: Profile['role']) => {
     if (newRole === profile.role) return;
+    setRoleChange({ profile, newRole });
+  };
+
+  const confirmRoleChange = async () => {
+    if (!roleChange) return;
+    const { profile, newRole } = roleChange;
+    setRoleChange(null);
     setProfiles((prev) => prev.map((p) => p.id === profile.id ? { ...p, role: newRole } : p));
     if (!db) return;
     await updateDoc(doc(db, 'profiles', profile.id), { role: newRole });
   };
+
+  const roleLabel = (r: Profile['role']) => r === 'superadmin' ? 'Super Administrator' : r === 'admin' ? 'Administrator' : 'User';
 
   const deleteUser = async () => {
     if (!deleteTarget) return;
@@ -229,7 +239,7 @@ export function TeamPage() {
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{profile.email}</td>
                   <td className="px-6 py-4 whitespace-nowrap">
-                    <select value={profile.role} onChange={(e) => updateUserRole(profile, e.target.value as Profile['role'])} className="border border-gray-300 rounded-md px-2 py-1 text-xs font-medium focus:outline-none focus:ring-2 focus:ring-brand-dark bg-white">
+                    <select value={profile.role} onChange={(e) => requestRoleChange(profile, e.target.value as Profile['role'])} className="border border-gray-300 rounded-md px-2 py-1 text-xs font-medium focus:outline-none focus:ring-2 focus:ring-brand-dark bg-white">
                       <option value="user">User</option>
                       <option value="admin">Administrator</option>
                       <option value="superadmin">Super Administrator</option>
@@ -387,6 +397,14 @@ export function TeamPage() {
         danger
         onConfirm={deleteUser}
         onCancel={() => setDeleteTarget(null)}
+      />
+      <ConfirmModal
+        open={!!roleChange}
+        title="Change Role"
+        message={roleChange ? `Change ${roleChange.profile.name}'s role from ${roleLabel(roleChange.profile.role)} to ${roleLabel(roleChange.newRole)}?` : ''}
+        confirmLabel="Change Role"
+        onConfirm={confirmRoleChange}
+        onCancel={() => setRoleChange(null)}
       />
     </div>
   );

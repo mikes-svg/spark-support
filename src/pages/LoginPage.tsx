@@ -7,7 +7,7 @@ import { motion } from 'framer-motion';
 
 export function LoginPage() {
   const navigate = useNavigate();
-  const { user } = useAuth();
+  const { user, authError, clearAuthError } = useAuth();
   const [error, setError] = useState('');
   const [ssoLoading, setSsoLoading] = useState(false);
 
@@ -20,6 +20,7 @@ export function LoginPage() {
     if (!auth || !googleProvider) return;
     setSsoLoading(true);
     setError('');
+    clearAuthError();
     try {
       await signInWithPopup(auth, googleProvider);
     } catch (err: unknown) {
@@ -31,6 +32,8 @@ export function LoginPage() {
       setSsoLoading(false);
     }
   };
+
+  const displayError = authError || error;
 
   return (
     <div className="min-h-screen bg-brand-cream flex flex-col justify-center py-12 sm:px-6 lg:px-8 relative overflow-hidden">
@@ -52,9 +55,9 @@ export function LoginPage() {
 
           <div className="w-16 h-0.5 bg-brand-gold mx-auto mb-8" />
 
-          {error && (
-            <p className="text-sm text-red-600 text-center bg-red-50 py-2 px-3 rounded-md mb-4">
-              {error}
+          {displayError && (
+            <p className="text-sm text-red-700 text-center bg-red-50 border border-red-200 py-3 px-4 rounded-md mb-4">
+              {displayError}
             </p>
           )}
 

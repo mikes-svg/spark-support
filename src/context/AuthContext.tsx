@@ -20,6 +20,8 @@ interface AuthContextType {
   user: Profile | null;
   loading: boolean;
   logout: () => Promise<void>;
+  authError: string | null;
+  clearAuthError: () => void;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -102,6 +104,15 @@ async function getOrCreateProfile(firebaseUser: FirebaseUser): Promise<Profile> 
   }
 
   // ─── First-time sign-in path ─────────────────────────────────────────
+  // Deny access if the user is NOT pre-registered and NOT in an env whitelist.
+  // This prevents random Google accounts from joining without invitation.
+  const isWhitelisted = isSuperadminEmail(email) || isAdminEmail(email);
+  if (dupes.length === 0 && !isWhitelisted) {
+    const err: Error & { code?: string } = new Error('not-invited');
+    err.code = 'not-invited';
+    throw err;
+  }
+
   // Inherit role from highest pre-reg dupe (or env), prefer Google name/photo
   const dupeRole = highestRole(dupes.map((d) => d.data().role));
   const role = roleForEmail(email, dupeRole);
@@ -132,6 +143,7 @@ async function getOrCreateProfile(firebaseUser: FirebaseUser): Promise<Profile> 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<Profile | null>(null);
   const [loading, setLoading] = useState(true);
+  const [authError, setAuthError] = useState<string | null>(null);
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
@@ -139,7 +151,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         try {
           const profile = await getOrCreateProfile(firebaseUser);
           setUser(profile);
+          setAuthError(null);
         } catch (err) {
+          const code = (err as { code?: string }).code;
+          if (code === 'not-invited') {
+            const attemptedEmail = firebaseUser.email || 'your account';
+            await signOut(auth);
+            setUser(null);
+            setAuthError(`Access denied. ${attemptedEmail} has not been invited to this portal. Contact your administrator to request access.`);
+            setLoading(false);
+            return;
+          }
           console.warn('Firestore profile fetch failed, using Firebase user data:', err);
           const displayName = firebaseUser.displayName || firebaseUser.email?.split('@')[0] || 'User';
           setUser({
@@ -164,10 +186,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const logout = async () => {
     await signOut(auth);
     setUser(null);
+    setAuthError(null);
   };
 
+  const clearAuthError = () => setAuthError(null);
+
   return (
-    <AuthContext.Provider value={{ user, loading, logout }}>
+    <AuthContext.Provider value={{ user, loading, logout, authError, clearAuthError }}>
       {children}
     </AuthContext.Provider>
   );
