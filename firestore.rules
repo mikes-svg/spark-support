@@ -22,7 +22,12 @@ service cloud.firestore {
       allow read: if isSignedIn();
       allow create: if request.auth.uid == userId || isAdmin();
       allow update: if request.auth.uid == userId || isAdmin();
-      allow delete: if isAdmin();
+      // Admins can delete any profile. Users can also delete profile docs whose
+      // email matches their own — this lets the sign-in flow auto-clean up
+      // pre-registration docs (email-slug ids) that have already been migrated
+      // to the user's UID profile.
+      allow delete: if isAdmin() ||
+        (isSignedIn() && resource.data.email == request.auth.token.email);
     }
 
     match /tickets/{ticketId} {
