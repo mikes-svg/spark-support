@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useLayoutEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { Plus, X, Users } from 'lucide-react';
 
 interface Profile { id: string; name: string; photoURL: string; }
@@ -14,16 +15,40 @@ export function AssigneeChips({ value, onChange, admins, disabled }: Props) {
   const [pickerOpen, setPickerOpen] = useState(false);
   const [search, setSearch] = useState('');
   const ref = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const popoverRef = useRef<HTMLDivElement>(null);
+  const [pos, setPos] = useState<{ top: number; left: number; width: number } | null>(null);
 
   useEffect(() => {
     const handler = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) {
-        setPickerOpen(false);
-        setSearch('');
-      }
+      const target = e.target as Node;
+      if (ref.current?.contains(target)) return;
+      if (popoverRef.current?.contains(target)) return;
+      setPickerOpen(false);
+      setSearch('');
     };
     if (pickerOpen) document.addEventListener('mousedown', handler);
     return () => document.removeEventListener('mousedown', handler);
+  }, [pickerOpen]);
+
+  useLayoutEffect(() => {
+    if (!pickerOpen) return;
+    const update = () => {
+      const btn = triggerRef.current;
+      if (!btn) return;
+      const r = btn.getBoundingClientRect();
+      const width = 256;
+      const margin = 8;
+      const left = Math.min(r.left, window.innerWidth - width - margin);
+      setPos({ top: r.bottom + 8, left: Math.max(margin, left), width });
+    };
+    update();
+    window.addEventListener('resize', update);
+    window.addEventListener('scroll', update, true);
+    return () => {
+      window.removeEventListener('resize', update);
+      window.removeEventListener('scroll', update, true);
+    };
   }, [pickerOpen]);
 
   const selected = admins.filter((a) => value.includes(a.id));
@@ -65,6 +90,7 @@ export function AssigneeChips({ value, onChange, admins, disabled }: Props) {
         ))}
         {!disabled && (
           <button
+            ref={triggerRef}
             type="button"
             onClick={() => setPickerOpen((o) => !o)}
             className="inline-flex items-center gap-1 px-2 py-0.5 text-xs text-gray-600 bg-white border border-dashed border-gray-300 rounded-full hover:border-brand-dark hover:text-brand-dark transition-colors"
@@ -75,8 +101,12 @@ export function AssigneeChips({ value, onChange, admins, disabled }: Props) {
         )}
       </div>
 
-      {pickerOpen && (
-        <div className="absolute z-20 mt-2 left-0 w-64 bg-white border border-gray-200 rounded-md shadow-lg overflow-hidden">
+      {pickerOpen && pos && createPortal(
+        <div
+          ref={popoverRef}
+          style={{ position: 'fixed', top: pos.top, left: pos.left, width: pos.width }}
+          className="z-50 bg-white border border-gray-200 rounded-md shadow-lg overflow-hidden"
+        >
           <div className="p-2 border-b border-gray-100">
             <input
               autoFocus
@@ -107,7 +137,8 @@ export function AssigneeChips({ value, onChange, admins, disabled }: Props) {
               ))
             )}
           </div>
-        </div>
+        </div>,
+        document.body,
       )}
     </div>
   );
