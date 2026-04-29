@@ -67,9 +67,20 @@ async function getOrCreateProfile(firebaseUser: FirebaseUser): Promise<Profile> 
     const data = profileSnap.data();
     const updates: Record<string, unknown> = {};
 
+    // Self-heal any mis-cased role (e.g. "Superadmin" → "superadmin") so strict equality checks work.
+    const normalizedRole = typeof data.role === 'string' ? data.role.toLowerCase() : data.role;
+    if (normalizedRole !== data.role) {
+      data.role = normalizedRole;
+      updates.role = normalizedRole;
+    }
+
     // Apply highest role from env whitelist OR from any pre-reg dupe (whichever is higher)
     const envRole = isSuperadminEmail(email) ? 'superadmin' : isAdminEmail(email) ? 'admin' : null;
-    const candidateRoles = [data.role, envRole, ...dupes.map((d) => d.data().role)];
+    const dupeRoles = dupes.map((d) => {
+      const r = d.data().role;
+      return typeof r === 'string' ? r.toLowerCase() : r;
+    });
+    const candidateRoles = [data.role, envRole, ...dupeRoles];
     const newRole = highestRole(candidateRoles);
     if (newRole && newRole !== data.role && (ROLE_RANK[newRole] ?? 0) > (ROLE_RANK[data.role] ?? 0)) {
       updates.role = newRole;
@@ -114,7 +125,10 @@ async function getOrCreateProfile(firebaseUser: FirebaseUser): Promise<Profile> 
   }
 
   // Inherit role from highest pre-reg dupe (or env), prefer Google name/photo
-  const dupeRole = highestRole(dupes.map((d) => d.data().role));
+  const dupeRole = highestRole(dupes.map((d) => {
+    const r = d.data().role;
+    return typeof r === 'string' ? r.toLowerCase() : r;
+  }));
   const role = roleForEmail(email, dupeRole);
 
   const fallbackName = email.split('@')[0].split(/[._-]/).filter(Boolean).map((p) => p[0].toUpperCase() + p.slice(1).toLowerCase()).join(' ') || email;
