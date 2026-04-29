@@ -18,6 +18,15 @@ export function Layout() {
     return 'Portal';
   };
 
+  const buildDate = new Date(__BUILD_TIME__);
+  const buildLabel = `v ${buildDate.toLocaleString([], {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  })}`;
+
   return (
     <div className="flex h-screen bg-brand-cream overflow-hidden">
       <Sidebar isOpen={sidebarOpen} onClose={() => setSidebarOpen(false)} />
@@ -39,6 +48,12 @@ export function Layout() {
             </motion.div>
           </AnimatePresence>
         </main>
+      </div>
+      <div
+        title={`Last build: ${buildDate.toISOString()}`}
+        className="pointer-events-none fixed bottom-2 right-3 text-[10px] text-gray-400 font-mono select-none z-10"
+      >
+        {buildLabel}
       </div>
     </div>
   );

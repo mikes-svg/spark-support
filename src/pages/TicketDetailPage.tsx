@@ -7,7 +7,8 @@ import { StatusBadge, PriorityBadge } from '../components/Badges';
 import { useAuth } from '../context/AuthContext';
 import { Send, ArrowLeft, Clock, Trash2, UploadCloud, FileText } from 'lucide-react';
 import { ConfirmModal } from '../components/ConfirmModal';
-import { AssigneeSelector } from '../components/AssigneeSelector';
+import { AssigneeChips } from '../components/AssigneeChips';
+import { MentionTextarea, renderCommentBody } from '../components/MentionTextarea';
 import { getAssigneeIds } from '../types';
 import type { TicketStatus, TicketPriority } from '../types';
 
@@ -23,6 +24,7 @@ interface Ticket {
 }
 interface Comment {
   id: string; ticketId: string; userId: string; body: string;
+  mentionedIds?: string[];
   createdAt: { toDate: () => Date } | string | null;
 }
 interface Attachment { name: string; url: string; }
@@ -49,6 +51,8 @@ export function TicketDetailPage() {
   const [uploading, setUploading] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [adminProfiles, setAdminProfiles] = useState<Profile[]>([]);
+  const [allProfiles, setAllProfiles] = useState<Profile[]>([]);
+  const [pendingMentionIds, setPendingMentionIds] = useState<string[]>([]);
 
   useEffect(() => {
     if (!id || !db) { setLoading(false); return; }
@@ -76,6 +80,11 @@ export function TicketDetailPage() {
     // Load admin profiles for assignee dropdown
     getDocs(query(collection(db!, 'profiles'), where('role', 'in', ['admin', 'superadmin'])))
       .then((snap) => setAdminProfiles(snap.docs.map((d) => ({ id: d.id, ...d.data() } as Profile))))
+      .catch(() => {});
+
+    // Load all profiles for the @mention picker (mentionable beyond just admins)
+    getDocs(collection(db!, 'profiles'))
+      .then((snap) => setAllProfiles(snap.docs.map((d) => ({ id: d.id, ...d.data() } as Profile))))
       .catch(() => {});
 
     // Load attachments
@@ -118,27 +127,42 @@ export function TicketDetailPage() {
     await addDoc(collection(db, 'mail'), { to, message: { subject, html } });
   };
 
-  const handleAddComment = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleAddComment = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
     if (!newComment.trim() || !user || !ticket || !db) return;
     const body = newComment.trim();
+    const mentionedIds = pendingMentionIds.filter((id) => id !== user.id);
     setNewComment('');
-    await addDoc(collection(db, 'comments'), { ticketId: ticket.id, userId: user.id, body, createdAt: serverTimestamp() });
+    setPendingMentionIds([]);
+    await addDoc(collection(db, 'comments'), {
+      ticketId: ticket.id,
+      userId: user.id,
+      body,
+      mentionedIds,
+      createdAt: serverTimestamp(),
+    });
 
-    // Email other parties (all participants except the commenter)
+    // Email other parties: participants + anyone mentioned (deduped, excluding commenter)
     const currentAssigneeIds = getAssigneeIds(ticket);
-    const allParticipants = [...new Set([ticket.submitterId, ...currentAssigneeIds])];
-    const recipientIds = allParticipants.filter((pid) => pid !== user.id);
+    const recipientIds = [
+      ...new Set([ticket.submitterId, ...currentAssigneeIds, ...mentionedIds]),
+    ].filter((pid) => pid && pid !== user.id);
     for (const recipientId of recipientIds) {
       const recipientDoc = await getDoc(doc(db, 'profiles', recipientId));
       const recipientEmail = recipientDoc.data()?.email;
-      if (recipientEmail) {
-        await sendEmail(
-          recipientEmail,
-          `New comment on ${ticket.id}: ${ticket.title}`,
-          `<p><strong>${user.name}</strong> commented on <strong>${ticket.id}</strong>:</p><p>${body}</p><p><a href="${window.location.origin}/tickets/${ticket.id}">View ticket →</a></p><hr style="margin:16px 0;border:none;border-top:1px solid #e5e7eb"/><p style="color:#9ca3af;font-size:12px">Please do not reply to this email. To respond, <a href="${window.location.origin}/tickets/${ticket.id}">click here to view the ticket</a> and add your comment there.</p>`
-        );
-      }
+      if (!recipientEmail) continue;
+      const wasMentioned = mentionedIds.includes(recipientId);
+      const subject = wasMentioned
+        ? `${user.name} mentioned you on ${ticket.id}: ${ticket.title}`
+        : `New comment on ${ticket.id}: ${ticket.title}`;
+      const lead = wasMentioned
+        ? `<p><strong>${user.name}</strong> mentioned you in a comment on <strong>${ticket.id}</strong>:</p>`
+        : `<p><strong>${user.name}</strong> commented on <strong>${ticket.id}</strong>:</p>`;
+      await sendEmail(
+        recipientEmail,
+        subject,
+        `${lead}<p>${body}</p><p><a href="${window.location.origin}/tickets/${ticket.id}">View ticket →</a></p><hr style="margin:16px 0;border:none;border-top:1px solid #e5e7eb"/><p style="color:#9ca3af;font-size:12px">Please do not reply to this email. To respond, <a href="${window.location.origin}/tickets/${ticket.id}">click here to view the ticket</a> and add your comment there.</p>`
+      );
     }
   };
 
@@ -313,7 +337,7 @@ export function TicketDetailPage() {
                         <span className="font-medium text-xs text-gray-600">{commentUser?.name || 'Unknown'}</span>
                         <span className="text-[10px] text-gray-400">{toDate(comment.createdAt).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</span>
                       </div>
-                      <div className={`mt-1 p-3 rounded-2xl text-sm ${isOwn ? 'bg-brand-dark text-white rounded-br-sm' : 'bg-gray-100 text-gray-800 rounded-bl-sm'}`}>{comment.body}</div>
+                      <div className={`mt-1 p-3 rounded-2xl text-sm whitespace-pre-wrap break-words ${isOwn ? 'bg-brand-dark text-white rounded-br-sm' : 'bg-gray-100 text-gray-800 rounded-bl-sm'}`}>{renderCommentBody(comment.body, comment.mentionedIds || [], profiles)}</div>
                     </div>
                   </div>
                 );
@@ -321,7 +345,15 @@ export function TicketDetailPage() {
             </div>
             <div className="p-4 border-t border-gray-200 bg-gray-50">
               <form onSubmit={handleAddComment} className="flex items-end gap-3">
-                <textarea value={newComment} onChange={(e) => setNewComment(e.target.value)} placeholder="Add a comment…" className="flex-1 border-gray-300 rounded-lg shadow-sm focus:ring-brand-dark focus:border-brand-dark sm:text-sm border p-3 resize-none" rows={2} />
+                <MentionTextarea
+                  value={newComment}
+                  onChange={(text, ids) => { setNewComment(text); setPendingMentionIds(ids); }}
+                  users={allProfiles}
+                  placeholder="Add a comment… type @ to mention"
+                  rows={2}
+                  className="flex-1 w-full border-gray-300 rounded-lg shadow-sm focus:ring-brand-dark focus:border-brand-dark sm:text-sm border p-3 resize-none"
+                  onSubmit={() => handleAddComment()}
+                />
                 <button type="submit" disabled={!newComment.trim()} className="p-3 bg-brand-dark text-white rounded-lg hover:bg-[#153427] disabled:opacity-50 transition-colors shadow-sm">
                   <Send className="w-5 h-5" />
                 </button>
@@ -367,7 +399,7 @@ export function TicketDetailPage() {
               <div>
                 <span className="block text-xs font-medium text-gray-500 uppercase mb-1">Assignees</span>
                 {isAdmin ? (
-                  <AssigneeSelector value={assigneeIds} onChange={handleAssigneesChange} admins={adminProfiles} />
+                  <AssigneeChips value={assigneeIds} onChange={handleAssigneesChange} admins={adminProfiles} />
                 ) : assignees.length > 0 ? (
                   <div className="flex flex-wrap gap-2 mt-1">
                     {assignees.map((a) => (
