@@ -173,7 +173,12 @@ export function MentionTextarea({
   );
 }
 
-export function renderCommentBody(body: string, mentionedIds: string[], users: Record<string, Profile>): React.ReactNode {
+export function renderCommentBody(
+  body: string,
+  mentionedIds: string[],
+  users: Record<string, Profile>,
+  variant: 'light' | 'dark' = 'light',
+): React.ReactNode {
   if (!mentionedIds || mentionedIds.length === 0) return body;
   const names = mentionedIds
     .map((id) => users[id]?.name)
@@ -182,6 +187,10 @@ export function renderCommentBody(body: string, mentionedIds: string[], users: R
   if (names.length === 0) return body;
   const escaped = names.map((n) => n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
   const re = new RegExp(`(^|\\s)(@(?:${escaped.join('|')}))(?=\\s|$|[.,!?;:])`, 'g');
+  const mentionClass =
+    variant === 'dark'
+      ? 'font-semibold bg-brand-gold/30 text-brand-gold rounded px-1'
+      : 'font-semibold bg-brand-gold/20 text-brand-dark rounded px-1';
   const parts: React.ReactNode[] = [];
   let last = 0;
   let key = 0;
@@ -190,7 +199,7 @@ export function renderCommentBody(body: string, mentionedIds: string[], users: R
     const matchStart = m.index + m[1].length;
     if (matchStart > last) parts.push(body.slice(last, matchStart));
     parts.push(
-      <span key={key++} className="font-medium bg-brand-gold/20 text-brand-dark rounded px-1">
+      <span key={key++} className={mentionClass}>
         {m[2]}
       </span>,
     );

@@ -337,7 +337,7 @@ export function TicketDetailPage() {
                         <span className="font-medium text-xs text-gray-600">{commentUser?.name || 'Unknown'}</span>
                         <span className="text-[10px] text-gray-400">{toDate(comment.createdAt).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</span>
                       </div>
-                      <div className={`mt-1 p-3 rounded-2xl text-sm whitespace-pre-wrap break-words ${isOwn ? 'bg-brand-dark text-white rounded-br-sm' : 'bg-gray-100 text-gray-800 rounded-bl-sm'}`}>{renderCommentBody(comment.body, comment.mentionedIds || [], profiles)}</div>
+                      <div className={`mt-1 p-3 rounded-2xl text-sm whitespace-pre-wrap break-words ${isOwn ? 'bg-brand-dark text-white rounded-br-sm' : 'bg-gray-100 text-gray-800 rounded-bl-sm'}`}>{renderCommentBody(comment.body, comment.mentionedIds || [], profiles, isOwn ? 'dark' : 'light')}</div>
                     </div>
                   </div>
                 );
