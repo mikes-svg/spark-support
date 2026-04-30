@@ -45,6 +45,14 @@ service cloud.firestore {
       allow delete: if isSuperAdmin();
     }
 
+    // Audit log for ticket lifecycle events. Created by clients but only
+    // readable by admins (who can see analytics). Never edited or deleted.
+    match /ticketEvents/{eventId} {
+      allow read: if isAdmin();
+      allow create: if isSignedIn() && request.resource.data.actorId == request.auth.uid;
+      allow update, delete: if false;
+    }
+
     match /requestTypes/{typeId} {
       allow read: if isSignedIn();
       allow write: if isSuperAdmin();

@@ -1,12 +1,18 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { collection, query, orderBy, getDocs, doc, getDoc, updateDoc, addDoc, serverTimestamp, where } from 'firebase/firestore';
+import { collection, query, orderBy, getDocs, doc, getDoc, addDoc, where } from 'firebase/firestore';
 import { db } from '../lib/firebase';
+import { useAuth } from '../context/AuthContext';
 import { Filter, AlertCircle, CheckCircle2, Clock, RefreshCw } from 'lucide-react';
 import { ConfirmModal } from '../components/ConfirmModal';
 import { AssigneeSelector } from '../components/AssigneeSelector';
 import { getAssigneeIds } from '../types';
 import type { TicketStatus, TicketPriority } from '../types';
+import {
+  updateTicketStatus,
+  updateTicketPriority,
+  updateTicketAssignees,
+} from '../lib/ticketEvents';
 
 interface Profile { id: string; name: string; photoURL: string; role: string; email?: string; }
 interface Ticket {
@@ -21,6 +27,7 @@ const PRIORITIES: TicketPriority[] = ['Low', 'Medium', 'High', 'Urgent'];
 
 export function AdminDashboardPage() {
   const navigate = useNavigate();
+  const { user } = useAuth();
   const [tickets, setTickets] = useState<Ticket[]>([]);
   const [profiles, setProfiles] = useState<Record<string, Profile>>({});
   const [adminProfiles, setAdminProfiles] = useState<Profile[]>([]);
@@ -83,22 +90,17 @@ export function AdminDashboardPage() {
   };
 
   const handleFieldChangeConfirm = async () => {
-    if (!pendingChange || !db) return;
+    if (!pendingChange || !db || !user) return;
     const change = pendingChange;
     setPendingChange(null);
-
-    const updates: Record<string, unknown> = { updatedAt: serverTimestamp() };
 
     if (change.type === 'assignees') {
       const { ticket, value: newAssigneeIds } = change;
       const oldAssigneeIds = getAssigneeIds(ticket);
       const added = newAssigneeIds.filter((id) => !oldAssigneeIds.includes(id));
       const participants = [...new Set([ticket.submitterId, ...newAssigneeIds])];
-      updates.assigneeIds = newAssigneeIds;
-      updates.assigneeId = null;
-      updates.participants = participants;
       setTickets((prev) => prev.map((t) => t.id === ticket.id ? { ...t, assigneeIds: newAssigneeIds, assigneeId: null, participants } : t));
-      await updateDoc(doc(db, 'tickets', ticket.id), updates);
+      await updateTicketAssignees(ticket.id, oldAssigneeIds, newAssigneeIds, participants, user.id);
 
       // Email newly added assignees
       for (const addedId of added) {
@@ -109,20 +111,21 @@ export function AdminDashboardPage() {
             `<p>Ticket <strong>${ticket.id}</strong> — ${ticket.title} — has been assigned to you.</p><p><a href="${window.location.origin}/tickets/${ticket.id}">View ticket →</a></p>`);
         }
       }
+    } else if (change.type === 'status') {
+      const { ticket, value } = change;
+      setTickets((prev) => prev.map((t) => t.id === ticket.id ? { ...t, status: value } : t));
+      await updateTicketStatus(ticket.id, ticket.status, value, user.id);
+
+      const submitterDoc = await getDoc(doc(db, 'profiles', ticket.submitterId));
+      const submitterEmail = submitterDoc.data()?.email;
+      if (submitterEmail) {
+        await sendMail(submitterEmail, `${ticket.id} status changed to ${value}`,
+          `<p>Your ticket <strong>${ticket.id}</strong> — ${ticket.title} — has been updated to <strong>${value}</strong>.</p><p><a href="${window.location.origin}/tickets/${ticket.id}">View ticket →</a></p>`);
+      }
     } else {
       const { ticket, value } = change;
-      updates[change.type] = value;
-      setTickets((prev) => prev.map((t) => t.id === ticket.id ? { ...t, [change.type]: value } : t));
-      await updateDoc(doc(db, 'tickets', ticket.id), updates);
-
-      if (change.type === 'status') {
-        const submitterDoc = await getDoc(doc(db, 'profiles', ticket.submitterId));
-        const submitterEmail = submitterDoc.data()?.email;
-        if (submitterEmail) {
-          await sendMail(submitterEmail, `${ticket.id} status changed to ${value}`,
-            `<p>Your ticket <strong>${ticket.id}</strong> — ${ticket.title} — has been updated to <strong>${value}</strong>.</p><p><a href="${window.location.origin}/tickets/${ticket.id}">View ticket →</a></p>`);
-        }
-      }
+      setTickets((prev) => prev.map((t) => t.id === ticket.id ? { ...t, priority: value } : t));
+      await updateTicketPriority(ticket.id, ticket.priority, value, user.id);
     }
   };
 

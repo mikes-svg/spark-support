@@ -11,6 +11,12 @@ import { AssigneeChips } from '../components/AssigneeChips';
 import { MentionTextarea, renderCommentBody } from '../components/MentionTextarea';
 import { getAssigneeIds } from '../types';
 import type { TicketStatus, TicketPriority } from '../types';
+import {
+  updateTicketStatus,
+  updateTicketPriority,
+  updateTicketAssignees,
+  logTicketComment,
+} from '../lib/ticketEvents';
 
 interface Profile { id: string; name: string; photoURL: string; email?: string; }
 interface Ticket {
@@ -142,6 +148,14 @@ export function TicketDetailPage() {
       createdAt: serverTimestamp(),
     });
 
+    // Audit log: first-response time only counts when a non-submitter comments first.
+    const priorNonSubmitterReply = ticketComments.some(
+      (c) => c.userId !== ticket.submitterId,
+    );
+    const isFirstResponse =
+      user.id !== ticket.submitterId && !priorNonSubmitterReply;
+    await logTicketComment(ticket.id, user.id, isFirstResponse);
+
     // Email other parties: participants + anyone mentioned (deduped, excluding commenter)
     const currentAssigneeIds = getAssigneeIds(ticket);
     const recipientIds = [
@@ -186,9 +200,10 @@ export function TicketDetailPage() {
   };
 
   const handleStatusChange = async (newStatus: TicketStatus) => {
-    if (!ticket || !db) return;
+    if (!ticket || !db || !user) return;
+    const fromStatus = ticket.status;
     setTicket({ ...ticket, status: newStatus });
-    await updateDoc(doc(db, 'tickets', ticket.id), { status: newStatus, updatedAt: serverTimestamp() });
+    await updateTicketStatus(ticket.id, fromStatus, newStatus, user.id);
 
     const submitterDoc = await getDoc(doc(db, 'profiles', ticket.submitterId));
     const submitterEmail = submitterDoc.data()?.email;
@@ -199,24 +214,20 @@ export function TicketDetailPage() {
   };
 
   const handlePriorityChange = async (newPriority: TicketPriority) => {
-    if (!ticket || !db) return;
+    if (!ticket || !db || !user) return;
+    const fromPriority = ticket.priority;
     setTicket({ ...ticket, priority: newPriority });
-    await updateDoc(doc(db, 'tickets', ticket.id), { priority: newPriority, updatedAt: serverTimestamp() });
+    await updateTicketPriority(ticket.id, fromPriority, newPriority, user.id);
   };
 
   const handleAssigneesChange = async (newAssigneeIds: string[]) => {
-    if (!ticket || !db) return;
+    if (!ticket || !db || !user) return;
     const oldAssigneeIds = getAssigneeIds(ticket);
     const added = newAssigneeIds.filter((id) => !oldAssigneeIds.includes(id));
     const participants = [...new Set([ticket.submitterId, ...newAssigneeIds])];
 
     setTicket({ ...ticket, assigneeIds: newAssigneeIds, assigneeId: null, participants } as Ticket);
-    await updateDoc(doc(db, 'tickets', ticket.id), {
-      assigneeIds: newAssigneeIds,
-      assigneeId: null,
-      participants,
-      updatedAt: serverTimestamp(),
-    });
+    await updateTicketAssignees(ticket.id, oldAssigneeIds, newAssigneeIds, participants, user.id);
 
     // Email every newly added assignee
     for (const addedId of added) {

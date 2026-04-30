@@ -14,6 +14,7 @@ import { TicketDetailPage } from './pages/TicketDetailPage';
 import { AdminDashboardPage } from './pages/AdminDashboardPage';
 import { AdminSettingsPage } from './pages/AdminSettingsPage';
 import { TeamPage } from './pages/TeamPage';
+import { AnalyticsPage } from './pages/AnalyticsPage';
 
 function ProtectedRoute({
   children,
@@ -86,6 +87,14 @@ export function App() {
               element={
                 <ProtectedRoute requireSuperadmin>
                   <AdminSettingsPage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="admin/analytics"
+              element={
+                <ProtectedRoute requireSuperadmin>
+                  <AnalyticsPage />
                 </ProtectedRoute>
               }
             />

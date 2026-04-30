@@ -7,6 +7,7 @@ import { useAuth } from '../context/AuthContext';
 import { UploadCloud, X } from 'lucide-react';
 import { getOrSeedRequestTypes } from '../lib/seedRequestTypes';
 import { getDefaultAssigneeIds } from '../types';
+import { logTicketCreated } from '../lib/ticketEvents';
 
 interface RequestType {
   id: string;
@@ -74,6 +75,8 @@ export function SubmitRequestPage() {
         assigneeIds, submitterId: user.id, participants,
         createdAt: serverTimestamp(), updatedAt: serverTimestamp(),
       });
+
+      await logTicketCreated(ticketId, user.id);
 
       if (storage) {
         for (const file of files) {
