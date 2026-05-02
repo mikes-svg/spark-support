@@ -86,6 +86,17 @@ async function getOrCreateProfile(firebaseUser: FirebaseUser): Promise<Profile> 
       updates.role = newRole;
     }
 
+    // Sync email from Google if missing/stale. Without this, a profile that
+    // was created without an email field never self-heals, and assignment
+    // notifications silently skip the user.
+    if (firebaseUser.email) {
+      const fbEmailLower = firebaseUser.email.toLowerCase();
+      const currentEmailLower = (data.email || '').toLowerCase();
+      if (currentEmailLower !== fbEmailLower) {
+        updates.email = fbEmailLower;
+      }
+    }
+
     // Sync Google photo if current is placeholder
     if (firebaseUser.photoURL && (!data.photoURL || data.photoURL.includes('ui-avatars.com'))) {
       updates.photoURL = firebaseUser.photoURL;

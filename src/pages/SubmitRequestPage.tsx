@@ -106,6 +106,8 @@ export function SubmitRequestPage() {
               html: `<p>A new support request has been assigned to you.</p><p><strong>${ticketId}</strong> — ${title}</p><p><a href="${window.location.origin}/tickets/${ticketId}">View ticket →</a></p>`,
             },
           });
+        } else {
+          console.warn(`Skipping assignee notification for ${ticketId}: profile ${assigneeId} has no email field. Have them sign in once to self-heal, or fix via /admin/team.`);
         }
       }
 

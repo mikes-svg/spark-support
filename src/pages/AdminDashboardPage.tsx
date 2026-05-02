@@ -109,6 +109,8 @@ export function AdminDashboardPage() {
         if (email) {
           await sendMail(email, `${ticket.id} has been assigned to you`,
             `<p>Ticket <strong>${ticket.id}</strong> — ${ticket.title} — has been assigned to you.</p><p><a href="${window.location.origin}/tickets/${ticket.id}">View ticket →</a></p>`);
+        } else {
+          console.warn(`Skipping assignee notification for ${ticket.id}: profile ${addedId} has no email field. Have them sign in once to self-heal, or fix via /admin/team.`);
         }
       }
     } else if (change.type === 'status') {

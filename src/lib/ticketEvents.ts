@@ -45,11 +45,20 @@ function getDb(): Firestore {
   return db;
 }
 
+/**
+ * Writes the audit-log entry but never throws — analytics are best-effort,
+ * and a Firestore hiccup here must not break the surrounding flow (which
+ * usually includes email notifications).
+ */
 export async function logTicketEvent(event: Omit<TicketEvent, 'createdAt'>): Promise<void> {
-  await addDoc(collection(getDb(), 'ticketEvents'), {
-    ...event,
-    createdAt: serverTimestamp(),
-  });
+  try {
+    await addDoc(collection(getDb(), 'ticketEvents'), {
+      ...event,
+      createdAt: serverTimestamp(),
+    });
+  } catch (err) {
+    console.warn('Failed to write ticket event (analytics only, non-fatal):', err);
+  }
 }
 
 /**
