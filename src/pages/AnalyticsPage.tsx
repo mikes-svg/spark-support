@@ -344,8 +344,6 @@ export function AnalyticsPage() {
     );
   }
 
-  const noEvents = events.length === 0;
-
   return (
     <div className="space-y-6">
       {/* Header + range filter */}
@@ -385,14 +383,6 @@ export function AnalyticsPage() {
           </div>
         )}
       </div>
-
-      {noEvents && (
-        <div className="bg-amber-50 border border-amber-200 text-amber-800 text-sm rounded-md px-4 py-3">
-          The audit log was just added — historical metrics like time-to-first-response and reopen rate
-          will fill in as new ticket activity occurs. Counts based on ticket records (opened, resolved
-          using <code>updatedAt</code>) work today.
-        </div>
-      )}
 
       {/* Top KPI cards */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
