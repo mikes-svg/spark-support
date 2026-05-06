@@ -34,7 +34,9 @@ export function AdminDashboardPage() {
   const [requestTypes, setRequestTypes] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [statusFilter, setStatusFilter] = useState('All');
+  // Default view hides Resolved tickets so admins focus on actionable work.
+  // 'Active' = anything not Resolved; 'All' = include Resolved; else exact status match.
+  const [statusFilter, setStatusFilter] = useState('Active');
   const [typeFilter, setTypeFilter] = useState('');
   const [assigneeFilter, setAssigneeFilter] = useState('');
 
@@ -132,7 +134,11 @@ export function AdminDashboardPage() {
   };
 
   const filteredTickets = tickets.filter((t) => {
-    if (statusFilter !== 'All' && t.status !== statusFilter) return false;
+    if (statusFilter === 'Active') {
+      if (t.status === 'Resolved') return false;
+    } else if (statusFilter !== 'All' && t.status !== statusFilter) {
+      return false;
+    }
     if (typeFilter && t.type !== typeFilter) return false;
     if (assigneeFilter && !getAssigneeIds(t).includes(assigneeFilter)) return false;
     return true;
@@ -150,7 +156,10 @@ export function AdminDashboardPage() {
   const resolvedCount = tickets.filter((t) => t.status === 'Resolved').length;
 
   const handleStatClick = (filter: string) => {
-    setStatusFilter((prev) => prev === filter ? 'All' : filter);
+    // Re-clicking the active stat card returns to the default 'Active' view
+    // (which still hides Resolved). Clicking the Resolved card temporarily
+    // surfaces resolved tickets without permanently changing the default.
+    setStatusFilter((prev) => prev === filter ? 'Active' : filter);
   };
 
   return (
@@ -181,6 +190,7 @@ export function AdminDashboardPage() {
       <div className="bg-white shadow-sm rounded-lg border border-gray-200 p-4 flex flex-wrap items-center gap-4">
         <div className="flex items-center text-gray-500 mr-2"><Filter className="w-5 h-5 mr-2" /><span className="text-sm font-medium">Filters:</span></div>
         <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="block pl-3 pr-10 py-2 text-sm border-gray-300 focus:outline-none focus:ring-brand-dark focus:border-brand-dark rounded-md border">
+          <option value="Active">Active (hide Resolved)</option>
           <option value="All">All Statuses</option>
           {STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
         </select>
@@ -192,7 +202,7 @@ export function AdminDashboardPage() {
           <option value="">All Assignees</option>
           {adminProfiles.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
         </select>
-        <button onClick={() => { setStatusFilter('All'); setTypeFilter(''); setAssigneeFilter(''); }} className="text-sm text-brand-gold hover:text-yellow-700 font-medium">Reset Filters</button>
+        <button onClick={() => { setStatusFilter('Active'); setTypeFilter(''); setAssigneeFilter(''); }} className="text-sm text-brand-gold hover:text-yellow-700 font-medium">Reset Filters</button>
         <button onClick={() => fetchData(false)} disabled={refreshing} className="ml-auto p-2 text-gray-400 hover:text-brand-dark transition-colors rounded-md hover:bg-gray-100 disabled:opacity-50" title="Refresh">
           <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} />
         </button>
