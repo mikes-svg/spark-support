@@ -1,15 +1,15 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
-import { doc, getDoc, deleteDoc, updateDoc, collection, query, where, orderBy, onSnapshot, addDoc, serverTimestamp, getDocs, writeBatch } from 'firebase/firestore';
+import { doc, getDoc, deleteDoc, updateDoc, collection, query, where, orderBy, onSnapshot, addDoc, serverTimestamp, getDocs, writeBatch, Timestamp } from 'firebase/firestore';
 import { ref, uploadBytes, listAll, getDownloadURL } from 'firebase/storage';
 import { db, storage } from '../lib/firebase';
 import { StatusBadge, PriorityBadge } from '../components/Badges';
 import { useAuth } from '../context/AuthContext';
-import { Send, ArrowLeft, Clock, Trash2, UploadCloud, FileText } from 'lucide-react';
+import { Send, ArrowLeft, Clock, Trash2, UploadCloud, FileText, CalendarClock } from 'lucide-react';
 import { ConfirmModal } from '../components/ConfirmModal';
 import { AssigneeChips } from '../components/AssigneeChips';
 import { MentionTextarea, renderCommentBody } from '../components/MentionTextarea';
-import { getAssigneeIds } from '../types';
+import { getAssigneeIds, isScheduled } from '../types';
 import type { TicketStatus, TicketPriority } from '../types';
 import {
   updateTicketStatus,
@@ -27,6 +27,7 @@ interface Ticket {
   participants?: string[];
   createdAt: { toDate: () => Date } | string;
   updatedAt: { toDate: () => Date } | string;
+  scheduledFor?: { toDate: () => Date } | string | null;
 }
 interface Comment {
   id: string; ticketId: string; userId: string; body: string;
@@ -56,6 +57,9 @@ export function TicketDetailPage() {
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [uploading, setUploading] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [showCancelConfirm, setShowCancelConfirm] = useState(false);
+  const [rescheduling, setRescheduling] = useState(false);
+  const [rescheduleValue, setRescheduleValue] = useState('');
   const [adminProfiles, setAdminProfiles] = useState<Profile[]>([]);
   const [allProfiles, setAllProfiles] = useState<Profile[]>([]);
   const [pendingMentionIds, setPendingMentionIds] = useState<string[]>([]);
@@ -224,10 +228,17 @@ export function TicketDetailPage() {
     if (!ticket || !db || !user) return;
     const oldAssigneeIds = getAssigneeIds(ticket);
     const added = newAssigneeIds.filter((id) => !oldAssigneeIds.includes(id));
-    const participants = [...new Set([ticket.submitterId, ...newAssigneeIds])];
+    // While scheduled, keep assignees out of participants (and don't email them);
+    // the activation function adds + notifies them on the go-live date.
+    const scheduled = isScheduled(ticket);
+    const participants = scheduled
+      ? [ticket.submitterId]
+      : [...new Set([ticket.submitterId, ...newAssigneeIds])];
 
     setTicket({ ...ticket, assigneeIds: newAssigneeIds, assigneeId: null, participants } as Ticket);
     await updateTicketAssignees(ticket.id, oldAssigneeIds, newAssigneeIds, participants, user.id);
+
+    if (scheduled) return; // no notifications until go-live
 
     // Email every newly added assignee
     for (const addedId of added) {
@@ -263,6 +274,34 @@ export function TicketDetailPage() {
     }
   };
 
+  // Cancel a scheduled go-live: the ticket never went live, so we discard it.
+  const handleCancelSchedule = async () => {
+    if (!ticket || !db) return;
+    setShowCancelConfirm(false);
+    try {
+      await deleteDoc(doc(db, 'tickets', ticket.id));
+      navigate('/admin');
+    } catch (err) {
+      console.error('Failed to cancel scheduled ticket:', err);
+      alert('Failed to cancel. Make sure Firestore rules allow deleting scheduled tickets.');
+    }
+  };
+
+  const handleReschedule = async () => {
+    if (!ticket || !db || !rescheduleValue) return;
+    const newDate = new Date(rescheduleValue);
+    if (newDate.getTime() <= Date.now()) {
+      alert('Pick a date in the future.');
+      return;
+    }
+    await updateDoc(doc(db, 'tickets', ticket.id), {
+      scheduledFor: Timestamp.fromDate(newDate),
+      updatedAt: serverTimestamp(),
+    });
+    setTicket({ ...ticket, scheduledFor: Timestamp.fromDate(newDate) } as Ticket);
+    setRescheduling(false);
+  };
+
   if (loading) return <div className="flex items-center justify-center py-20"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-brand-dark" /></div>;
   if (!ticket) return <div className="text-center py-12 text-gray-500">Ticket not found.</div>;
 
@@ -271,6 +310,12 @@ export function TicketDetailPage() {
   const submitter = profiles[ticket.submitterId];
   const isAdmin = user?.role === 'admin' || user?.role === 'superadmin';
   const isSuperadmin = user?.role === 'superadmin';
+  const scheduled = isScheduled(ticket);
+  const nowLocalMin = (() => {
+    const d = new Date();
+    d.setSeconds(0, 0);
+    return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+  })();
 
   return (
     <div className="space-y-6">
@@ -292,6 +337,45 @@ export function TicketDetailPage() {
           </button>
         )}
       </div>
+
+      {scheduled && (
+        <div className="bg-purple-50 border border-purple-200 rounded-xl p-5">
+          <div className="flex flex-wrap items-center gap-4">
+            <div className="flex items-center gap-3 flex-1 min-w-[240px]">
+              <CalendarClock className="h-5 w-5 text-purple-600 flex-shrink-0" />
+              <div>
+                <p className="text-sm font-medium text-purple-900">Scheduled — not yet live</p>
+                <p className="text-xs text-purple-700">
+                  Goes live on <strong>{toDate(ticket.scheduledFor).toLocaleString()}</strong>, notifying assignees then. Hidden from assignees until then.
+                </p>
+              </div>
+            </div>
+            {isAdmin && !rescheduling && (
+              <div className="flex items-center gap-2">
+                <button onClick={() => { setRescheduleValue(''); setRescheduling(true); }} className="px-3 py-1.5 text-sm font-medium text-purple-700 bg-white border border-purple-300 rounded-md hover:bg-purple-50 transition-colors">Reschedule</button>
+                <button onClick={() => setShowCancelConfirm(true)} className="px-3 py-1.5 text-sm font-medium text-red-600 bg-white border border-red-200 rounded-md hover:bg-red-50 transition-colors">Cancel</button>
+              </div>
+            )}
+          </div>
+          {isAdmin && rescheduling && (
+            <div className="mt-4 flex flex-wrap items-end gap-3 border-t border-purple-200 pt-4">
+              <div>
+                <label htmlFor="reschedule" className="block text-xs font-medium text-purple-800 mb-1">New go-live date</label>
+                <input
+                  type="datetime-local"
+                  id="reschedule"
+                  min={nowLocalMin}
+                  value={rescheduleValue}
+                  onChange={(e) => setRescheduleValue(e.target.value)}
+                  className="block border-gray-300 rounded-md shadow-sm focus:ring-brand-dark focus:border-brand-dark sm:text-sm border p-2"
+                />
+              </div>
+              <button onClick={handleReschedule} disabled={!rescheduleValue} className="px-4 py-2 text-sm font-medium text-white bg-brand-dark rounded-md hover:bg-[#153427] disabled:opacity-50 transition-colors">Save</button>
+              <button onClick={() => setRescheduling(false)} className="px-4 py-2 text-sm font-medium text-gray-600 hover:text-gray-900">Dismiss</button>
+            </div>
+          )}
+        </div>
+      )}
 
       <div className="flex flex-col lg:flex-row gap-6">
         <div className="flex-1 space-y-6">
@@ -384,7 +468,7 @@ export function TicketDetailPage() {
               <div><span className="block text-xs font-medium text-gray-500 uppercase mb-1">Type</span><span className="text-sm text-gray-900 font-medium">{ticket.type}</span></div>
               <div>
                 <span className="block text-xs font-medium text-gray-500 uppercase mb-1">Status</span>
-                {isAdmin ? (
+                {isAdmin && !scheduled ? (
                   <select value={ticket.status} onChange={(e) => handleStatusChange(e.target.value as TicketStatus)} className="block w-full pl-3 pr-8 py-1.5 text-sm border-gray-300 focus:outline-none focus:ring-brand-dark focus:border-brand-dark rounded-md border bg-gray-50">
                     {STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
                   </select>
@@ -459,6 +543,15 @@ export function TicketDetailPage() {
         danger
         onConfirm={handleDeleteTicket}
         onCancel={() => setShowDeleteConfirm(false)}
+      />
+      <ConfirmModal
+        open={showCancelConfirm}
+        title="Cancel Scheduled Ticket"
+        message={`Cancel ${ticket.id}? It will never go live and will be removed. This cannot be undone.`}
+        confirmLabel="Cancel Ticket"
+        danger
+        onConfirm={handleCancelSchedule}
+        onCancel={() => setShowCancelConfirm(false)}
       />
     </div>
   );

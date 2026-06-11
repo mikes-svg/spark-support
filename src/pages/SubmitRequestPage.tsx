@@ -1,12 +1,12 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
-import { getDoc, doc, setDoc, addDoc, runTransaction, collection, serverTimestamp } from 'firebase/firestore';
+import { getDoc, doc, setDoc, addDoc, runTransaction, collection, serverTimestamp, Timestamp } from 'firebase/firestore';
 import { ref, uploadBytes } from 'firebase/storage';
 import { db, storage } from '../lib/firebase';
 import { useAuth } from '../context/AuthContext';
-import { UploadCloud, X } from 'lucide-react';
+import { UploadCloud, X, CalendarClock } from 'lucide-react';
 import { getOrSeedRequestTypes } from '../lib/seedRequestTypes';
-import { getDefaultAssigneeIds } from '../types';
+import { getDefaultAssigneeIds, isAdminRole } from '../types';
 import { logTicketCreated } from '../lib/ticketEvents';
 
 interface RequestType {
@@ -59,6 +59,14 @@ export function SubmitRequestPage() {
     const selectedType = requestTypes.find((rt) => rt.name === type);
     const assigneeIds = selectedType ? getDefaultAssigneeIds(selectedType) : [];
 
+    // Admins may future-date a ticket so it goes live (and notifies assignees)
+    // on the chosen date, exactly as if submitted then. A scheduled-date in the
+    // past or absent falls through to an immediate submission.
+    const canSchedule = isAdminRole(user.role);
+    const scheduledRaw = canSchedule ? (data.get('scheduledFor') as string) : '';
+    const scheduledDate = scheduledRaw ? new Date(scheduledRaw) : null;
+    const isFutureScheduled = !!scheduledDate && scheduledDate.getTime() > Date.now();
+
     try {
       const counterRef = doc(db, 'meta', 'ticketCounter');
       const ticketId = await runTransaction(db, async (tx) => {
@@ -68,15 +76,24 @@ export function SubmitRequestPage() {
         return `TKT-${String(count).padStart(4, '0')}`;
       });
 
-      const participants = [...new Set([user.id, ...assigneeIds])];
+      // While scheduled, keep assignees OUT of participants so they don't see
+      // (or get notified about) the ticket until it goes live. The activation
+      // Cloud Function adds them back and emails them on the go-live date.
+      const participants = isFutureScheduled
+        ? [user.id]
+        : [...new Set([user.id, ...assigneeIds])];
 
       await setDoc(doc(db, 'tickets', ticketId), {
-        type, title, description, status: 'Open', priority,
+        type, title, description, priority,
+        status: isFutureScheduled ? 'Scheduled' : 'Open',
         assigneeIds, submitterId: user.id, participants,
+        ...(isFutureScheduled ? { scheduledFor: Timestamp.fromDate(scheduledDate!) } : {}),
         createdAt: serverTimestamp(), updatedAt: serverTimestamp(),
       });
 
-      await logTicketCreated(ticketId, user.id);
+      // For scheduled tickets the 'created' audit event is logged on activation
+      // so analytics clock from the go-live date, not from when it was scheduled.
+      if (!isFutureScheduled) await logTicketCreated(ticketId, user.id);
 
       if (storage) {
         for (const file of files) {
@@ -85,29 +102,40 @@ export function SubmitRequestPage() {
         }
       }
 
-      // Email submitter confirmation
-      await addDoc(collection(db, 'mail'), {
-        to: user.email,
-        message: {
-          subject: `Your request ${ticketId} has been submitted`,
-          html: `<p>Your support request has been submitted successfully.</p><p><strong>${ticketId}</strong> — ${title}</p><p>Priority: ${priority} · Type: ${type}</p><p><a href="${window.location.origin}/tickets/${ticketId}">View ticket →</a></p>`,
-        },
-      });
+      if (isFutureScheduled) {
+        const goLive = scheduledDate!.toLocaleString();
+        await addDoc(collection(db, 'mail'), {
+          to: user.email,
+          message: {
+            subject: `Your request ${ticketId} is scheduled for ${goLive}`,
+            html: `<p>Your support request has been scheduled and will go live on <strong>${goLive}</strong>. Assignees will be notified then.</p><p><strong>${ticketId}</strong> — ${title}</p><p>Priority: ${priority} · Type: ${type}</p><p><a href="${window.location.origin}/tickets/${ticketId}">View ticket →</a></p>`,
+          },
+        });
+      } else {
+        // Email submitter confirmation
+        await addDoc(collection(db, 'mail'), {
+          to: user.email,
+          message: {
+            subject: `Your request ${ticketId} has been submitted`,
+            html: `<p>Your support request has been submitted successfully.</p><p><strong>${ticketId}</strong> — ${title}</p><p>Priority: ${priority} · Type: ${type}</p><p><a href="${window.location.origin}/tickets/${ticketId}">View ticket →</a></p>`,
+          },
+        });
 
-      // Email each assignee
-      for (const assigneeId of assigneeIds) {
-        const assigneeDoc = await getDoc(doc(db, 'profiles', assigneeId));
-        const assigneeEmail = assigneeDoc.data()?.email;
-        if (assigneeEmail) {
-          await addDoc(collection(db, 'mail'), {
-            to: assigneeEmail,
-            message: {
-              subject: `New ${priority} ticket: ${title}`,
-              html: `<p>A new support request has been assigned to you.</p><p><strong>${ticketId}</strong> — ${title}</p><p><a href="${window.location.origin}/tickets/${ticketId}">View ticket →</a></p>`,
-            },
-          });
-        } else {
-          console.warn(`Skipping assignee notification for ${ticketId}: profile ${assigneeId} has no email field. Have them sign in once to self-heal, or fix via /admin/team.`);
+        // Email each assignee
+        for (const assigneeId of assigneeIds) {
+          const assigneeDoc = await getDoc(doc(db, 'profiles', assigneeId));
+          const assigneeEmail = assigneeDoc.data()?.email;
+          if (assigneeEmail) {
+            await addDoc(collection(db, 'mail'), {
+              to: assigneeEmail,
+              message: {
+                subject: `New ${priority} ticket: ${title}`,
+                html: `<p>A new support request has been assigned to you.</p><p><strong>${ticketId}</strong> — ${title}</p><p><a href="${window.location.origin}/tickets/${ticketId}">View ticket →</a></p>`,
+              },
+            });
+          } else {
+            console.warn(`Skipping assignee notification for ${ticketId}: profile ${assigneeId} has no email field. Have them sign in once to self-heal, or fix via /admin/team.`);
+          }
         }
       }
 
@@ -117,6 +145,14 @@ export function SubmitRequestPage() {
       setIsSubmitting(false);
     }
   };
+
+  const canSchedule = isAdminRole(user?.role);
+  // Local-time min for the datetime-local input so admins can't pick the past.
+  const nowLocalMin = (() => {
+    const d = new Date();
+    d.setSeconds(0, 0);
+    return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+  })();
 
   return (
     <div className="max-w-2xl mx-auto">
@@ -145,6 +181,25 @@ export function SubmitRequestPage() {
               </select>
             </div>
           </div>
+
+          {canSchedule && (
+            <div className="rounded-md border border-purple-200 bg-purple-50/50 p-4">
+              <label htmlFor="scheduledFor" className="flex items-center text-sm font-medium text-gray-700">
+                <CalendarClock className="h-4 w-4 mr-2 text-purple-600" />
+                Schedule for later <span className="ml-1 font-normal text-gray-500">(optional)</span>
+              </label>
+              <input
+                type="datetime-local"
+                name="scheduledFor"
+                id="scheduledFor"
+                min={nowLocalMin}
+                className="mt-2 block w-full border-gray-300 rounded-md shadow-sm focus:ring-brand-dark focus:border-brand-dark sm:text-sm border p-2"
+              />
+              <p className="mt-2 text-xs text-gray-500">
+                Leave blank to submit now. If set to a future date, the ticket stays hidden until then, and goes live — notifying assignees — on that date.
+              </p>
+            </div>
+          )}
 
           <div>
             <label htmlFor="title" className="block text-sm font-medium text-gray-700">Title</label>

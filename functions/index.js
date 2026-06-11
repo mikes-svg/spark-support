@@ -4,6 +4,11 @@
  * - sendTicketReminders: scheduled every 24 hours. For each ticket with status
  *   'Open' or 'In Progress' that is at least 24 hours old, email all assignees
  *   a reminder. Tracks `lastReminderAt` on each ticket to avoid duplicate emails.
+ *
+ * - activateScheduledTickets: scheduled hourly. For each ticket with status
+ *   'Scheduled' whose `scheduledFor` date has passed, flip it to 'Open' as if
+ *   freshly submitted (reset createdAt, restore assignees to participants),
+ *   log the 'created' audit event, and email the assignees.
  */
 
 const { onSchedule } = require('firebase-functions/v2/scheduler');
@@ -94,5 +99,70 @@ exports.sendTicketReminders = onSchedule(
     }
 
     logger.info(`Sent ${remindersSent} reminder emails`);
+  }
+);
+
+exports.activateScheduledTickets = onSchedule(
+  {
+    schedule: 'every 1 hours',
+    timeZone: 'America/Los_Angeles',
+    region: 'us-central1',
+  },
+  async () => {
+    const now = admin.firestore.Timestamp.now();
+
+    const snap = await db
+      .collection('tickets')
+      .where('status', '==', 'Scheduled')
+      .where('scheduledFor', '<=', now)
+      .get();
+
+    logger.info(`Found ${snap.size} scheduled tickets due to go live`);
+
+    let activated = 0;
+
+    for (const ticketDoc of snap.docs) {
+      const ticket = ticketDoc.data();
+      const assigneeIds = getAssigneeIds(ticket);
+      const participants = [...new Set([ticket.submitterId, ...assigneeIds].filter(Boolean))];
+
+      // Go live: behave like a same-day submission — reset createdAt so the
+      // reminder clock starts now, and restore assignees to participants so
+      // they can see the ticket.
+      await ticketDoc.ref.update({
+        status: 'Open',
+        participants,
+        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+
+      // Audit 'created' now so analytics clock from the go-live date.
+      await db.collection('ticketEvents').add({
+        ticketId: ticketDoc.id,
+        type: 'created',
+        actorId: ticket.submitterId,
+        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+
+      // Notify assignees, mirroring the submit-time assignment email.
+      const assigneeDocs = await Promise.all(
+        assigneeIds.map((aid) => db.collection('profiles').doc(aid).get())
+      );
+      for (const aDoc of assigneeDocs) {
+        const email = aDoc.data()?.email;
+        if (!email) continue;
+        await db.collection('mail').add({
+          to: email,
+          message: {
+            subject: `New ${ticket.priority} ticket: ${ticket.title}`,
+            html: `<p>A new support request has been assigned to you.</p><p><strong>${ticketDoc.id}</strong> — ${ticket.title}</p><p><a href="${APP_URL}/tickets/${ticketDoc.id}">View ticket →</a></p>`,
+          },
+        });
+      }
+
+      activated++;
+    }
+
+    logger.info(`Activated ${activated} scheduled tickets`);
   }
 );

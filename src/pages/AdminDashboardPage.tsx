@@ -6,6 +6,7 @@ import { useAuth } from '../context/AuthContext';
 import { Filter, AlertCircle, CheckCircle2, Clock, RefreshCw } from 'lucide-react';
 import { ConfirmModal } from '../components/ConfirmModal';
 import { AssigneeSelector } from '../components/AssigneeSelector';
+import { StatusBadge } from '../components/Badges';
 import { getAssigneeIds } from '../types';
 import type { TicketStatus, TicketPriority } from '../types';
 import {
@@ -20,6 +21,7 @@ interface Ticket {
   assigneeIds?: string[]; assigneeId?: string | null;
   submitterId: string; participants?: string[];
   createdAt: { toDate: () => Date } | string;
+  scheduledFor?: { toDate: () => Date } | string | null;
 }
 
 const STATUSES: TicketStatus[] = ['Open', 'In Progress', 'On Hold', 'Resolved'];
@@ -150,6 +152,12 @@ export function AdminDashboardPage() {
     return d.toLocaleDateString();
   };
 
+  const formatDateTime = (ts: Ticket['scheduledFor']) => {
+    if (!ts) return '';
+    const d = typeof ts === 'string' ? new Date(ts) : ts.toDate();
+    return d.toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+  };
+
   const openCount = tickets.filter((t) => t.status === 'Open').length;
   const inProgressCount = tickets.filter((t) => t.status === 'In Progress').length;
   const onHoldCount = tickets.filter((t) => t.status === 'On Hold').length;
@@ -193,6 +201,7 @@ export function AdminDashboardPage() {
           <option value="Active">Active (hide Resolved)</option>
           <option value="All">All Statuses</option>
           {STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
+          <option value="Scheduled">Scheduled</option>
         </select>
         <select value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)} className="block pl-3 pr-10 py-2 text-sm border-gray-300 focus:outline-none focus:ring-brand-dark focus:border-brand-dark rounded-md border">
           <option value="">All Types</option>
@@ -239,14 +248,21 @@ export function AdminDashboardPage() {
                         <div className="text-xs text-gray-500">{ticket.type} · {formatDate(ticket.createdAt)}</div>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">
-                        <select
-                          className="block w-full pl-3 pr-8 py-1.5 text-sm border-gray-300 focus:outline-none focus:ring-brand-dark focus:border-brand-dark rounded-md border bg-gray-50"
-                          value={ticket.status}
-                          onClick={(e) => e.stopPropagation()}
-                          onChange={(e) => setPendingChange({ type: 'status', ticket, value: e.target.value as TicketStatus })}
-                        >
-                          {STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
-                        </select>
+                        {ticket.status === 'Scheduled' ? (
+                          <div className="flex flex-col gap-1">
+                            <StatusBadge status="Scheduled" />
+                            <span className="text-[11px] text-purple-700">Goes live {formatDateTime(ticket.scheduledFor)}</span>
+                          </div>
+                        ) : (
+                          <select
+                            className="block w-full pl-3 pr-8 py-1.5 text-sm border-gray-300 focus:outline-none focus:ring-brand-dark focus:border-brand-dark rounded-md border bg-gray-50"
+                            value={ticket.status}
+                            onClick={(e) => e.stopPropagation()}
+                            onChange={(e) => setPendingChange({ type: 'status', ticket, value: e.target.value as TicketStatus })}
+                          >
+                            {STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
+                          </select>
+                        )}
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">
                         <select

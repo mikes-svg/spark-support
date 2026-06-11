@@ -9,8 +9,17 @@ export function isAdminRole(role?: string | null): boolean {
 export function isSuperadminRole(role?: string | null): boolean {
   return role === 'superadmin';
 }
-export type TicketStatus = 'Open' | 'In Progress' | 'On Hold' | 'Resolved';
+// 'Scheduled' is a pre-live state: the ticket exists but has a future go-live
+// date and behaves as if it hasn't been submitted yet. A Cloud Function flips
+// it to 'Open' (sending assignee emails, resetting createdAt) on the go-live
+// date. It is intentionally NOT offered in the manual status dropdowns.
+export type TicketStatus = 'Open' | 'In Progress' | 'On Hold' | 'Resolved' | 'Scheduled';
 export type TicketPriority = 'Low' | 'Medium' | 'High' | 'Urgent';
+
+/** True if a ticket is scheduled for a future go-live and not yet live. */
+export function isScheduled(ticket: { status?: string | null }): boolean {
+  return ticket.status === 'Scheduled';
+}
 
 /** Backward-compat: read assignees as an array, supporting old `assigneeId` string field. */
 export function getAssigneeIds(ticket: { assigneeIds?: string[] | null; assigneeId?: string | null }): string[] {

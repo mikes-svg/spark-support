@@ -134,7 +134,13 @@ export function AnalyticsPage() {
           getDocs(query(collection(db!, 'ticketEvents'), orderBy('createdAt', 'asc'))).catch(() => null),
           getDocs(collection(db!, 'profiles')),
         ]);
-        setTickets(ticketsSnap.docs.map((d) => ({ id: d.id, ...d.data() } as Ticket)));
+        // Exclude scheduled (not-yet-live) tickets — they have no real activity
+        // until their go-live date, when they become 'Open' with a reset createdAt.
+        setTickets(
+          ticketsSnap.docs
+            .map((d) => ({ id: d.id, ...d.data() } as Ticket))
+            .filter((t) => t.status !== 'Scheduled'),
+        );
         if (eventsSnap) {
           setEvents(eventsSnap.docs.map((d) => ({ id: d.id, ...d.data() } as TicketEvent)));
         }

@@ -34,9 +34,15 @@ service cloud.firestore {
       allow read: if isSignedIn() && (
         resource.data.participants.hasAny([request.auth.uid]) || isAdmin()
       );
-      allow create: if isSignedIn();
+      // Only admins may future-date a ticket (status 'Scheduled'); anyone may
+      // create a normal ticket.
+      allow create: if isSignedIn() &&
+        (request.resource.data.status != 'Scheduled' || isAdmin());
       allow update: if isAdmin();
-      allow delete: if isSuperAdmin();
+      // Superadmins can delete any ticket; admins can also delete a scheduled
+      // ticket that never went live (the "cancel" action).
+      allow delete: if isSuperAdmin() ||
+        (isAdmin() && resource.data.status == 'Scheduled');
     }
 
     match /comments/{commentId} {

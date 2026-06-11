@@ -17,6 +17,14 @@
       ]
     },
     {
+      "collectionGroup": "tickets",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "scheduledFor", "order": "ASCENDING" }
+      ]
+    },
+    {
       "collectionGroup": "requestTypes",
       "queryScope": "COLLECTION",
       "fields": [
