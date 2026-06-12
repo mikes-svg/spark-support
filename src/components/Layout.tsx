@@ -3,7 +3,6 @@ import { Outlet, useLocation } from 'react-router-dom';
 import { Sidebar } from './Sidebar';
 import { Header } from './Header';
 import { PageSpinner } from './PageSpinner';
-import { motion, AnimatePresence } from 'framer-motion';
 
 export function Layout() {
   const location = useLocation();
@@ -38,19 +37,12 @@ export function Layout() {
           onMenuClick={() => setSidebarOpen(true)}
         />
         <main className="flex-1 overflow-y-auto p-4 sm:p-6 lg:p-8">
-          <AnimatePresence mode="wait">
-            <motion.div
-              key={location.pathname}
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -10 }}
-              transition={{ duration: 0.2 }}
-              className="h-full max-w-7xl mx-auto">
-              <Suspense fallback={<PageSpinner />}>
-                <Outlet />
-              </Suspense>
-            </motion.div>
-          </AnimatePresence>
+          {/* key changes on navigation, replaying the CSS fade-in animation */}
+          <div key={location.pathname} className="h-full max-w-7xl mx-auto animate-fade-in-up">
+            <Suspense fallback={<PageSpinner />}>
+              <Outlet />
+            </Suspense>
+          </div>
         </main>
       </div>
       <div

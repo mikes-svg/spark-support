@@ -3,7 +3,6 @@ import { useNavigate } from 'react-router-dom';
 import { signInWithPopup } from 'firebase/auth';
 import { auth, googleProvider } from '../lib/firebase';
 import { useAuth } from '../context/AuthContext';
-import { motion } from 'framer-motion';
 
 export function LoginPage() {
   const navigate = useNavigate();
@@ -39,12 +38,7 @@ export function LoginPage() {
     <div className="min-h-screen bg-brand-cream flex flex-col justify-center py-12 sm:px-6 lg:px-8 relative overflow-hidden">
       <div className="absolute top-0 left-0 w-full h-64 bg-brand-dark rounded-b-[100px] opacity-10" />
 
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.5 }}
-        className="sm:mx-auto sm:w-full sm:max-w-md relative z-10"
-      >
+      <div className="sm:mx-auto sm:w-full sm:max-w-md relative z-10 animate-fade-in-up-lg">
         <div className="bg-white py-10 px-4 shadow-xl shadow-gray-200/50 sm:rounded-2xl sm:px-10 border border-gray-100">
           <div className="text-center mb-8">
             <img src="/spark-logo.png" alt="Spark Management" className="mx-auto h-20 mb-4" />
@@ -80,7 +74,7 @@ export function LoginPage() {
             Sign in with Google
           </button>
         </div>
-      </motion.div>
+      </div>
     </div>
   );
 }

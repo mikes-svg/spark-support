@@ -15,7 +15,6 @@ export default defineConfig({
         manualChunks(id) {
           if (!id.includes('node_modules')) return;
           if (id.includes('firebase') || id.includes('@firebase')) return 'firebase';
-          if (id.includes('framer-motion')) return 'framer';
           if (id.includes('react-router') || id.includes('@remix-run')) return 'router';
           if (id.includes('/react') || id.includes('/scheduler')) return 'react';
         },
