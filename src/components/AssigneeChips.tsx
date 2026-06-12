@@ -1,8 +1,7 @@
 import { useState, useEffect, useRef, useLayoutEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { Plus, X, Users } from 'lucide-react';
-
-interface Profile { id: string; name: string; photoURL: string; }
+import type { Profile } from '../types';
 
 interface Props {
   value: string[];

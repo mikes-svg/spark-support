@@ -11,7 +11,7 @@ import { AssigneeChips } from '../components/AssigneeChips';
 import { MentionTextarea, renderCommentBody } from '../components/MentionTextarea';
 import { PageSpinner } from '../components/PageSpinner';
 import { getAssigneeIds, isScheduled, isAdminRole, isSuperadminRole } from '../types';
-import type { TicketStatus, TicketPriority } from '../types';
+import type { TicketStatus, TicketPriority, Ticket, Profile } from '../types';
 import { toDate, localDateTimeMin } from '../lib/dates';
 import { sendMail, ticketUrl } from '../lib/mail';
 import {
@@ -21,17 +21,6 @@ import {
   logTicketComment,
 } from '../lib/ticketEvents';
 
-interface Profile { id: string; name: string; photoURL: string; email?: string; }
-interface Ticket {
-  id: string; type: string; title: string; description: string;
-  status: TicketStatus; priority: TicketPriority;
-  assigneeIds?: string[]; assigneeId?: string | null;
-  submitterId: string;
-  participants?: string[];
-  createdAt: { toDate: () => Date } | string;
-  updatedAt: { toDate: () => Date } | string;
-  scheduledFor?: { toDate: () => Date } | string | null;
-}
 interface Comment {
   id: string; ticketId: string; userId: string; body: string;
   mentionedIds?: string[];

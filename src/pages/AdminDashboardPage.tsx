@@ -8,7 +8,7 @@ import { ConfirmModal } from '../components/ConfirmModal';
 import { AssigneeSelector } from '../components/AssigneeSelector';
 import { StatusBadge } from '../components/Badges';
 import { getAssigneeIds, isSuperadminRole } from '../types';
-import type { TicketStatus, TicketPriority } from '../types';
+import type { TicketStatus, TicketPriority, Ticket, Profile } from '../types';
 import { formatDate, formatDateTime } from '../lib/dates';
 import { sendMail, ticketUrl } from '../lib/mail';
 import {
@@ -16,15 +16,6 @@ import {
   updateTicketPriority,
   updateTicketAssignees,
 } from '../lib/ticketEvents';
-
-interface Profile { id: string; name: string; photoURL: string; role: string; email?: string; }
-interface Ticket {
-  id: string; type: string; title: string; status: TicketStatus; priority: TicketPriority;
-  assigneeIds?: string[]; assigneeId?: string | null;
-  submitterId: string; participants?: string[];
-  createdAt: { toDate: () => Date } | string;
-  scheduledFor?: { toDate: () => Date } | string | null;
-}
 
 const STATUSES: TicketStatus[] = ['Open', 'In Progress', 'On Hold', 'Resolved'];
 const PRIORITIES: TicketPriority[] = ['Low', 'Medium', 'High', 'Urgent'];

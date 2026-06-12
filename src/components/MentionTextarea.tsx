@@ -1,6 +1,5 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
-
-interface Profile { id: string; name: string; photoURL: string; }
+import type { Profile } from '../types';
 
 interface Props {
   value: string;

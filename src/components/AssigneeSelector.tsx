@@ -1,7 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { Check, ChevronDown, Users } from 'lucide-react';
-
-interface Profile { id: string; name: string; photoURL: string; }
+import type { Profile } from '../types';
 
 interface Props {
   value: string[];

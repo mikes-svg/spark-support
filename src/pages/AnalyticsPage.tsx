@@ -7,7 +7,7 @@ import {
 } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { getAssigneeIds } from '../types';
-import type { TicketStatus, TicketPriority } from '../types';
+import type { TicketStatus, TicketPriority, Ticket, Profile } from '../types';
 import { toDate } from '../lib/dates';
 import { PageSpinner } from '../components/PageSpinner';
 import {
@@ -20,26 +20,6 @@ import {
   Mail,
   Activity,
 } from 'lucide-react';
-
-interface Ticket {
-  id: string;
-  type: string;
-  status: TicketStatus;
-  priority: TicketPriority;
-  assigneeIds?: string[];
-  assigneeId?: string | null;
-  submitterId: string;
-  createdAt: { toDate: () => Date } | string;
-  updatedAt: { toDate: () => Date } | string;
-}
-
-interface Profile {
-  id: string;
-  name: string;
-  email?: string;
-  photoURL?: string;
-  role?: string;
-}
 
 interface TicketEvent {
   id: string;

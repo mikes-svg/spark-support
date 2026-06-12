@@ -27,6 +27,44 @@ export function roleLabel(role?: string | null): string {
 export type TicketStatus = 'Open' | 'In Progress' | 'On Hold' | 'Resolved' | 'Scheduled';
 export type TicketPriority = 'Low' | 'Medium' | 'High' | 'Urgent';
 
+/** A Firestore Timestamp (has toDate()) or an ISO date string, as read off a document. */
+export type FsTimestamp = { toDate: () => Date } | string;
+
+/**
+ * A ticket document, as read by the various views. Fields that only some views
+ * populate/read are optional so one shape fits the dashboard, admin, detail,
+ * and analytics pages.
+ */
+export interface Ticket {
+  id: string;
+  type: string;
+  title: string;
+  description?: string;
+  status: TicketStatus;
+  priority: TicketPriority;
+  assigneeIds?: string[];
+  assigneeId?: string | null;
+  submitterId: string;
+  participants?: string[];
+  createdAt: FsTimestamp;
+  updatedAt?: FsTimestamp;
+  scheduledFor?: FsTimestamp | null;
+}
+
+/**
+ * A profile/user document as read for display (a directory entry). `email` and
+ * `role` are optional because not every read path needs or fetches them. The
+ * Team/Settings forms keep their own stricter shape, and AuthContext keeps its
+ * own all-required Profile for the signed-in user.
+ */
+export interface Profile {
+  id: string;
+  name: string;
+  photoURL: string;
+  email?: string;
+  role?: Role;
+}
+
 /** True if a ticket is scheduled for a future go-live and not yet live. */
 export function isScheduled(ticket: { status?: string | null }): boolean {
   return ticket.status === 'Scheduled';

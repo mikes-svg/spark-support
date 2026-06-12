@@ -6,23 +6,8 @@ import { useAuth } from '../context/AuthContext';
 import { StatusBadge } from '../components/Badges';
 import { Plus } from 'lucide-react';
 import { getAssigneeIds } from '../types';
-import type { TicketStatus, TicketPriority } from '../types';
+import type { Ticket, Profile } from '../types';
 import { formatDate } from '../lib/dates';
-
-interface Ticket {
-  id: string;
-  type: string;
-  title: string;
-  status: TicketStatus;
-  priority: TicketPriority;
-  assigneeIds?: string[];
-  assigneeId?: string | null;
-  submitterId: string;
-  createdAt: { toDate: () => Date } | string;
-  participants: string[];
-}
-
-interface Profile { id: string; name: string; photoURL: string; }
 
 export function DashboardPage() {
   const { user } = useAuth();

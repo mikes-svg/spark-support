@@ -1,4 +1,5 @@
-export type FsTimestamp = { toDate: () => Date } | string;
+import type { FsTimestamp } from '../types';
+export type { FsTimestamp };
 
 /** Robust conversion of a Firestore Timestamp or ISO string to a Date. Returns null for falsy input. */
 export function toDate(ts: FsTimestamp | null | undefined): Date | null {
