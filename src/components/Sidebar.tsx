@@ -29,8 +29,8 @@ function SidebarContent({ onClose }: { onClose: () => void }) {
 
   const adminItems = [
     { to: '/admin', icon: TicketIcon, label: 'All Tickets', exact: true },
-    { to: '/admin/team', icon: Users, label: 'Team' },
     ...(isSuperadmin ? [
+      { to: '/admin/team', icon: Users, label: 'Team' },
       { to: '/admin/analytics', icon: BarChart3, label: 'Analytics' },
       { to: '/admin/settings', icon: Settings, label: 'Settings' },
     ] : []),

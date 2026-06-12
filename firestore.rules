@@ -20,13 +20,15 @@ service cloud.firestore {
 
     match /profiles/{userId} {
       allow read: if isSignedIn();
-      allow create: if request.auth.uid == userId || isAdmin();
-      allow update: if request.auth.uid == userId || isAdmin();
-      // Admins can delete any profile. Users can also delete profile docs whose
-      // email matches their own — this lets the sign-in flow auto-clean up
+      // Team management (inviting users, changing roles) is superadmin-only.
+      // Users may still create/update their OWN profile doc (sign-in self-heal).
+      allow create: if request.auth.uid == userId || isSuperAdmin();
+      allow update: if request.auth.uid == userId || isSuperAdmin();
+      // Superadmins can delete any profile. Users can also delete profile docs
+      // whose email matches their own — this lets the sign-in flow auto-clean up
       // pre-registration docs (email-slug ids) that have already been migrated
       // to the user's UID profile.
-      allow delete: if isAdmin() ||
+      allow delete: if isSuperAdmin() ||
         (isSignedIn() && resource.data.email == request.auth.token.email);
     }
 
@@ -34,15 +36,14 @@ service cloud.firestore {
       allow read: if isSignedIn() && (
         resource.data.participants.hasAny([request.auth.uid]) || isAdmin()
       );
-      // Only admins may future-date a ticket (status 'Scheduled'); anyone may
-      // create a normal ticket.
+      // Only superadmins may future-date a ticket (status 'Scheduled'); anyone
+      // may create a normal ticket.
       allow create: if isSignedIn() &&
-        (request.resource.data.status != 'Scheduled' || isAdmin());
+        (request.resource.data.status != 'Scheduled' || isSuperAdmin());
       allow update: if isAdmin();
-      // Superadmins can delete any ticket; admins can also delete a scheduled
-      // ticket that never went live (the "cancel" action).
-      allow delete: if isSuperAdmin() ||
-        (isAdmin() && resource.data.status == 'Scheduled');
+      // Superadmins can delete any ticket (this also covers cancelling a
+      // not-yet-live scheduled ticket).
+      allow delete: if isSuperAdmin();
     }
 
     match /comments/{commentId} {

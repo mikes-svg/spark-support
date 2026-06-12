@@ -36,10 +36,10 @@ const PERMISSIONS: PermissionSection[] = [
     title: 'Team',
     color: 'bg-amber-50 text-amber-800',
     permissions: [
-      { label: 'Invite individual users', super: true, admin: true, user: false },
-      { label: 'Bulk invite users', super: true, admin: true, user: false },
-      { label: 'Change user roles', super: true, admin: true, user: false },
-      { label: 'Delete users', super: true, admin: true, user: false },
+      { label: 'Invite individual users', super: true, admin: false, user: false },
+      { label: 'Bulk invite users', super: true, admin: false, user: false },
+      { label: 'Change user roles', super: true, admin: false, user: false },
+      { label: 'Delete users', super: true, admin: false, user: false },
     ],
   },
   {

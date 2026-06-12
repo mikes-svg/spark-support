@@ -162,6 +162,8 @@ export function AdminDashboardPage() {
     return d.toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
   };
 
+  // Scheduling is a superadmin-only feature; only they can reveal scheduled tickets.
+  const isSuperadmin = user?.role === 'superadmin';
   const scheduledCount = tickets.filter((t) => t.status === 'Scheduled').length;
   const openCount = tickets.filter((t) => t.status === 'Open').length;
   const inProgressCount = tickets.filter((t) => t.status === 'In Progress').length;
@@ -215,12 +217,14 @@ export function AdminDashboardPage() {
           <option value="">All Assignees</option>
           {adminProfiles.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
         </select>
-        <button
-          onClick={() => setShowScheduled((s) => !s)}
-          className={`text-sm font-medium px-3 py-1.5 rounded-md border transition-colors ${showScheduled ? 'bg-purple-100 text-purple-800 border-purple-300' : 'text-gray-600 border-gray-300 hover:bg-gray-50'}`}
-        >
-          {showScheduled ? 'Hide scheduled' : `Show scheduled${scheduledCount ? ` (${scheduledCount})` : ''}`}
-        </button>
+        {isSuperadmin && (
+          <button
+            onClick={() => setShowScheduled((s) => !s)}
+            className={`text-sm font-medium px-3 py-1.5 rounded-md border transition-colors ${showScheduled ? 'bg-purple-100 text-purple-800 border-purple-300' : 'text-gray-600 border-gray-300 hover:bg-gray-50'}`}
+          >
+            {showScheduled ? 'Hide scheduled' : `Show scheduled${scheduledCount ? ` (${scheduledCount})` : ''}`}
+          </button>
+        )}
         <button onClick={() => { setStatusFilter('Active'); setTypeFilter(''); setAssigneeFilter(''); setShowScheduled(false); }} className="text-sm text-brand-gold hover:text-yellow-700 font-medium">Reset Filters</button>
         <button onClick={() => fetchData(false)} disabled={refreshing} className="ml-auto p-2 text-gray-400 hover:text-brand-dark transition-colors rounded-md hover:bg-gray-100 disabled:opacity-50" title="Refresh">
           <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} />

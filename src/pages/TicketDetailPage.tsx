@@ -350,14 +350,14 @@ export function TicketDetailPage() {
                 </p>
               </div>
             </div>
-            {isAdmin && !rescheduling && (
+            {isSuperadmin && !rescheduling && (
               <div className="flex items-center gap-2">
                 <button onClick={() => { setRescheduleValue(''); setRescheduling(true); }} className="px-3 py-1.5 text-sm font-medium text-purple-700 bg-white border border-purple-300 rounded-md hover:bg-purple-50 transition-colors">Reschedule</button>
                 <button onClick={() => setShowCancelConfirm(true)} className="px-3 py-1.5 text-sm font-medium text-red-600 bg-white border border-red-200 rounded-md hover:bg-red-50 transition-colors">Cancel</button>
               </div>
             )}
           </div>
-          {isAdmin && rescheduling && (
+          {isSuperadmin && rescheduling && (
             <div className="mt-4 flex flex-wrap items-end gap-3 border-t border-purple-200 pt-4">
               <div>
                 <label htmlFor="reschedule" className="block text-xs font-medium text-purple-800 mb-1">New go-live date</label>

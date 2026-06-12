@@ -6,7 +6,7 @@ import { db, storage } from '../lib/firebase';
 import { useAuth } from '../context/AuthContext';
 import { UploadCloud, X, CalendarClock } from 'lucide-react';
 import { getOrSeedRequestTypes } from '../lib/seedRequestTypes';
-import { getDefaultAssigneeIds, isAdminRole } from '../types';
+import { getDefaultAssigneeIds, isSuperadminRole } from '../types';
 import { logTicketCreated } from '../lib/ticketEvents';
 
 interface RequestType {
@@ -62,7 +62,7 @@ export function SubmitRequestPage() {
     // Admins may future-date a ticket so it goes live (and notifies assignees)
     // on the chosen date, exactly as if submitted then. A scheduled-date in the
     // past or absent falls through to an immediate submission.
-    const canSchedule = isAdminRole(user.role);
+    const canSchedule = isSuperadminRole(user.role);
     const scheduledRaw = canSchedule ? (data.get('scheduledFor') as string) : '';
     const scheduledDate = scheduledRaw ? new Date(scheduledRaw) : null;
     const isFutureScheduled = !!scheduledDate && scheduledDate.getTime() > Date.now();
@@ -146,7 +146,7 @@ export function SubmitRequestPage() {
     }
   };
 
-  const canSchedule = isAdminRole(user?.role);
+  const canSchedule = isSuperadminRole(user?.role);
   // Local-time min for the datetime-local input so admins can't pick the past.
   const nowLocalMin = (() => {
     const d = new Date();

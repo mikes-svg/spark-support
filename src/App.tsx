@@ -77,7 +77,7 @@ export function App() {
             <Route
               path="admin/team"
               element={
-                <ProtectedRoute requireAdmin>
+                <ProtectedRoute requireSuperadmin>
                   <TeamPage />
                 </ProtectedRoute>
               }
