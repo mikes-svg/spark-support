@@ -106,7 +106,14 @@ export function AdminDashboardPage() {
       const added = newAssigneeIds.filter((id) => !oldAssigneeIds.includes(id));
       const participants = [...new Set([ticket.submitterId, ...newAssigneeIds])];
       setTickets((prev) => prev.map((t) => t.id === ticket.id ? { ...t, assigneeIds: newAssigneeIds, assigneeId: null, participants } : t));
-      await updateTicketAssignees(ticket.id, oldAssigneeIds, newAssigneeIds, participants, user.id);
+      try {
+        await updateTicketAssignees(ticket.id, oldAssigneeIds, newAssigneeIds, participants, user.id);
+      } catch (err) {
+        console.error('Failed to update assignees:', err);
+        setTickets((prev) => prev.map((t) => t.id === ticket.id ? ticket : t));
+        alert('Failed to update assignees. Please try again.');
+        return;
+      }
 
       // Email newly added assignees
       for (const addedId of added) {
@@ -122,7 +129,14 @@ export function AdminDashboardPage() {
     } else if (change.type === 'status') {
       const { ticket, value } = change;
       setTickets((prev) => prev.map((t) => t.id === ticket.id ? { ...t, status: value } : t));
-      await updateTicketStatus(ticket.id, ticket.status, value, user.id);
+      try {
+        await updateTicketStatus(ticket.id, ticket.status, value, user.id);
+      } catch (err) {
+        console.error('Failed to update status:', err);
+        setTickets((prev) => prev.map((t) => t.id === ticket.id ? ticket : t));
+        alert('Failed to update status. Please try again.');
+        return;
+      }
 
       const submitterDoc = await getDoc(doc(db, 'profiles', ticket.submitterId));
       const submitterEmail = submitterDoc.data()?.email;
@@ -133,7 +147,13 @@ export function AdminDashboardPage() {
     } else {
       const { ticket, value } = change;
       setTickets((prev) => prev.map((t) => t.id === ticket.id ? { ...t, priority: value } : t));
-      await updateTicketPriority(ticket.id, ticket.priority, value, user.id);
+      try {
+        await updateTicketPriority(ticket.id, ticket.priority, value, user.id);
+      } catch (err) {
+        console.error('Failed to update priority:', err);
+        setTickets((prev) => prev.map((t) => t.id === ticket.id ? ticket : t));
+        alert('Failed to update priority. Please try again.');
+      }
     }
   };
 

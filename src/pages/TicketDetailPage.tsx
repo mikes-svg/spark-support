@@ -205,9 +205,17 @@ export function TicketDetailPage() {
 
   const handleStatusChange = async (newStatus: TicketStatus) => {
     if (!ticket || !db || !user) return;
+    const prev = ticket;
     const fromStatus = ticket.status;
     setTicket({ ...ticket, status: newStatus });
-    await updateTicketStatus(ticket.id, fromStatus, newStatus, user.id);
+    try {
+      await updateTicketStatus(ticket.id, fromStatus, newStatus, user.id);
+    } catch (err) {
+      console.error('Failed to update status:', err);
+      setTicket(prev);
+      alert('Failed to update status. Please try again.');
+      return;
+    }
 
     const submitterDoc = await getDoc(doc(db, 'profiles', ticket.submitterId));
     const submitterEmail = submitterDoc.data()?.email;
@@ -219,9 +227,16 @@ export function TicketDetailPage() {
 
   const handlePriorityChange = async (newPriority: TicketPriority) => {
     if (!ticket || !db || !user) return;
+    const prev = ticket;
     const fromPriority = ticket.priority;
     setTicket({ ...ticket, priority: newPriority });
-    await updateTicketPriority(ticket.id, fromPriority, newPriority, user.id);
+    try {
+      await updateTicketPriority(ticket.id, fromPriority, newPriority, user.id);
+    } catch (err) {
+      console.error('Failed to update priority:', err);
+      setTicket(prev);
+      alert('Failed to update priority. Please try again.');
+    }
   };
 
   const handleAssigneesChange = async (newAssigneeIds: string[]) => {
@@ -235,8 +250,16 @@ export function TicketDetailPage() {
       ? [ticket.submitterId]
       : [...new Set([ticket.submitterId, ...newAssigneeIds])];
 
+    const prev = ticket;
     setTicket({ ...ticket, assigneeIds: newAssigneeIds, assigneeId: null, participants } as Ticket);
-    await updateTicketAssignees(ticket.id, oldAssigneeIds, newAssigneeIds, participants, user.id);
+    try {
+      await updateTicketAssignees(ticket.id, oldAssigneeIds, newAssigneeIds, participants, user.id);
+    } catch (err) {
+      console.error('Failed to update assignees:', err);
+      setTicket(prev);
+      alert('Failed to update assignees. Please try again.');
+      return;
+    }
 
     if (scheduled) return; // no notifications until go-live
 
@@ -316,6 +339,15 @@ export function TicketDetailPage() {
     d.setSeconds(0, 0);
     return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
   })();
+
+  // Only allow @mentioning people who can actually read this ticket — admins
+  // (who can read any ticket) and current participants. Mentioning anyone else
+  // would email them a "View ticket" link that the rules deny.
+  const mentionableIds = new Set<string>([
+    ...adminProfiles.map((a) => a.id),
+    ...(ticket.participants ?? []),
+  ]);
+  const mentionableProfiles = allProfiles.filter((p) => mentionableIds.has(p.id));
 
   return (
     <div className="space-y-6">
@@ -445,7 +477,7 @@ export function TicketDetailPage() {
                 <MentionTextarea
                   value={newComment}
                   onChange={(text, ids) => { setNewComment(text); setPendingMentionIds(ids); }}
-                  users={allProfiles}
+                  users={mentionableProfiles}
                   placeholder="Add a comment… type @ to mention"
                   rows={2}
                   className="flex-1 w-full border-gray-300 rounded-lg shadow-sm focus:ring-brand-dark focus:border-brand-dark sm:text-sm border p-3 resize-none"
