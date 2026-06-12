@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Check, ChevronDown, Users } from 'lucide-react';
 
 interface Profile { id: string; name: string; photoURL: string; }

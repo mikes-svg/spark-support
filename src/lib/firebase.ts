@@ -2,7 +2,6 @@ import { initializeApp, FirebaseApp } from 'firebase/app';
 import { Auth, getAuth, GoogleAuthProvider } from 'firebase/auth';
 import { Firestore, getFirestore } from 'firebase/firestore';
 import { FirebaseStorage, getStorage } from 'firebase/storage';
-import { Analytics, getAnalytics, isSupported } from 'firebase/analytics';
 
 const firebaseConfig = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
@@ -18,7 +17,6 @@ let app: FirebaseApp | null = null;
 let auth: Auth | null = null;
 let db: Firestore | null = null;
 let storage: FirebaseStorage | null = null;
-let analytics: Analytics | null = null;
 let googleProvider: GoogleAuthProvider | null = null;
 
 try {
@@ -29,10 +27,8 @@ try {
   googleProvider = new GoogleAuthProvider();
   // TODO: Re-enable domain restriction at launch
   // googleProvider.setCustomParameters({ hd: 'standifercapital.com sparkmanage.com' });
-  // Analytics only works in browser (not SSR/test environments)
-  isSupported().then((yes) => { if (yes && app) analytics = getAnalytics(app!); });
 } catch (e) {
   console.warn('Firebase not configured — running in mock/dev mode');
 }
 
-export { auth, db, storage, analytics, firebaseConfig, googleProvider };
+export { auth, db, storage, googleProvider };

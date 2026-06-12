@@ -1,10 +1,10 @@
-import React, { useState, createContext, useContext, useEffect, ReactNode } from 'react';
+import { useState, createContext, useContext, useEffect, ReactNode } from 'react';
 import {
   onAuthStateChanged,
   signOut,
   User as FirebaseUser,
 } from 'firebase/auth';
-import { doc, getDoc, setDoc, deleteDoc, collection, query, where, getDocs, serverTimestamp } from 'firebase/firestore';
+import { doc, getDoc, setDoc, deleteDoc, collection, getDocs, serverTimestamp } from 'firebase/firestore';
 import { auth, db } from '../lib/firebase';
 import type { Role } from '../types';
 

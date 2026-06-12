@@ -1,4 +1,3 @@
-import React from 'react';
 import { TicketStatus, TicketPriority } from '../types';
 export function StatusBadge({ status }: {status: TicketStatus;}) {
   const colors = {
