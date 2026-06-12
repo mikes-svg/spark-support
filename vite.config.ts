@@ -6,6 +6,22 @@ export default defineConfig({
   define: {
     __BUILD_TIME__: JSON.stringify(new Date().toISOString()),
   },
+  build: {
+    rollupOptions: {
+      output: {
+        // Split vendors into cacheable chunks so app-code changes don't bust
+        // the large firebase download for return visitors. Order matters:
+        // react-router before react (its path contains "react").
+        manualChunks(id) {
+          if (!id.includes('node_modules')) return;
+          if (id.includes('firebase') || id.includes('@firebase')) return 'firebase';
+          if (id.includes('framer-motion')) return 'framer';
+          if (id.includes('react-router') || id.includes('@remix-run')) return 'router';
+          if (id.includes('/react') || id.includes('/scheduler')) return 'react';
+        },
+      },
+    },
+  },
   plugins: [
     react(),
     VitePWA({

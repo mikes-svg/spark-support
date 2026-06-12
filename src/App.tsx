@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { lazy } from 'react';
 import {
   BrowserRouter as Router,
   Routes,
@@ -9,12 +9,16 @@ import { AuthProvider, useAuth } from './context/AuthContext';
 import { Layout } from './components/Layout';
 import { LoginPage } from './pages/LoginPage';
 import { DashboardPage } from './pages/DashboardPage';
-import { SubmitRequestPage } from './pages/SubmitRequestPage';
-import { TicketDetailPage } from './pages/TicketDetailPage';
-import { AdminDashboardPage } from './pages/AdminDashboardPage';
-import { AdminSettingsPage } from './pages/AdminSettingsPage';
-import { TeamPage } from './pages/TeamPage';
-import { AnalyticsPage } from './pages/AnalyticsPage';
+
+// Heavier / less-frequently-hit pages are code-split so regular users don't
+// download the admin, team, analytics, and detail bundles up front. The
+// Layout wraps <Outlet> in <Suspense>, so these resolve inside the content area.
+const SubmitRequestPage = lazy(() => import('./pages/SubmitRequestPage').then((m) => ({ default: m.SubmitRequestPage })));
+const TicketDetailPage = lazy(() => import('./pages/TicketDetailPage').then((m) => ({ default: m.TicketDetailPage })));
+const AdminDashboardPage = lazy(() => import('./pages/AdminDashboardPage').then((m) => ({ default: m.AdminDashboardPage })));
+const AdminSettingsPage = lazy(() => import('./pages/AdminSettingsPage').then((m) => ({ default: m.AdminSettingsPage })));
+const TeamPage = lazy(() => import('./pages/TeamPage').then((m) => ({ default: m.TeamPage })));
+const AnalyticsPage = lazy(() => import('./pages/AnalyticsPage').then((m) => ({ default: m.AnalyticsPage })));
 
 function ProtectedRoute({
   children,
