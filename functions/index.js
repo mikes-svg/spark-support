@@ -5,7 +5,7 @@
  *   'Open' or 'In Progress' that is at least 24 hours old, email all assignees
  *   a reminder. Tracks `lastReminderAt` on each ticket to avoid duplicate emails.
  *
- * - activateScheduledTickets: scheduled hourly. For each ticket with status
+ * - activateScheduledTickets: runs every 5 minutes. For each ticket with status
  *   'Scheduled' whose `scheduledFor` date has passed, flip it to 'Open' as if
  *   freshly submitted (reset createdAt, restore assignees to participants),
  *   log the 'created' audit event, and email the assignees.
@@ -104,7 +104,7 @@ exports.sendTicketReminders = onSchedule(
 
 exports.activateScheduledTickets = onSchedule(
   {
-    schedule: 'every 1 hours',
+    schedule: 'every 5 minutes',
     timeZone: 'America/Los_Angeles',
     region: 'us-central1',
   },
