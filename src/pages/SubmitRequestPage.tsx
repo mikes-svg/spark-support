@@ -4,7 +4,7 @@ import { getDoc, doc, setDoc, addDoc, runTransaction, collection, serverTimestam
 import { ref, uploadBytes } from 'firebase/storage';
 import { db, storage } from '../lib/firebase';
 import { useAuth } from '../context/AuthContext';
-import { UploadCloud, X, CalendarClock } from 'lucide-react';
+import { UploadCloud, X } from 'lucide-react';
 import { getOrSeedRequestTypes } from '../lib/seedRequestTypes';
 import { getDefaultAssigneeIds, isSuperadminRole } from '../types';
 import { logTicketCreated } from '../lib/ticketEvents';
@@ -182,25 +182,6 @@ export function SubmitRequestPage() {
             </div>
           </div>
 
-          {canSchedule && (
-            <div className="rounded-md border border-purple-200 bg-purple-50/50 p-4">
-              <label htmlFor="scheduledFor" className="flex items-center text-sm font-medium text-gray-700">
-                <CalendarClock className="h-4 w-4 mr-2 text-purple-600" />
-                Schedule for later <span className="ml-1 font-normal text-gray-500">(optional)</span>
-              </label>
-              <input
-                type="datetime-local"
-                name="scheduledFor"
-                id="scheduledFor"
-                min={nowLocalMin}
-                className="mt-2 block w-full border-gray-300 rounded-md shadow-sm focus:ring-brand-dark focus:border-brand-dark sm:text-sm border p-2"
-              />
-              <p className="mt-2 text-xs text-gray-500">
-                Leave blank to submit now. If set to a future date, the ticket stays hidden until then, and goes live — notifying assignees — on that date.
-              </p>
-            </div>
-          )}
-
           <div>
             <label htmlFor="title" className="block text-sm font-medium text-gray-700">Title</label>
             <input type="text" name="title" id="title" required placeholder="Brief summary of the issue" className="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-brand-dark focus:border-brand-dark sm:text-sm border p-2" />
@@ -239,6 +220,24 @@ export function SubmitRequestPage() {
               </ul>
             )}
           </div>
+
+          {canSchedule && (
+            <div>
+              <label htmlFor="scheduledFor" className="block text-sm font-medium text-gray-700">
+                Schedule for later <span className="font-normal text-gray-500">(optional)</span>
+              </label>
+              <input
+                type="datetime-local"
+                name="scheduledFor"
+                id="scheduledFor"
+                min={nowLocalMin}
+                className="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-brand-dark focus:border-brand-dark sm:text-sm border p-2"
+              />
+              <p className="mt-1 text-xs text-gray-500">
+                Leave blank to submit now. If set to a future date, the ticket stays hidden until then, and goes live — notifying assignees — on that date.
+              </p>
+            </div>
+          )}
 
           <div className="pt-4 flex items-center justify-end gap-4 border-t border-gray-200">
             <Link to="/" className="text-sm font-medium text-gray-700 hover:text-gray-900">Cancel</Link>
