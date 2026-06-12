@@ -3,6 +3,7 @@ import { collection, getDocs, doc, updateDoc, deleteDoc, setDoc, serverTimestamp
 import { db } from '../lib/firebase';
 import { Trash2, Edit2, Check, X, UserPlus, Users } from 'lucide-react';
 import { ConfirmModal } from '../components/ConfirmModal';
+import { roleLabel } from '../types';
 
 interface Profile { id: string; name: string; email: string; photoURL: string; role: 'superadmin' | 'admin' | 'user'; }
 
@@ -109,8 +110,6 @@ export function TeamPage() {
     if (!db) return;
     await updateDoc(doc(db, 'profiles', profile.id), { role: newRole });
   };
-
-  const roleLabel = (r: Profile['role']) => r === 'superadmin' ? 'Super Administrator' : r === 'admin' ? 'Administrator' : 'User';
 
   const deleteUser = async () => {
     if (!deleteTarget) return;
@@ -241,8 +240,8 @@ export function TeamPage() {
                   <td className="px-6 py-4 whitespace-nowrap">
                     <select value={profile.role} onChange={(e) => requestRoleChange(profile, e.target.value as Profile['role'])} className="border border-gray-300 rounded-md px-2 py-1 text-xs font-medium focus:outline-none focus:ring-2 focus:ring-brand-dark bg-white">
                       <option value="user">User</option>
-                      <option value="admin">Administrator</option>
-                      <option value="superadmin">Super Administrator</option>
+                      <option value="admin">Manager</option>
+                      <option value="superadmin">Administrator</option>
                     </select>
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm font-medium space-x-3">
@@ -271,8 +270,8 @@ export function TeamPage() {
             <thead>
               <tr className="border-b border-gray-200">
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-1/2">Permission</th>
-                <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">Super Admin</th>
-                <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">Admin</th>
+                <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">Administrator</th>
+                <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">Manager</th>
                 <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">User</th>
               </tr>
             </thead>
@@ -323,8 +322,8 @@ export function TeamPage() {
                 <label className="block text-sm font-medium text-gray-700 mb-1">Role</label>
                 <select value={inviteForm.role} onChange={(e) => setInviteForm((f) => ({ ...f, role: e.target.value as Profile['role'] }))} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-dark">
                   <option value="user">User</option>
-                  <option value="admin">Administrator</option>
-                  <option value="superadmin">Super Administrator</option>
+                  <option value="admin">Manager</option>
+                  <option value="superadmin">Administrator</option>
                 </select>
               </div>
               <p className="text-xs text-gray-400">Pre-register a user and set their role. They'll sign in with Google when ready.</p>
@@ -359,8 +358,8 @@ export function TeamPage() {
                 <label className="block text-sm font-medium text-gray-700 mb-1">Assign Role</label>
                 <select value={bulkRole} onChange={(e) => setBulkRole(e.target.value as Profile['role'])} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-dark">
                   <option value="user">User</option>
-                  <option value="admin">Administrator</option>
-                  <option value="superadmin">Super Administrator</option>
+                  <option value="admin">Manager</option>
+                  <option value="superadmin">Administrator</option>
                 </select>
               </div>
               {bulkResult && (

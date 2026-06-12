@@ -9,6 +9,17 @@ export function isAdminRole(role?: string | null): boolean {
 export function isSuperadminRole(role?: string | null): boolean {
   return role === 'superadmin';
 }
+
+/**
+ * Human-facing label for a role. The stored values stay 'superadmin' | 'admin'
+ * | 'user'; only the display name changes: superadmin → "Administrator",
+ * admin → "Manager".
+ */
+export function roleLabel(role?: string | null): string {
+  if (role === 'superadmin') return 'Administrator';
+  if (role === 'admin') return 'Manager';
+  return 'User';
+}
 // 'Scheduled' is a pre-live state: the ticket exists but has a future go-live
 // date and behaves as if it hasn't been submitted yet. A Cloud Function flips
 // it to 'Open' (sending assignee emails, resetting createdAt) on the go-live

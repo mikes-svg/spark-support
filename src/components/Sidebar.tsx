@@ -11,6 +11,7 @@ import {
   X,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
+import { roleLabel } from '../types';
 
 interface SidebarProps {
   isOpen: boolean;
@@ -115,7 +116,7 @@ function SidebarContent({ onClose }: { onClose: () => void }) {
             />
             <div className="ml-3 min-w-0">
               <p className="text-sm font-medium text-white truncate">{user?.name}</p>
-              <p className="text-xs font-medium text-gray-400 capitalize">{user?.role}</p>
+              <p className="text-xs font-medium text-gray-400">{roleLabel(user?.role)}</p>
             </div>
           </div>
           <button onClick={logout} title="Sign out" className="ml-2 p-1.5 text-gray-400 hover:text-white transition-colors flex-shrink-0">
