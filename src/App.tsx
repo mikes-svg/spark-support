@@ -6,6 +6,7 @@ import {
   Navigate,
 } from 'react-router-dom';
 import { AuthProvider, useAuth } from './context/AuthContext';
+import { isAdminRole, isSuperadminRole } from './types';
 import { Layout } from './components/Layout';
 import { LoginPage } from './pages/LoginPage';
 import { DashboardPage } from './pages/DashboardPage';
@@ -42,10 +43,10 @@ function ProtectedRoute({
   if (!user) {
     return <Navigate to="/login" replace />;
   }
-  if (requireSuperadmin && user.role !== 'superadmin') {
+  if (requireSuperadmin && !isSuperadminRole(user.role)) {
     return <Navigate to="/" replace />;
   }
-  if (requireAdmin && user.role !== 'admin' && user.role !== 'superadmin') {
+  if (requireAdmin && !isAdminRole(user.role)) {
     return <Navigate to="/" replace />;
   }
   return <>{children}</>;

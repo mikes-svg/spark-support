@@ -9,8 +9,11 @@ import { Send, ArrowLeft, Clock, Trash2, UploadCloud, FileText, CalendarClock } 
 import { ConfirmModal } from '../components/ConfirmModal';
 import { AssigneeChips } from '../components/AssigneeChips';
 import { MentionTextarea, renderCommentBody } from '../components/MentionTextarea';
-import { getAssigneeIds, isScheduled } from '../types';
+import { PageSpinner } from '../components/PageSpinner';
+import { getAssigneeIds, isScheduled, isAdminRole, isSuperadminRole } from '../types';
 import type { TicketStatus, TicketPriority } from '../types';
+import { toDate, localDateTimeMin } from '../lib/dates';
+import { sendMail, ticketUrl } from '../lib/mail';
 import {
   updateTicketStatus,
   updateTicketPriority,
@@ -38,12 +41,6 @@ interface Attachment { name: string; url: string; }
 
 const STATUSES: TicketStatus[] = ['Open', 'In Progress', 'On Hold', 'Resolved'];
 const PRIORITIES: TicketPriority[] = ['Low', 'Medium', 'High', 'Urgent'];
-
-function toDate(ts: Comment['createdAt'] | Ticket['createdAt']): Date {
-  if (!ts) return new Date();
-  if (typeof ts === 'string') return new Date(ts);
-  return (ts as { toDate: () => Date }).toDate();
-}
 
 export function TicketDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -132,11 +129,6 @@ export function TicketDetailPage() {
     return () => { if (unsubscribe) unsubscribe(); };
   }, [id]);
 
-  const sendEmail = async (to: string, subject: string, html: string) => {
-    if (!db) return;
-    await addDoc(collection(db, 'mail'), { to, message: { subject, html } });
-  };
-
   const handleAddComment = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     if (!newComment.trim() || !user || !ticket || !db) return;
@@ -176,10 +168,10 @@ export function TicketDetailPage() {
       const lead = wasMentioned
         ? `<p><strong>${user.name}</strong> mentioned you in a comment on <strong>${ticket.id}</strong>:</p>`
         : `<p><strong>${user.name}</strong> commented on <strong>${ticket.id}</strong>:</p>`;
-      await sendEmail(
+      await sendMail(
         recipientEmail,
         subject,
-        `${lead}<p>${body}</p><p><a href="${window.location.origin}/tickets/${ticket.id}">View ticket →</a></p><hr style="margin:16px 0;border:none;border-top:1px solid #e5e7eb"/><p style="color:#9ca3af;font-size:12px">Please do not reply to this email. To respond, <a href="${window.location.origin}/tickets/${ticket.id}">click here to view the ticket</a> and add your comment there.</p>`
+        `${lead}<p>${body}</p><p><a href="${ticketUrl(ticket.id)}">View ticket →</a></p><hr style="margin:16px 0;border:none;border-top:1px solid #e5e7eb"/><p style="color:#9ca3af;font-size:12px">Please do not reply to this email. To respond, <a href="${ticketUrl(ticket.id)}">click here to view the ticket</a> and add your comment there.</p>`
       );
     }
   };
@@ -220,8 +212,8 @@ export function TicketDetailPage() {
     const submitterDoc = await getDoc(doc(db, 'profiles', ticket.submitterId));
     const submitterEmail = submitterDoc.data()?.email;
     if (submitterEmail) {
-      await sendEmail(submitterEmail, `${ticket.id} status changed to ${newStatus}`,
-        `<p>Your ticket <strong>${ticket.id}</strong> — ${ticket.title} — has been updated to <strong>${newStatus}</strong>.</p><p><a href="${window.location.origin}/tickets/${ticket.id}">View ticket →</a></p>`);
+      await sendMail(submitterEmail, `${ticket.id} status changed to ${newStatus}`,
+        `<p>Your ticket <strong>${ticket.id}</strong> — ${ticket.title} — has been updated to <strong>${newStatus}</strong>.</p><p><a href="${ticketUrl(ticket.id)}">View ticket →</a></p>`);
     }
   };
 
@@ -268,8 +260,8 @@ export function TicketDetailPage() {
       const assigneeDoc = await getDoc(doc(db, 'profiles', addedId));
       const assigneeData = assigneeDoc.data();
       if (assigneeData?.email) {
-        await sendEmail(assigneeData.email, `${ticket.id} has been assigned to you`,
-          `<p>Ticket <strong>${ticket.id}</strong> — ${ticket.title} — has been assigned to you.</p><p><a href="${window.location.origin}/tickets/${ticket.id}">View ticket →</a></p>`);
+        await sendMail(assigneeData.email, `${ticket.id} has been assigned to you`,
+          `<p>Ticket <strong>${ticket.id}</strong> — ${ticket.title} — has been assigned to you.</p><p><a href="${ticketUrl(ticket.id)}">View ticket →</a></p>`);
       } else {
         console.warn(`Skipping assignee notification for ${ticket.id}: profile ${addedId} has no email field. Have them sign in once to self-heal, or fix via /admin/team.`);
       }
@@ -325,20 +317,16 @@ export function TicketDetailPage() {
     setRescheduling(false);
   };
 
-  if (loading) return <div className="flex items-center justify-center py-20"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-brand-dark" /></div>;
+  if (loading) return <PageSpinner />;
   if (!ticket) return <div className="text-center py-12 text-gray-500">Ticket not found.</div>;
 
   const assigneeIds = getAssigneeIds(ticket);
   const assignees = assigneeIds.map((id) => profiles[id]).filter(Boolean);
   const submitter = profiles[ticket.submitterId];
-  const isAdmin = user?.role === 'admin' || user?.role === 'superadmin';
-  const isSuperadmin = user?.role === 'superadmin';
+  const isAdmin = isAdminRole(user?.role);
+  const isSuperadmin = isSuperadminRole(user?.role);
   const scheduled = isScheduled(ticket);
-  const nowLocalMin = (() => {
-    const d = new Date();
-    d.setSeconds(0, 0);
-    return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
-  })();
+  const nowLocalMin = localDateTimeMin();
 
   // Only allow @mentioning people who can actually read this ticket — admins
   // (who can read any ticket) and current participants. Mentioning anyone else
@@ -378,7 +366,7 @@ export function TicketDetailPage() {
               <div>
                 <p className="text-sm font-medium text-purple-900">Scheduled — not yet live</p>
                 <p className="text-xs text-purple-700">
-                  Goes live on <strong>{toDate(ticket.scheduledFor).toLocaleString()}</strong>, notifying assignees then. Hidden from assignees until then.
+                  Goes live on <strong>{(toDate(ticket.scheduledFor) ?? new Date()).toLocaleString()}</strong>, notifying assignees then. Hidden from assignees until then.
                 </p>
               </div>
             </div>
@@ -464,7 +452,7 @@ export function TicketDetailPage() {
                     <div className={`max-w-[75%] ${isOwn ? 'items-end' : 'items-start'} flex flex-col`}>
                       <div className={`flex items-baseline gap-2 ${isOwn ? 'flex-row-reverse' : ''}`}>
                         <span className="font-medium text-xs text-gray-600">{commentUser?.name || 'Unknown'}</span>
-                        <span className="text-[10px] text-gray-400">{toDate(comment.createdAt).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</span>
+                        <span className="text-[10px] text-gray-400">{(toDate(comment.createdAt) ?? new Date()).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</span>
                       </div>
                       <div className={`mt-1 p-3 rounded-2xl text-sm whitespace-pre-wrap break-words ${isOwn ? 'bg-brand-dark text-white rounded-br-sm' : 'bg-gray-100 text-gray-800 rounded-bl-sm'}`}>{renderCommentBody(comment.body, comment.mentionedIds || [], profiles, isOwn ? 'dark' : 'light')}</div>
                     </div>
@@ -540,7 +528,7 @@ export function TicketDetailPage() {
                   </div>
                 ) : <span className="text-sm text-gray-500 italic">Unassigned</span>}
               </div>
-              <div><span className="block text-xs font-medium text-gray-500 uppercase mb-1">Created</span><span className="text-sm text-gray-900">{toDate(ticket.createdAt).toLocaleDateString()}</span></div>
+              <div><span className="block text-xs font-medium text-gray-500 uppercase mb-1">Created</span><span className="text-sm text-gray-900">{(toDate(ticket.createdAt) ?? new Date()).toLocaleDateString()}</span></div>
             </div>
           </div>
 
@@ -553,13 +541,13 @@ export function TicketDetailPage() {
                 <div className="relative pl-6">
                   <div className="absolute -left-[9px] top-1 w-4 h-4 rounded-full bg-blue-500 border-4 border-white" />
                   <p className="text-sm font-medium text-gray-900">Ticket Created</p>
-                  <p className="text-xs text-gray-500 flex items-center mt-1"><Clock className="w-3 h-3 mr-1" />{toDate(ticket.createdAt).toLocaleString()}</p>
+                  <p className="text-xs text-gray-500 flex items-center mt-1"><Clock className="w-3 h-3 mr-1" />{(toDate(ticket.createdAt) ?? new Date()).toLocaleString()}</p>
                 </div>
                 {ticket.status !== 'Open' && (
                   <div className="relative pl-6">
                     <div className="absolute -left-[9px] top-1 w-4 h-4 rounded-full bg-amber-500 border-4 border-white" />
                     <p className="text-sm font-medium text-gray-900">Status: {ticket.status}</p>
-                    <p className="text-xs text-gray-500 flex items-center mt-1"><Clock className="w-3 h-3 mr-1" />{toDate(ticket.updatedAt).toLocaleString()}</p>
+                    <p className="text-xs text-gray-500 flex items-center mt-1"><Clock className="w-3 h-3 mr-1" />{(toDate(ticket.updatedAt) ?? new Date()).toLocaleString()}</p>
                   </div>
                 )}
               </div>

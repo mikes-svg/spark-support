@@ -1,14 +1,16 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { collection, query, orderBy, getDocs, doc, getDoc, addDoc, where } from 'firebase/firestore';
+import { collection, query, orderBy, getDocs, doc, getDoc, where } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { useAuth } from '../context/AuthContext';
 import { Filter, AlertCircle, CheckCircle2, Clock, RefreshCw } from 'lucide-react';
 import { ConfirmModal } from '../components/ConfirmModal';
 import { AssigneeSelector } from '../components/AssigneeSelector';
 import { StatusBadge } from '../components/Badges';
-import { getAssigneeIds } from '../types';
+import { getAssigneeIds, isSuperadminRole } from '../types';
 import type { TicketStatus, TicketPriority } from '../types';
+import { formatDate, formatDateTime } from '../lib/dates';
+import { sendMail, ticketUrl } from '../lib/mail';
 import {
   updateTicketStatus,
   updateTicketPriority,
@@ -90,11 +92,6 @@ export function AdminDashboardPage() {
     return `Change ${pendingChange.type} for ${ticket.id} to "${value}"?`;
   })();
 
-  const sendMail = async (to: string, subject: string, html: string) => {
-    if (!db) return;
-    await addDoc(collection(db, 'mail'), { to, message: { subject, html } });
-  };
-
   const handleFieldChangeConfirm = async () => {
     if (!pendingChange || !db || !user) return;
     const change = pendingChange;
@@ -121,7 +118,7 @@ export function AdminDashboardPage() {
         const email = assigneeDoc.data()?.email;
         if (email) {
           await sendMail(email, `${ticket.id} has been assigned to you`,
-            `<p>Ticket <strong>${ticket.id}</strong> — ${ticket.title} — has been assigned to you.</p><p><a href="${window.location.origin}/tickets/${ticket.id}">View ticket →</a></p>`);
+            `<p>Ticket <strong>${ticket.id}</strong> — ${ticket.title} — has been assigned to you.</p><p><a href="${ticketUrl(ticket.id)}">View ticket →</a></p>`);
         } else {
           console.warn(`Skipping assignee notification for ${ticket.id}: profile ${addedId} has no email field. Have them sign in once to self-heal, or fix via /admin/team.`);
         }
@@ -142,7 +139,7 @@ export function AdminDashboardPage() {
       const submitterEmail = submitterDoc.data()?.email;
       if (submitterEmail) {
         await sendMail(submitterEmail, `${ticket.id} status changed to ${value}`,
-          `<p>Your ticket <strong>${ticket.id}</strong> — ${ticket.title} — has been updated to <strong>${value}</strong>.</p><p><a href="${window.location.origin}/tickets/${ticket.id}">View ticket →</a></p>`);
+          `<p>Your ticket <strong>${ticket.id}</strong> — ${ticket.title} — has been updated to <strong>${value}</strong>.</p><p><a href="${ticketUrl(ticket.id)}">View ticket →</a></p>`);
       }
     } else {
       const { ticket, value } = change;
@@ -170,20 +167,8 @@ export function AdminDashboardPage() {
     return true;
   });
 
-  const formatDate = (ts: Ticket['createdAt']) => {
-    if (!ts) return '';
-    const d = typeof ts === 'string' ? new Date(ts) : ts.toDate();
-    return d.toLocaleDateString();
-  };
-
-  const formatDateTime = (ts: Ticket['scheduledFor']) => {
-    if (!ts) return '';
-    const d = typeof ts === 'string' ? new Date(ts) : ts.toDate();
-    return d.toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
-  };
-
   // Scheduling is a superadmin-only feature; only they can reveal scheduled tickets.
-  const isSuperadmin = user?.role === 'superadmin';
+  const isSuperadmin = isSuperadminRole(user?.role);
   const scheduledCount = tickets.filter((t) => t.status === 'Scheduled').length;
   const openCount = tickets.filter((t) => t.status === 'Open').length;
   const inProgressCount = tickets.filter((t) => t.status === 'In Progress').length;

@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
-import { getDoc, doc, setDoc, addDoc, runTransaction, collection, serverTimestamp, Timestamp } from 'firebase/firestore';
+import { getDoc, doc, setDoc, runTransaction, serverTimestamp, Timestamp } from 'firebase/firestore';
 import { ref, uploadBytes } from 'firebase/storage';
 import { db, storage } from '../lib/firebase';
 import { useAuth } from '../context/AuthContext';
@@ -8,6 +8,8 @@ import { UploadCloud, X } from 'lucide-react';
 import { getOrSeedRequestTypes } from '../lib/seedRequestTypes';
 import { getDefaultAssigneeIds, isSuperadminRole } from '../types';
 import { logTicketCreated } from '../lib/ticketEvents';
+import { sendMail, ticketUrl } from '../lib/mail';
+import { localDateTimeMin } from '../lib/dates';
 
 interface RequestType {
   id: string;
@@ -104,35 +106,29 @@ export function SubmitRequestPage() {
 
       if (isFutureScheduled) {
         const goLive = scheduledDate!.toLocaleString();
-        await addDoc(collection(db, 'mail'), {
-          to: user.email,
-          message: {
-            subject: `Your request ${ticketId} is scheduled for ${goLive}`,
-            html: `<p>Your support request has been scheduled and will go live on <strong>${goLive}</strong>. Assignees will be notified then.</p><p><strong>${ticketId}</strong> — ${title}</p><p>Priority: ${priority} · Type: ${type}</p><p><a href="${window.location.origin}/tickets/${ticketId}">View ticket →</a></p>`,
-          },
-        });
+        await sendMail(
+          user.email,
+          `Your request ${ticketId} is scheduled for ${goLive}`,
+          `<p>Your support request has been scheduled and will go live on <strong>${goLive}</strong>. Assignees will be notified then.</p><p><strong>${ticketId}</strong> — ${title}</p><p>Priority: ${priority} · Type: ${type}</p><p><a href="${ticketUrl(ticketId)}">View ticket →</a></p>`,
+        );
       } else {
         // Email submitter confirmation
-        await addDoc(collection(db, 'mail'), {
-          to: user.email,
-          message: {
-            subject: `Your request ${ticketId} has been submitted`,
-            html: `<p>Your support request has been submitted successfully.</p><p><strong>${ticketId}</strong> — ${title}</p><p>Priority: ${priority} · Type: ${type}</p><p><a href="${window.location.origin}/tickets/${ticketId}">View ticket →</a></p>`,
-          },
-        });
+        await sendMail(
+          user.email,
+          `Your request ${ticketId} has been submitted`,
+          `<p>Your support request has been submitted successfully.</p><p><strong>${ticketId}</strong> — ${title}</p><p>Priority: ${priority} · Type: ${type}</p><p><a href="${ticketUrl(ticketId)}">View ticket →</a></p>`,
+        );
 
         // Email each assignee
         for (const assigneeId of assigneeIds) {
           const assigneeDoc = await getDoc(doc(db, 'profiles', assigneeId));
           const assigneeEmail = assigneeDoc.data()?.email;
           if (assigneeEmail) {
-            await addDoc(collection(db, 'mail'), {
-              to: assigneeEmail,
-              message: {
-                subject: `New ${priority} ticket: ${title}`,
-                html: `<p>A new support request has been assigned to you.</p><p><strong>${ticketId}</strong> — ${title}</p><p><a href="${window.location.origin}/tickets/${ticketId}">View ticket →</a></p>`,
-              },
-            });
+            await sendMail(
+              assigneeEmail,
+              `New ${priority} ticket: ${title}`,
+              `<p>A new support request has been assigned to you.</p><p><strong>${ticketId}</strong> — ${title}</p><p><a href="${ticketUrl(ticketId)}">View ticket →</a></p>`,
+            );
           } else {
             console.warn(`Skipping assignee notification for ${ticketId}: profile ${assigneeId} has no email field. Have them sign in once to self-heal, or fix via /admin/team.`);
           }
@@ -148,11 +144,7 @@ export function SubmitRequestPage() {
 
   const canSchedule = isSuperadminRole(user?.role);
   // Local-time min for the datetime-local input so admins can't pick the past.
-  const nowLocalMin = (() => {
-    const d = new Date();
-    d.setSeconds(0, 0);
-    return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
-  })();
+  const nowLocalMin = localDateTimeMin();
 
   return (
     <div className="max-w-2xl mx-auto">

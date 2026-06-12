@@ -4,7 +4,8 @@ import { db } from '../lib/firebase';
 import { Plus, Trash2, Edit2, Check, X } from 'lucide-react';
 import { AssigneeSelector } from '../components/AssigneeSelector';
 import { getOrSeedRequestTypes } from '../lib/seedRequestTypes';
-import { getDefaultAssigneeIds } from '../types';
+import { getDefaultAssigneeIds, isAdminRole } from '../types';
+import { PageSpinner } from '../components/PageSpinner';
 
 interface Profile { id: string; name: string; email: string; photoURL: string; role: 'superadmin' | 'admin' | 'user'; }
 interface RequestType {
@@ -73,9 +74,9 @@ export function AdminSettingsPage() {
     await addDoc(collection(db, 'requestTypes'), { name: name.trim(), defaultAssigneeIds: [], active: true, createdAt: serverTimestamp() });
   };
 
-  if (loading) return <div className="flex items-center justify-center py-20"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-brand-dark" /></div>;
+  if (loading) return <PageSpinner />;
 
-  const admins = profiles.filter((p) => p.role === 'admin' || p.role === 'superadmin');
+  const admins = profiles.filter((p) => isAdminRole(p.role));
 
   return (
     <div className="space-y-8 max-w-5xl mx-auto">

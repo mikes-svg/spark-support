@@ -2,6 +2,7 @@ import { useState, Suspense } from 'react';
 import { Outlet, useLocation } from 'react-router-dom';
 import { Sidebar } from './Sidebar';
 import { Header } from './Header';
+import { PageSpinner } from './PageSpinner';
 import { motion, AnimatePresence } from 'framer-motion';
 
 export function Layout() {
@@ -45,7 +46,7 @@ export function Layout() {
               exit={{ opacity: 0, y: -10 }}
               transition={{ duration: 0.2 }}
               className="h-full max-w-7xl mx-auto">
-              <Suspense fallback={<div className="flex items-center justify-center py-20"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-brand-dark" /></div>}>
+              <Suspense fallback={<PageSpinner />}>
                 <Outlet />
               </Suspense>
             </motion.div>

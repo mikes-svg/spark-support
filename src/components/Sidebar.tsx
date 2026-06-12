@@ -10,7 +10,7 @@ import {
   X,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
-import { roleLabel } from '../types';
+import { roleLabel, isAdminRole, isSuperadminRole } from '../types';
 
 interface SidebarProps {
   isOpen: boolean;
@@ -19,8 +19,8 @@ interface SidebarProps {
 
 function SidebarContent({ onClose }: { onClose: () => void }) {
   const { user, logout } = useAuth();
-  const isAdmin = user?.role === 'admin' || user?.role === 'superadmin';
-  const isSuperadmin = user?.role === 'superadmin';
+  const isAdmin = isAdminRole(user?.role);
+  const isSuperadmin = isSuperadminRole(user?.role);
 
   const navItems = [
     { to: '/', icon: LayoutDashboard, label: 'My Tickets', exact: true },

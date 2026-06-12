@@ -7,6 +7,7 @@ import { StatusBadge } from '../components/Badges';
 import { Plus } from 'lucide-react';
 import { getAssigneeIds } from '../types';
 import type { TicketStatus, TicketPriority } from '../types';
+import { formatDate } from '../lib/dates';
 
 interface Ticket {
   id: string;
@@ -57,12 +58,6 @@ export function DashboardPage() {
   const openCount = tickets.filter((t) => t.status === 'Open').length;
   const inProgressCount = tickets.filter((t) => t.status === 'In Progress').length;
   const resolvedCount = tickets.filter((t) => t.status === 'Resolved').length;
-
-  const formatDate = (ts: Ticket['createdAt']) => {
-    if (!ts) return '';
-    const d = typeof ts === 'string' ? new Date(ts) : ts.toDate();
-    return d.toLocaleDateString();
-  };
 
   return (
     <div className="space-y-6">

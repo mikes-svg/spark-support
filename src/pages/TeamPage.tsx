@@ -3,6 +3,7 @@ import { collection, getDocs, doc, updateDoc, deleteDoc, setDoc, serverTimestamp
 import { db } from '../lib/firebase';
 import { Trash2, Edit2, Check, X, UserPlus, Users } from 'lucide-react';
 import { ConfirmModal } from '../components/ConfirmModal';
+import { PageSpinner } from '../components/PageSpinner';
 import { roleLabel } from '../types';
 
 interface Profile { id: string; name: string; email: string; photoURL: string; role: 'superadmin' | 'admin' | 'user'; }
@@ -194,7 +195,7 @@ export function TeamPage() {
     }
   };
 
-  if (loading) return <div className="flex items-center justify-center py-20"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-brand-dark" /></div>;
+  if (loading) return <PageSpinner />;
 
   return (
     <div className="space-y-8 max-w-5xl mx-auto">

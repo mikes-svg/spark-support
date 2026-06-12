@@ -8,6 +8,8 @@ import {
 import { db } from '../lib/firebase';
 import { getAssigneeIds } from '../types';
 import type { TicketStatus, TicketPriority } from '../types';
+import { toDate } from '../lib/dates';
+import { PageSpinner } from '../components/PageSpinner';
 import {
   Clock,
   TrendingUp,
@@ -64,19 +66,6 @@ const PRESETS: { id: RangePreset; label: string; days?: number }[] = [
 
 const PRIORITY_ORDER: TicketPriority[] = ['Urgent', 'High', 'Medium', 'Low'];
 const STATUS_ORDER: TicketStatus[] = ['Open', 'In Progress', 'On Hold', 'Resolved'];
-
-function toDate(ts: Ticket['createdAt'] | TicketEvent['createdAt'] | undefined | null): Date | null {
-  if (!ts) return null;
-  if (typeof ts === 'string') {
-    const d = new Date(ts);
-    return isNaN(d.getTime()) ? null : d;
-  }
-  try {
-    return ts.toDate();
-  } catch {
-    return null;
-  }
-}
 
 function median(nums: number[]): number {
   if (nums.length === 0) return 0;
@@ -342,11 +331,7 @@ export function AnalyticsPage() {
   }, [tickets, events, range]);
 
   if (loading) {
-    return (
-      <div className="flex items-center justify-center py-20">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-brand-dark" />
-      </div>
-    );
+    return <PageSpinner />;
   }
 
   return (
