@@ -41,6 +41,8 @@ export function AdminDashboardPage() {
   const [statusFilter, setStatusFilter] = useState('Active');
   const [typeFilter, setTypeFilter] = useState('');
   const [assigneeFilter, setAssigneeFilter] = useState('');
+  // Scheduled (not-yet-live) tickets are hidden by default; this toggle reveals them.
+  const [showScheduled, setShowScheduled] = useState(false);
 
   const fetchData = useCallback(async (showLoading = true) => {
     if (!db) { setLoading(false); return; }
@@ -136,6 +138,8 @@ export function AdminDashboardPage() {
   };
 
   const filteredTickets = tickets.filter((t) => {
+    // Hide not-yet-live scheduled tickets unless the user opts in.
+    if (t.status === 'Scheduled' && !showScheduled) return false;
     if (statusFilter === 'Active') {
       if (t.status === 'Resolved') return false;
     } else if (statusFilter !== 'All' && t.status !== statusFilter) {
@@ -158,6 +162,7 @@ export function AdminDashboardPage() {
     return d.toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
   };
 
+  const scheduledCount = tickets.filter((t) => t.status === 'Scheduled').length;
   const openCount = tickets.filter((t) => t.status === 'Open').length;
   const inProgressCount = tickets.filter((t) => t.status === 'In Progress').length;
   const onHoldCount = tickets.filter((t) => t.status === 'On Hold').length;
@@ -201,7 +206,6 @@ export function AdminDashboardPage() {
           <option value="Active">Active (hide Resolved)</option>
           <option value="All">All Statuses</option>
           {STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
-          <option value="Scheduled">Scheduled</option>
         </select>
         <select value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)} className="block pl-3 pr-10 py-2 text-sm border-gray-300 focus:outline-none focus:ring-brand-dark focus:border-brand-dark rounded-md border">
           <option value="">All Types</option>
@@ -211,7 +215,13 @@ export function AdminDashboardPage() {
           <option value="">All Assignees</option>
           {adminProfiles.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
         </select>
-        <button onClick={() => { setStatusFilter('Active'); setTypeFilter(''); setAssigneeFilter(''); }} className="text-sm text-brand-gold hover:text-yellow-700 font-medium">Reset Filters</button>
+        <button
+          onClick={() => setShowScheduled((s) => !s)}
+          className={`text-sm font-medium px-3 py-1.5 rounded-md border transition-colors ${showScheduled ? 'bg-purple-100 text-purple-800 border-purple-300' : 'text-gray-600 border-gray-300 hover:bg-gray-50'}`}
+        >
+          {showScheduled ? 'Hide scheduled' : `Show scheduled${scheduledCount ? ` (${scheduledCount})` : ''}`}
+        </button>
+        <button onClick={() => { setStatusFilter('Active'); setTypeFilter(''); setAssigneeFilter(''); setShowScheduled(false); }} className="text-sm text-brand-gold hover:text-yellow-700 font-medium">Reset Filters</button>
         <button onClick={() => fetchData(false)} disabled={refreshing} className="ml-auto p-2 text-gray-400 hover:text-brand-dark transition-colors rounded-md hover:bg-gray-100 disabled:opacity-50" title="Refresh">
           <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} />
         </button>
