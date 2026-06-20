@@ -3,6 +3,7 @@ import { collection, getDocs, doc, updateDoc, deleteDoc, setDoc, serverTimestamp
 import { db } from '../lib/firebase';
 import { Trash2, Edit2, Check, X, UserPlus, Users } from 'lucide-react';
 import { ConfirmModal } from '../components/ConfirmModal';
+import { Modal } from '../components/Modal';
 import { PageSpinner } from '../components/PageSpinner';
 import { Avatar } from '../components/Avatar';
 import { roleLabel } from '../types';
@@ -361,11 +362,9 @@ export function TeamPage() {
       </div>
 
       {/* Invite modal */}
-      {showInviteModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md mx-4 overflow-hidden">
-            <div className="px-6 py-5 border-b border-gray-200 flex justify-between items-center">
-              <h3 className="text-lg font-serif font-semibold text-gray-900">Add New User</h3>
+      <Modal open={showInviteModal} onClose={() => { setShowInviteModal(false); setInviteError(''); }} labelledBy="invite-title" widthClass="max-w-md">
+          <div className="px-6 py-5 border-b border-gray-200 flex justify-between items-center">
+              <h3 id="invite-title" className="text-lg font-serif font-semibold text-gray-900">Add New User</h3>
               <button onClick={() => { setShowInviteModal(false); setInviteError(''); }} className="text-gray-400 hover:text-gray-600"><X className="h-5 w-5" /></button>
             </div>
             <div className="p-6 space-y-4">
@@ -394,16 +393,13 @@ export function TeamPage() {
                 {inviting ? 'Creating…' : 'Add User'}
               </button>
             </div>
-          </div>
-        </div>
-      )}
+      </Modal>
+
 
       {/* Bulk invite modal */}
-      {showBulkModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg mx-4 overflow-hidden">
+      <Modal open={showBulkModal} onClose={() => { setShowBulkModal(false); setBulkResult(null); }} labelledBy="bulk-title" widthClass="max-w-lg">
             <div className="px-6 py-5 border-b border-gray-200 flex justify-between items-center">
-              <h3 className="text-lg font-serif font-semibold text-gray-900">Bulk Invite Users</h3>
+              <h3 id="bulk-title" className="text-lg font-serif font-semibold text-gray-900">Bulk Invite Users</h3>
               <button onClick={() => { setShowBulkModal(false); setBulkResult(null); }} className="text-gray-400 hover:text-gray-600"><X className="h-5 w-5" /></button>
             </div>
             <div className="p-6 space-y-4">
@@ -444,9 +440,7 @@ export function TeamPage() {
                 {bulkImporting ? 'Importing…' : 'Import Users'}
               </button>
             </div>
-          </div>
-        </div>
-      )}
+      </Modal>
 
       <ConfirmModal
         open={!!deleteTarget}

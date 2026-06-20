@@ -4,6 +4,7 @@ import { db } from '../lib/firebase';
 import { Plus, Trash2, Edit2, Check, X } from 'lucide-react';
 import { AssigneeSelector } from '../components/AssigneeSelector';
 import { ConfirmModal } from '../components/ConfirmModal';
+import { Modal } from '../components/Modal';
 import { getOrSeedRequestTypes } from '../lib/seedRequestTypes';
 import { getDefaultAssigneeIds, isAdminRole } from '../types';
 import { PageSpinner } from '../components/PageSpinner';
@@ -198,34 +199,30 @@ export function AdminSettingsPage() {
           </table>
         </div>
       </div>
-      {showAddModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={() => setShowAddModal(false)}>
-          <div role="dialog" aria-modal="true" aria-labelledby="add-type-title" className="bg-white rounded-2xl shadow-2xl w-full max-w-sm mx-4 overflow-hidden" onClick={(e) => e.stopPropagation()}>
-            <div className="px-6 py-5 border-b border-gray-200">
-              <h3 id="add-type-title" className="text-lg font-serif font-semibold text-gray-900">Add Request Type</h3>
-            </div>
-            <div className="p-6 space-y-2">
-              <label htmlFor="new-type-name" className="block text-sm font-medium text-gray-700">Type name</label>
-              <input
-                id="new-type-name"
-                value={newTypeName}
-                onChange={(e) => setNewTypeName(e.target.value)}
-                onKeyDown={(e) => { if (e.key === 'Enter') handleAddType(); if (e.key === 'Escape') setShowAddModal(false); }}
-                autoFocus
-                placeholder="e.g. Facilities"
-                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-dark"
-              />
-              {addError && <p className="text-sm text-red-600" role="alert">{addError}</p>}
-            </div>
-            <div className="px-6 py-4 border-t border-gray-200 flex justify-end gap-3 bg-gray-50/50">
-              <button onClick={() => setShowAddModal(false)} className="px-4 py-2 text-sm font-medium text-gray-700 hover:text-gray-900">Cancel</button>
-              <button onClick={handleAddType} disabled={addingType || !newTypeName.trim()} className="px-5 py-2 text-sm font-medium rounded-lg bg-brand-dark text-white hover:bg-[#153427] disabled:opacity-50 transition-colors">
-                {addingType ? 'Adding…' : 'Add Type'}
-              </button>
-            </div>
-          </div>
+      <Modal open={showAddModal} onClose={() => setShowAddModal(false)} labelledBy="add-type-title" widthClass="max-w-sm">
+        <div className="px-6 py-5 border-b border-gray-200">
+          <h3 id="add-type-title" className="text-lg font-serif font-semibold text-gray-900">Add Request Type</h3>
         </div>
-      )}
+        <div className="p-6 space-y-2">
+          <label htmlFor="new-type-name" className="block text-sm font-medium text-gray-700">Type name</label>
+          <input
+            id="new-type-name"
+            value={newTypeName}
+            onChange={(e) => setNewTypeName(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter') handleAddType(); }}
+            autoFocus
+            placeholder="e.g. Facilities"
+            className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-dark"
+          />
+          {addError && <p className="text-sm text-red-600" role="alert">{addError}</p>}
+        </div>
+        <div className="px-6 py-4 border-t border-gray-200 flex justify-end gap-3 bg-gray-50/50">
+          <button onClick={() => setShowAddModal(false)} className="px-4 py-2 text-sm font-medium text-gray-700 hover:text-gray-900">Cancel</button>
+          <button onClick={handleAddType} disabled={addingType || !newTypeName.trim()} className="px-5 py-2 text-sm font-medium rounded-lg bg-brand-dark text-white hover:bg-[#153427] disabled:opacity-50 transition-colors">
+            {addingType ? 'Adding…' : 'Add Type'}
+          </button>
+        </div>
+      </Modal>
       <ConfirmModal
         open={!!deleteTarget}
         title="Delete Request Type"

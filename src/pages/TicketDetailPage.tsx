@@ -14,6 +14,7 @@ import { Avatar } from '../components/Avatar';
 import { getAssigneeIds, isScheduled, isAdminRole, isSuperadminRole } from '../types';
 import type { TicketStatus, TicketPriority, Ticket, Profile } from '../types';
 import { toDate, localDateTimeMin } from '../lib/dates';
+import { partitionFiles, ATTACHMENT_HINT } from '../lib/attachments';
 import {
   updateTicketStatus,
   updateTicketPriority,
@@ -43,6 +44,7 @@ export function TicketDetailPage() {
   const [loading, setLoading] = useState(true);
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState('');
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [showCancelConfirm, setShowCancelConfirm] = useState(false);
   const [rescheduling, setRescheduling] = useState(false);
@@ -179,10 +181,13 @@ export function TicketDetailPage() {
 
   const handleUploadFiles = async (files: FileList) => {
     if (!ticket || !storage || files.length === 0) return;
+    const { accepted, rejected } = partitionFiles(Array.from(files));
+    setUploadError(rejected.length ? `Skipped: ${rejected.join(', ')}. ${ATTACHMENT_HINT}` : '');
+    if (accepted.length === 0) return;
     setUploading(true);
     try {
       const newAttachments: Attachment[] = [];
-      for (const file of Array.from(files)) {
+      for (const file of accepted) {
         const fileRef = ref(storage, `attachments/${ticket.id}/${file.name}`);
         await uploadBytes(fileRef, file);
         const url = await getDownloadURL(fileRef);
@@ -191,6 +196,7 @@ export function TicketDetailPage() {
       setAttachments((prev) => [...prev, ...newAttachments]);
     } catch (err) {
       console.error('Failed to upload files:', err);
+      setUploadError('Upload failed. Please try again.');
     } finally {
       setUploading(false);
     }
@@ -410,6 +416,7 @@ export function TicketDetailPage() {
               </label>
             </div>
             <div className="p-4">
+              {uploadError && <p className="text-xs text-red-600 mb-2" role="alert">{uploadError}</p>}
               {attachments.length === 0 ? (
                 <p className="text-sm text-gray-400 text-center py-2">No attachments.</p>
               ) : (

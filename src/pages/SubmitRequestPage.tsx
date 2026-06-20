@@ -9,10 +9,7 @@ import { getOrSeedRequestTypes } from '../lib/seedRequestTypes';
 import { getDefaultAssigneeIds, isSuperadminRole } from '../types';
 import { logTicketCreated } from '../lib/ticketEvents';
 import { localDateTimeMin } from '../lib/dates';
-
-// Attachment constraints, mirrored in the dropzone helper text below.
-const MAX_FILE_BYTES = 10 * 1024 * 1024; // 10 MB
-const ACCEPTED_FILE_TYPES = ['image/png', 'image/jpeg', 'application/pdf'];
+import { partitionFiles, ATTACHMENT_HINT } from '../lib/attachments';
 
 interface RequestType {
   id: string;
@@ -39,19 +36,8 @@ export function SubmitRequestPage() {
   }, []);
 
   const addFiles = (newFiles: FileList | File[]) => {
-    const incoming = Array.from(newFiles);
-    const accepted: File[] = [];
-    const rejected: string[] = [];
-    for (const file of incoming) {
-      if (!ACCEPTED_FILE_TYPES.includes(file.type)) {
-        rejected.push(`${file.name} (unsupported type)`);
-      } else if (file.size > MAX_FILE_BYTES) {
-        rejected.push(`${file.name} (over 10MB)`);
-      } else {
-        accepted.push(file);
-      }
-    }
-    setFileError(rejected.length ? `Skipped: ${rejected.join(', ')}. Allowed: PNG, JPG, PDF up to 10MB.` : '');
+    const { accepted, rejected } = partitionFiles(Array.from(newFiles));
+    setFileError(rejected.length ? `Skipped: ${rejected.join(', ')}. ${ATTACHMENT_HINT}` : '');
     if (accepted.length) setFiles((prev) => [...prev, ...accepted]);
   };
 
