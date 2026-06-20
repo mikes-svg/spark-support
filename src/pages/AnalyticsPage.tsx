@@ -13,6 +13,7 @@ import { getAssigneeIds } from '../types';
 import type { TicketStatus, TicketPriority, Ticket, Profile } from '../types';
 import { toDate } from '../lib/dates';
 import { PageSpinner } from '../components/PageSpinner';
+import { Avatar } from '../components/Avatar';
 import {
   Clock,
   TrendingUp,
@@ -100,6 +101,7 @@ export function AnalyticsPage() {
   const [eventsExist, setEventsExist] = useState(false);
   const [profiles, setProfiles] = useState<Record<string, Profile>>({});
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(false);
   const [preset, setPreset] = useState<RangePreset>('30d');
   const [customStart, setCustomStart] = useState<string>(isoDate(startOfDay(new Date(Date.now() - 30 * 86_400_000))));
   const [customEnd, setCustomEnd] = useState<string>(isoDate(startOfDay(new Date())));
@@ -128,8 +130,10 @@ export function AnalyticsPage() {
         profilesSnap.docs.forEach((d) => { map[d.id] = { id: d.id, ...d.data() } as Profile; });
         setProfiles(map);
         setEventsExist(!!eventsCount && eventsCount.data().count > 0);
+        setError(false);
       } catch (err) {
         console.error('Failed to load analytics data:', err);
+        setError(true);
       } finally {
         setLoading(false);
       }
@@ -357,6 +361,11 @@ export function AnalyticsPage() {
 
   return (
     <div className="space-y-6">
+      {error && (
+        <p className="text-sm text-red-700 bg-red-50 border border-red-200 px-4 py-3 rounded-md" role="alert">
+          Couldn't load analytics data. Some figures may be missing — check your connection and refresh.
+        </p>
+      )}
       {/* Header + range filter */}
       <div className="bg-white shadow-sm rounded-lg border border-gray-200 p-4 flex flex-wrap items-center gap-3">
         <span className="text-sm font-medium text-gray-700">Time range:</span>
@@ -543,7 +552,7 @@ export function AnalyticsPage() {
                 <tr key={row.id}>
                   <td className="py-2 pr-4">
                     <div className="flex items-center gap-2">
-                      {row.photoURL && <img src={row.photoURL} alt="" className="w-6 h-6 rounded-full" />}
+                      <Avatar src={row.photoURL} name={row.name} className="w-6 h-6 rounded-full" />
                       <span className="text-gray-900">{row.name}</span>
                     </div>
                   </td>
@@ -565,7 +574,7 @@ export function AnalyticsPage() {
             {topSubmitters.map((s) => (
               <li key={s.id} className="flex items-center justify-between text-sm">
                 <div className="flex items-center gap-2">
-                  {s.photoURL && <img src={s.photoURL} alt="" className="w-6 h-6 rounded-full" />}
+                  <Avatar src={s.photoURL} name={s.name} className="w-6 h-6 rounded-full" />
                   <span className="text-gray-900">{s.name}</span>
                 </div>
                 <span className="font-semibold text-gray-900">{s.count}</span>

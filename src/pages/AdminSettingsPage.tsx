@@ -25,6 +25,10 @@ export function AdminSettingsPage() {
   const [editTypeName, setEditTypeName] = useState('');
   const [deleteTarget, setDeleteTarget] = useState<RequestType | null>(null);
   const [actionError, setActionError] = useState('');
+  const [showAddModal, setShowAddModal] = useState(false);
+  const [newTypeName, setNewTypeName] = useState('');
+  const [addingType, setAddingType] = useState(false);
+  const [addError, setAddError] = useState('');
 
   useEffect(() => {
     if (!db) { setLoading(false); return; }
@@ -101,20 +105,35 @@ export function AdminSettingsPage() {
     }
   };
 
-  const addRequestType = async () => {
-    const name = window.prompt('Enter new request type name:');
-    const trimmed = name?.trim();
-    if (!trimmed) return;
-    if (!db) return;
-    setActionError('');
+  const openAddModal = () => {
+    setNewTypeName('');
+    setAddError('');
+    setShowAddModal(true);
+  };
+
+  const handleAddType = async () => {
+    const trimmed = newTypeName.trim();
+    if (!trimmed || !db) return;
+    // Duplicate-name guard (case-insensitive): names drive ticket linkage + the
+    // dashboard filter, so two types with the same name would be ambiguous.
+    if (requestTypes.some((t) => t.name.toLowerCase() === trimmed.toLowerCase())) {
+      setAddError(`A request type named "${trimmed}" already exists.`);
+      return;
+    }
+    setAddingType(true);
+    setAddError('');
     try {
       // Write first, then add the row with the REAL Firestore id so edit/toggle/
       // delete on the new row target the right document (not a fabricated id).
       const docRef = await addDoc(collection(db, 'requestTypes'), { name: trimmed, defaultAssigneeIds: [], active: true, createdAt: serverTimestamp() });
       setRequestTypes((prev) => [...prev, { id: docRef.id, name: trimmed, defaultAssigneeIds: [], active: true }].sort((a, b) => a.name.localeCompare(b.name)));
+      setShowAddModal(false);
+      setNewTypeName('');
     } catch (err) {
       console.error('Failed to add type:', err);
-      setActionError('Could not add the request type. Please try again.');
+      setAddError('Could not add the request type. Please try again.');
+    } finally {
+      setAddingType(false);
     }
   };
 
@@ -133,7 +152,7 @@ export function AdminSettingsPage() {
             <h2 className="text-lg font-serif font-semibold text-gray-900">Request Types & Routing</h2>
             <p className="mt-1 text-sm text-gray-500">Configure categories and default assignees for new tickets.</p>
           </div>
-          <button onClick={addRequestType} className="inline-flex items-center justify-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 shadow-sm transition-colors">
+          <button onClick={openAddModal} className="inline-flex items-center justify-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 shadow-sm transition-colors">
             <Plus className="h-4 w-4 mr-2" />Add Type
           </button>
         </div>
@@ -143,6 +162,9 @@ export function AdminSettingsPage() {
               <tr>{['Type Name', 'Default Assignees', 'Status', 'Actions'].map((h) => <th key={h} scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">{h}</th>)}</tr>
             </thead>
             <tbody className="bg-white divide-y divide-gray-200">
+              {requestTypes.length === 0 && (
+                <tr><td colSpan={4} className="px-6 py-12 text-center text-sm text-gray-500">No request types yet. Click “Add Type” to create one.</td></tr>
+              )}
               {requestTypes.map((type) => (
                 <tr key={type.id}>
                   <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
@@ -176,6 +198,34 @@ export function AdminSettingsPage() {
           </table>
         </div>
       </div>
+      {showAddModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={() => setShowAddModal(false)}>
+          <div role="dialog" aria-modal="true" aria-labelledby="add-type-title" className="bg-white rounded-2xl shadow-2xl w-full max-w-sm mx-4 overflow-hidden" onClick={(e) => e.stopPropagation()}>
+            <div className="px-6 py-5 border-b border-gray-200">
+              <h3 id="add-type-title" className="text-lg font-serif font-semibold text-gray-900">Add Request Type</h3>
+            </div>
+            <div className="p-6 space-y-2">
+              <label htmlFor="new-type-name" className="block text-sm font-medium text-gray-700">Type name</label>
+              <input
+                id="new-type-name"
+                value={newTypeName}
+                onChange={(e) => setNewTypeName(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter') handleAddType(); if (e.key === 'Escape') setShowAddModal(false); }}
+                autoFocus
+                placeholder="e.g. Facilities"
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-dark"
+              />
+              {addError && <p className="text-sm text-red-600" role="alert">{addError}</p>}
+            </div>
+            <div className="px-6 py-4 border-t border-gray-200 flex justify-end gap-3 bg-gray-50/50">
+              <button onClick={() => setShowAddModal(false)} className="px-4 py-2 text-sm font-medium text-gray-700 hover:text-gray-900">Cancel</button>
+              <button onClick={handleAddType} disabled={addingType || !newTypeName.trim()} className="px-5 py-2 text-sm font-medium rounded-lg bg-brand-dark text-white hover:bg-[#153427] disabled:opacity-50 transition-colors">
+                {addingType ? 'Adding…' : 'Add Type'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       <ConfirmModal
         open={!!deleteTarget}
         title="Delete Request Type"

@@ -10,6 +10,7 @@ import { ConfirmModal } from '../components/ConfirmModal';
 import { AssigneeChips } from '../components/AssigneeChips';
 import { MentionTextarea, renderCommentBody } from '../components/MentionTextarea';
 import { PageSpinner } from '../components/PageSpinner';
+import { Avatar } from '../components/Avatar';
 import { getAssigneeIds, isScheduled, isAdminRole, isSuperadminRole } from '../types';
 import type { TicketStatus, TicketPriority, Ticket, Profile } from '../types';
 import { toDate, localDateTimeMin } from '../lib/dates';
@@ -437,7 +438,7 @@ export function TicketDetailPage() {
                 const isOwn = comment.userId === user?.id;
                 return (
                   <div key={comment.id} className={`flex items-end gap-2 ${isOwn ? 'flex-row-reverse' : ''}`}>
-                    <img src={commentUser?.photoURL || `https://ui-avatars.com/api/?name=User&background=1B4332&color=D4A843`} alt="" className="w-8 h-8 rounded-full border border-gray-200 flex-shrink-0" />
+                    <Avatar src={commentUser?.photoURL} name={commentUser?.name} className="w-8 h-8 rounded-full border border-gray-200 flex-shrink-0" />
                     <div className={`max-w-[75%] ${isOwn ? 'items-end' : 'items-start'} flex flex-col`}>
                       <div className={`flex items-baseline gap-2 ${isOwn ? 'flex-row-reverse' : ''}`}>
                         <span className="font-medium text-xs text-gray-600">{commentUser?.name || 'Unknown'}</span>
@@ -499,7 +500,7 @@ export function TicketDetailPage() {
               <div>
                 <span className="block text-xs font-medium text-gray-500 uppercase mb-1">Submitter</span>
                 <div className="flex items-center gap-2 mt-1">
-                  {submitter && <img src={submitter.photoURL} alt="" className="w-6 h-6 rounded-full" />}
+                  {submitter && <Avatar src={submitter.photoURL} name={submitter.name} className="w-6 h-6 rounded-full" />}
                   <span className="text-sm text-gray-900">{submitter?.name || '—'}</span>
                 </div>
               </div>
@@ -511,7 +512,7 @@ export function TicketDetailPage() {
                   <div className="flex flex-wrap gap-2 mt-1">
                     {assignees.map((a) => (
                       <div key={a.id} className="flex items-center gap-1.5 bg-gray-100 rounded-full pl-1 pr-2 py-0.5">
-                        <img src={a.photoURL} alt="" className="w-5 h-5 rounded-full" />
+                        <Avatar src={a.photoURL} name={a.name} className="w-5 h-5 rounded-full" />
                         <span className="text-xs text-gray-900">{a.name}</span>
                       </div>
                     ))}

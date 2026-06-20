@@ -4,6 +4,7 @@ import { collection, query, where, orderBy, getDocs, doc, getDoc } from 'firebas
 import { db } from '../lib/firebase';
 import { useAuth } from '../context/AuthContext';
 import { StatusBadge } from '../components/Badges';
+import { Avatar } from '../components/Avatar';
 import { Plus } from 'lucide-react';
 import { getAssigneeIds } from '../types';
 import type { Ticket, Profile } from '../types';
@@ -45,6 +46,7 @@ export function DashboardPage() {
 
   const openCount = tickets.filter((t) => t.status === 'Open').length;
   const inProgressCount = tickets.filter((t) => t.status === 'In Progress').length;
+  const onHoldCount = tickets.filter((t) => t.status === 'On Hold').length;
   const resolvedCount = tickets.filter((t) => t.status === 'Resolved').length;
 
   return (
@@ -56,10 +58,11 @@ export function DashboardPage() {
         </Link>
       </div>
 
-      <div className="grid grid-cols-1 gap-5 sm:grid-cols-3">
+      <div className="grid grid-cols-2 gap-5 lg:grid-cols-4">
         {[
           { label: 'Open Tickets', count: openCount, color: 'bg-blue-500' },
           { label: 'In Progress', count: inProgressCount, color: 'bg-amber-500' },
+          { label: 'On Hold', count: onHoldCount, color: 'bg-orange-500' },
           { label: 'Resolved', count: resolvedCount, color: 'bg-emerald-500' },
         ].map(({ label, count, color }) => (
           <div key={label} className="bg-white overflow-hidden shadow-sm rounded-lg border border-gray-200 relative">
@@ -103,7 +106,7 @@ export function DashboardPage() {
                         {assignees.length > 0 ? (
                           <div className="flex items-center -space-x-2">
                             {assignees.slice(0, 3).map((a) => (
-                              <img key={a.id} className="h-6 w-6 rounded-full border-2 border-white" src={a.photoURL} alt={a.name} title={a.name} />
+                              <Avatar key={a.id} className="h-6 w-6 rounded-full border-2 border-white" src={a.photoURL} name={a.name} />
                             ))}
                             {assignees.length > 3 && (
                               <span className="flex items-center justify-center h-6 w-6 rounded-full bg-gray-200 text-[10px] font-medium text-gray-600 border-2 border-white">

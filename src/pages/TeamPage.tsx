@@ -4,6 +4,7 @@ import { db } from '../lib/firebase';
 import { Trash2, Edit2, Check, X, UserPlus, Users } from 'lucide-react';
 import { ConfirmModal } from '../components/ConfirmModal';
 import { PageSpinner } from '../components/PageSpinner';
+import { Avatar } from '../components/Avatar';
 import { roleLabel } from '../types';
 
 interface Profile { id: string; name: string; email: string; photoURL: string; role: 'superadmin' | 'admin' | 'user'; }
@@ -283,7 +284,7 @@ export function TeamPage() {
                 <tr key={profile.id}>
                   <td className="px-6 py-4 whitespace-nowrap">
                     <div className="flex items-center">
-                      <img className="h-8 w-8 rounded-full mr-3" src={profile.photoURL} alt="" />
+                      <Avatar className="h-8 w-8 rounded-full mr-3" src={profile.photoURL} name={profile.name} />
                       {editingUser === profile.id ? (
                         <div className="flex items-center gap-1">
                           <input type="text" value={editUserName} onChange={(e) => setEditUserName(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') saveUserName(profile); if (e.key === 'Escape') setEditingUser(null); }} className="border border-gray-300 rounded px-2 py-1 text-sm w-40 focus:outline-none focus:ring-2 focus:ring-brand-dark" autoFocus />
@@ -411,7 +412,7 @@ export function TeamPage() {
               </p>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Emails</label>
-                <textarea value={bulkEmails} onChange={(e) => setBulkEmails(e.target.value)} rows={8} placeholder={'alice@company.com\nbob@company.com\ncharlie@company.com'} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-brand-dark" />
+                <textarea value={bulkEmails} onChange={(e) => { setBulkEmails(e.target.value); if (bulkResult) setBulkResult(null); }} rows={8} placeholder={'alice@company.com\nbob@company.com\ncharlie@company.com'} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-brand-dark" />
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Assign Role</label>

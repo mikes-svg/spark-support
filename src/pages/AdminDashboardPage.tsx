@@ -20,6 +20,7 @@ import { Filter, AlertCircle, CheckCircle2, Clock, RefreshCw } from 'lucide-reac
 import { ConfirmModal } from '../components/ConfirmModal';
 import { AssigneeSelector } from '../components/AssigneeSelector';
 import { StatusBadge } from '../components/Badges';
+import { Avatar } from '../components/Avatar';
 import { getAssigneeIds, isSuperadminRole } from '../types';
 import type { TicketStatus, TicketPriority, Ticket, Profile } from '../types';
 import { formatDate, formatDateTime } from '../lib/dates';
@@ -330,7 +331,7 @@ export function AdminDashboardPage() {
                       <td className="px-6 py-4 whitespace-nowrap text-sm font-mono text-gray-500">{ticket.id}</td>
                       <td className="px-6 py-4 whitespace-nowrap">
                         <div className="flex items-center">
-                          {submitter && <img className="h-8 w-8 rounded-full mr-3" src={submitter.photoURL} alt="" />}
+                          {submitter && <Avatar className="h-8 w-8 rounded-full mr-3" src={submitter.photoURL} name={submitter.name} />}
                           <div className="text-sm font-medium text-gray-900">{submitter?.name || '—'}</div>
                         </div>
                       </td>
