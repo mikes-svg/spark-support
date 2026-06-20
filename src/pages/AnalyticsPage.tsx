@@ -1,9 +1,12 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   collection,
+  getCountFromServer,
   getDocs,
   orderBy,
   query,
+  where,
+  Timestamp,
 } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { getAssigneeIds } from '../types';
@@ -92,20 +95,27 @@ function parseLocalDate(s: string): Date {
 export function AnalyticsPage() {
   const [tickets, setTickets] = useState<Ticket[]>([]);
   const [events, setEvents] = useState<TicketEvent[]>([]);
+  // Whether the audit log has ANY events — gates the legacy updatedAt fallback
+  // (distinct from "no events in the selected range").
+  const [eventsExist, setEventsExist] = useState(false);
   const [profiles, setProfiles] = useState<Record<string, Profile>>({});
   const [loading, setLoading] = useState(true);
   const [preset, setPreset] = useState<RangePreset>('30d');
   const [customStart, setCustomStart] = useState<string>(isoDate(startOfDay(new Date(Date.now() - 30 * 86_400_000))));
   const [customEnd, setCustomEnd] = useState<string>(isoDate(startOfDay(new Date())));
 
+  // Tickets + profiles load once: the full set is needed for "open right now"
+  // and for resolution times of tickets created before the selected range.
+  // ticketEvents (the fastest-growing collection) are NOT loaded here — only a
+  // cheap existence count; the events themselves load per-range below.
   useEffect(() => {
     if (!db) { setLoading(false); return; }
     (async () => {
       try {
-        const [ticketsSnap, eventsSnap, profilesSnap] = await Promise.all([
+        const [ticketsSnap, profilesSnap, eventsCount] = await Promise.all([
           getDocs(query(collection(db!, 'tickets'), orderBy('createdAt', 'desc'))),
-          getDocs(query(collection(db!, 'ticketEvents'), orderBy('createdAt', 'asc'))).catch(() => null),
           getDocs(collection(db!, 'profiles')),
+          getCountFromServer(collection(db!, 'ticketEvents')).catch(() => null),
         ]);
         // Exclude scheduled (not-yet-live) tickets — they have no real activity
         // until their go-live date, when they become 'Open' with a reset createdAt.
@@ -114,12 +124,10 @@ export function AnalyticsPage() {
             .map((d) => ({ id: d.id, ...d.data() } as Ticket))
             .filter((t) => t.status !== 'Scheduled'),
         );
-        if (eventsSnap) {
-          setEvents(eventsSnap.docs.map((d) => ({ id: d.id, ...d.data() } as TicketEvent)));
-        }
         const map: Record<string, Profile> = {};
         profilesSnap.docs.forEach((d) => { map[d.id] = { id: d.id, ...d.data() } as Profile; });
         setProfiles(map);
+        setEventsExist(!!eventsCount && eventsCount.data().count > 0);
       } catch (err) {
         console.error('Failed to load analytics data:', err);
       } finally {
@@ -155,6 +163,29 @@ export function AnalyticsPage() {
     () => tickets.filter((t) => inRange(toDate(t.createdAt))),
     [tickets, inRange],
   );
+
+  // Load only the audit events within the selected range — every event-based
+  // metric below is range-scoped anyway, so this is equivalent to loading the
+  // whole collection and filtering, but reads far less as the log grows.
+  useEffect(() => {
+    const database = db;
+    if (!database || !eventsExist) { setEvents([]); return; }
+    let cancelled = false;
+    (async () => {
+      try {
+        const snap = await getDocs(query(
+          collection(database, 'ticketEvents'),
+          where('createdAt', '>=', Timestamp.fromDate(range.start)),
+          where('createdAt', '<=', Timestamp.fromDate(range.end)),
+          orderBy('createdAt', 'asc'),
+        ));
+        if (!cancelled) setEvents(snap.docs.map((d) => ({ id: d.id, ...d.data() } as TicketEvent)));
+      } catch (err) {
+        if (!cancelled) { console.error('Failed to load analytics events:', err); setEvents([]); }
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [range, eventsExist]);
 
   // ---------- METRICS ----------
 
@@ -303,8 +334,10 @@ export function AnalyticsPage() {
         }
       }
     });
-    // Fallback: if no events, also count tickets currently Resolved by their updatedAt
-    if (events.length === 0) {
+    // Fallback only when the audit log doesn't exist at all (legacy data): count
+    // tickets currently Resolved by their updatedAt. When events exist we trust
+    // them, even if the selected range happens to contain none.
+    if (!eventsExist) {
       tickets.forEach((t) => {
         if (t.status === 'Resolved') {
           const d = toDate(t.updatedAt);
@@ -316,7 +349,7 @@ export function AnalyticsPage() {
       });
     }
     return buckets;
-  }, [tickets, events, range]);
+  }, [tickets, events, range, eventsExist]);
 
   if (loading) {
     return <PageSpinner />;
