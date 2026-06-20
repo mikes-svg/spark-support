@@ -175,16 +175,26 @@ export function TeamPage() {
     setInviting(true);
     setInviteError('');
     try {
-      const existing = profiles.find((p) => p.email.toLowerCase() === inviteForm.email.trim().toLowerCase());
+      const emailTrim = inviteForm.email.trim();
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailTrim)) {
+        setInviteError('Please enter a valid email address.');
+        return;
+      }
+      const existing = profiles.find((p) => p.email.toLowerCase() === emailTrim.toLowerCase());
       if (existing) {
         setInviteError('A user with this email already exists.');
         return;
       }
       const displayName = inviteForm.name.trim();
       const photoURL = `https://ui-avatars.com/api/?name=${encodeURIComponent(displayName)}&background=1B4332&color=D4A843`;
-      const emailLower = inviteForm.email.trim().toLowerCase();
+      const emailLower = emailTrim.toLowerCase();
       const profileData = { name: displayName, email: emailLower, photoURL, role: inviteForm.role, createdAt: serverTimestamp() };
       const profileId = emailLower.replace(/[^a-z0-9]/g, '_');
+      // Two different emails can slug to the same id; refuse rather than overwrite.
+      if (profiles.some((p) => p.id === profileId && p.email.toLowerCase() !== emailLower)) {
+        setInviteError('This email conflicts with an existing user id. Please contact support to resolve it.');
+        return;
+      }
       if (db) await setDoc(doc(db, 'profiles', profileId), profileData);
       const newProfile: Profile = { id: profileId, ...profileData, role: inviteForm.role };
       setProfiles((prev) => [...prev, newProfile].sort((a, b) => a.name.localeCompare(b.name)));
@@ -216,6 +226,13 @@ export function TeamPage() {
         try {
           const displayName = nameFromEmail(email);
           const profileId = email.replace(/[^a-z0-9]/g, '_');
+          // Skip slug collisions (a different email mapping to the same id) so an
+          // import can't silently overwrite an existing or just-created user.
+          if (profiles.some((p) => p.id === profileId && p.email.toLowerCase() !== email) ||
+              newProfiles.some((p) => p.id === profileId)) {
+            errors.push(`${email}: conflicts with an existing user id, skipped`);
+            continue;
+          }
           const photoURL = `https://ui-avatars.com/api/?name=${encodeURIComponent(displayName)}&background=1B4332&color=D4A843`;
           const data = { name: displayName, email, photoURL, role: bulkRole, createdAt: serverTimestamp() };
           await setDoc(doc(db, 'profiles', profileId), data);

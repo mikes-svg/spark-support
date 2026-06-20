@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   collection,
   getDocs,
@@ -76,7 +76,12 @@ function startOfDay(d: Date): Date {
 }
 
 function isoDate(d: Date): string {
-  return d.toISOString().slice(0, 10);
+  // Use LOCAL date parts (not toISOString, which is UTC) so the default custom
+  // range and the date-input max land on the right calendar day in any timezone.
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
 }
 
 function parseLocalDate(s: string): Date {
@@ -138,14 +143,17 @@ export function AnalyticsPage() {
     return { start, end };
   }, [preset, customStart, customEnd]);
 
-  const inRange = (d: Date | null): boolean => {
-    if (!d) return false;
-    return d >= range.start && d <= range.end;
-  };
+  const inRange = useCallback(
+    (d: Date | null): boolean => {
+      if (!d) return false;
+      return d >= range.start && d <= range.end;
+    },
+    [range],
+  );
 
   const ticketsInRange = useMemo(
     () => tickets.filter((t) => inRange(toDate(t.createdAt))),
-    [tickets, range],
+    [tickets, inRange],
   );
 
   // ---------- METRICS ----------
