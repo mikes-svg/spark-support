@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import { doc, getDoc, deleteDoc, updateDoc, collection, query, where, orderBy, onSnapshot, addDoc, serverTimestamp, getDocs, writeBatch, Timestamp } from 'firebase/firestore';
 import { ref, uploadBytes, listAll, getDownloadURL } from 'firebase/storage';
@@ -13,7 +13,7 @@ import { PageSpinner } from '../components/PageSpinner';
 import { getAssigneeIds, isScheduled, isAdminRole, isSuperadminRole } from '../types';
 import type { TicketStatus, TicketPriority, Ticket, Profile } from '../types';
 import { toDate, localDateTimeMin } from '../lib/dates';
-import { sendMail, ticketUrl } from '../lib/mail';
+import { sendMail, ticketUrl, escapeHtml } from '../lib/mail';
 import {
   updateTicketStatus,
   updateTicketPriority,
@@ -39,6 +39,7 @@ export function TicketDetailPage() {
   const [profiles, setProfiles] = useState<Record<string, Profile>>({});
   const [ticketComments, setTicketComments] = useState<Comment[]>([]);
   const [newComment, setNewComment] = useState('');
+  const [postingComment, setPostingComment] = useState(false);
   const [loading, setLoading] = useState(true);
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [uploading, setUploading] = useState(false);
@@ -49,6 +50,15 @@ export function TicketDetailPage() {
   const [adminProfiles, setAdminProfiles] = useState<Profile[]>([]);
   const [allProfiles, setAllProfiles] = useState<Profile[]>([]);
   const [pendingMentionIds, setPendingMentionIds] = useState<string[]>([]);
+
+  // Mirror `profiles` into a ref so the comments listener (whose effect only
+  // depends on `id`) can read the latest loaded profiles instead of the stale
+  // closure value, avoiding redundant re-fetches of authors we already have.
+  const profilesRef = useRef<Record<string, Profile>>({});
+  useEffect(() => { profilesRef.current = profiles; }, [profiles]);
+
+  // Auto-scroll the discussion to the newest comment as it grows.
+  const commentsEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (!id || !db) { setLoading(false); return; }
@@ -102,7 +112,7 @@ export function TicketDetailPage() {
         const comments = snap.docs.map((d) => ({ id: d.id, ...d.data() } as Comment));
         setTicketComments(comments);
         const commentUserIds = [...new Set(comments.map((c) => c.userId))];
-        const missing = commentUserIds.filter((uid) => !profiles[uid]);
+        const missing = commentUserIds.filter((uid) => !profilesRef.current[uid]);
         if (missing.length) {
           const newProfileDocs = await Promise.all(missing.map((uid) => getDoc(doc(db!, 'profiles', uid))));
           setProfiles((prev) => {
@@ -118,50 +128,75 @@ export function TicketDetailPage() {
     return () => { if (unsubscribe) unsubscribe(); };
   }, [id]);
 
+  // Keep the discussion scrolled to the newest comment.
+  useEffect(() => {
+    commentsEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [ticketComments]);
+
   const handleAddComment = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
-    if (!newComment.trim() || !user || !ticket || !db) return;
+    // Guard against double-submit (Enter + click) which would post duplicates.
+    if (!newComment.trim() || !user || !ticket || !db || postingComment) return;
     const body = newComment.trim();
     const mentionedIds = pendingMentionIds.filter((id) => id !== user.id);
+
+    setPostingComment(true);
+    try {
+      await addDoc(collection(db, 'comments'), {
+        ticketId: ticket.id,
+        userId: user.id,
+        body,
+        mentionedIds,
+        createdAt: serverTimestamp(),
+      });
+    } catch (err) {
+      // Keep the typed text in the composer so the user doesn't lose it.
+      console.error('Failed to post comment:', err);
+      alert('Failed to post your comment. Please try again.');
+      setPostingComment(false);
+      return;
+    }
+    // Comment persisted — safe to clear the composer now.
     setNewComment('');
     setPendingMentionIds([]);
-    await addDoc(collection(db, 'comments'), {
-      ticketId: ticket.id,
-      userId: user.id,
-      body,
-      mentionedIds,
-      createdAt: serverTimestamp(),
-    });
+    setPostingComment(false);
 
-    // Audit log: first-response time only counts when a non-submitter comments first.
-    const priorNonSubmitterReply = ticketComments.some(
-      (c) => c.userId !== ticket.submitterId,
-    );
-    const isFirstResponse =
-      user.id !== ticket.submitterId && !priorNonSubmitterReply;
-    await logTicketComment(ticket.id, user.id, isFirstResponse);
-
-    // Email other parties: participants + anyone mentioned (deduped, excluding commenter)
-    const currentAssigneeIds = getAssigneeIds(ticket);
-    const recipientIds = [
-      ...new Set([ticket.submitterId, ...currentAssigneeIds, ...mentionedIds]),
-    ].filter((pid) => pid && pid !== user.id);
-    for (const recipientId of recipientIds) {
-      const recipientDoc = await getDoc(doc(db, 'profiles', recipientId));
-      const recipientEmail = recipientDoc.data()?.email;
-      if (!recipientEmail) continue;
-      const wasMentioned = mentionedIds.includes(recipientId);
-      const subject = wasMentioned
-        ? `${user.name} mentioned you on ${ticket.id}: ${ticket.title}`
-        : `New comment on ${ticket.id}: ${ticket.title}`;
-      const lead = wasMentioned
-        ? `<p><strong>${user.name}</strong> mentioned you in a comment on <strong>${ticket.id}</strong>:</p>`
-        : `<p><strong>${user.name}</strong> commented on <strong>${ticket.id}</strong>:</p>`;
-      await sendMail(
-        recipientEmail,
-        subject,
-        `${lead}<p>${body}</p><p><a href="${ticketUrl(ticket.id)}">View ticket →</a></p><hr style="margin:16px 0;border:none;border-top:1px solid #e5e7eb"/><p style="color:#9ca3af;font-size:12px">Please do not reply to this email. To respond, <a href="${ticketUrl(ticket.id)}">click here to view the ticket</a> and add your comment there.</p>`
+    // Audit log + notifications are best-effort and must not error the saved comment.
+    try {
+      // First-response time only counts when a non-submitter comments first.
+      const priorNonSubmitterReply = ticketComments.some(
+        (c) => c.userId !== ticket.submitterId,
       );
+      const isFirstResponse =
+        user.id !== ticket.submitterId && !priorNonSubmitterReply;
+      await logTicketComment(ticket.id, user.id, isFirstResponse);
+
+      // Email other parties: participants + anyone mentioned (deduped, excluding commenter)
+      const safeBody = escapeHtml(body);
+      const safeName = escapeHtml(user.name);
+      const currentAssigneeIds = getAssigneeIds(ticket);
+      const recipientIds = [
+        ...new Set([ticket.submitterId, ...currentAssigneeIds, ...mentionedIds]),
+      ].filter((pid) => pid && pid !== user.id);
+      for (const recipientId of recipientIds) {
+        const recipientDoc = await getDoc(doc(db, 'profiles', recipientId));
+        const recipientEmail = recipientDoc.data()?.email;
+        if (!recipientEmail) continue;
+        const wasMentioned = mentionedIds.includes(recipientId);
+        const subject = wasMentioned
+          ? `${user.name} mentioned you on ${ticket.id}: ${ticket.title}`
+          : `New comment on ${ticket.id}: ${ticket.title}`;
+        const lead = wasMentioned
+          ? `<p><strong>${safeName}</strong> mentioned you in a comment on <strong>${ticket.id}</strong>:</p>`
+          : `<p><strong>${safeName}</strong> commented on <strong>${ticket.id}</strong>:</p>`;
+        await sendMail(
+          recipientEmail,
+          subject,
+          `${lead}<p>${safeBody}</p><p><a href="${ticketUrl(ticket.id)}">View ticket →</a></p><hr style="margin:16px 0;border:none;border-top:1px solid #e5e7eb"/><p style="color:#9ca3af;font-size:12px">Please do not reply to this email. To respond, <a href="${ticketUrl(ticket.id)}">click here to view the ticket</a> and add your comment there.</p>`
+        );
+      }
+    } catch (err) {
+      console.error('Comment saved, but a notification step failed:', err);
     }
   };
 
@@ -202,7 +237,7 @@ export function TicketDetailPage() {
     const submitterEmail = submitterDoc.data()?.email;
     if (submitterEmail) {
       await sendMail(submitterEmail, `${ticket.id} status changed to ${newStatus}`,
-        `<p>Your ticket <strong>${ticket.id}</strong> — ${ticket.title} — has been updated to <strong>${newStatus}</strong>.</p><p><a href="${ticketUrl(ticket.id)}">View ticket →</a></p>`);
+        `<p>Your ticket <strong>${ticket.id}</strong> — ${escapeHtml(ticket.title)} — has been updated to <strong>${newStatus}</strong>.</p><p><a href="${ticketUrl(ticket.id)}">View ticket →</a></p>`);
     }
   };
 
@@ -250,7 +285,7 @@ export function TicketDetailPage() {
       const assigneeData = assigneeDoc.data();
       if (assigneeData?.email) {
         await sendMail(assigneeData.email, `${ticket.id} has been assigned to you`,
-          `<p>Ticket <strong>${ticket.id}</strong> — ${ticket.title} — has been assigned to you.</p><p><a href="${ticketUrl(ticket.id)}">View ticket →</a></p>`);
+          `<p>Ticket <strong>${ticket.id}</strong> — ${escapeHtml(ticket.title)} — has been assigned to you.</p><p><a href="${ticketUrl(ticket.id)}">View ticket →</a></p>`);
       } else {
         console.warn(`Skipping assignee notification for ${ticket.id}: profile ${addedId} has no email field. Have them sign in once to self-heal, or fix via /admin/team.`);
       }
@@ -448,6 +483,7 @@ export function TicketDetailPage() {
                   </div>
                 );
               })}
+              <div ref={commentsEndRef} />
             </div>
             <div className="p-4 border-t border-gray-200 bg-gray-50">
               <form onSubmit={handleAddComment} className="flex items-end gap-3">
@@ -460,7 +496,7 @@ export function TicketDetailPage() {
                   className="flex-1 w-full border-gray-300 rounded-lg shadow-sm focus:ring-brand-dark focus:border-brand-dark sm:text-sm border p-3 resize-none"
                   onSubmit={() => handleAddComment()}
                 />
-                <button type="submit" disabled={!newComment.trim()} className="p-3 bg-brand-dark text-white rounded-lg hover:bg-[#153427] disabled:opacity-50 transition-colors shadow-sm">
+                <button type="submit" disabled={!newComment.trim() || postingComment} aria-label="Send comment" className="p-3 bg-brand-dark text-white rounded-lg hover:bg-[#153427] disabled:opacity-50 transition-colors shadow-sm">
                   <Send className="w-5 h-5" />
                 </button>
               </form>

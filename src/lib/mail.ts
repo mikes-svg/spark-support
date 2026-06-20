@@ -11,3 +11,17 @@ export async function sendMail(to: string, subject: string, html: string) {
 export function ticketUrl(id: string) {
   return `${window.location.origin}/tickets/${id}`;
 }
+
+/**
+ * Escape user-controlled text before interpolating it into email HTML, so a
+ * crafted ticket title or comment body can't inject markup or links into the
+ * mail delivered to staff.
+ */
+export function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}

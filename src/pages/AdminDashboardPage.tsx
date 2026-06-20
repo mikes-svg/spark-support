@@ -10,7 +10,7 @@ import { StatusBadge } from '../components/Badges';
 import { getAssigneeIds, isSuperadminRole } from '../types';
 import type { TicketStatus, TicketPriority, Ticket, Profile } from '../types';
 import { formatDate, formatDateTime } from '../lib/dates';
-import { sendMail, ticketUrl } from '../lib/mail';
+import { sendMail, ticketUrl, escapeHtml } from '../lib/mail';
 import {
   updateTicketStatus,
   updateTicketPriority,
@@ -38,22 +38,26 @@ export function AdminDashboardPage() {
   const [showScheduled, setShowScheduled] = useState(false);
 
   const fetchData = useCallback(async (showLoading = true) => {
-    if (!db) { setLoading(false); return; }
+    // Capture into a local const so the non-null narrowing survives into the
+    // map() closures below (the imported `db` is a mutable binding, so TS would
+    // otherwise widen it back to Firestore | null inside callbacks).
+    const database = db;
+    if (!database) { setLoading(false); return; }
     if (showLoading) setLoading(true);
     else setRefreshing(true);
     try {
-      const ticketsSnap = await getDocs(query(collection(db, 'tickets'), orderBy('createdAt', 'desc')));
+      const ticketsSnap = await getDocs(query(collection(database, 'tickets'), orderBy('createdAt', 'desc')));
       const ticketList = ticketsSnap.docs.map((d) => ({ id: d.id, ...d.data() } as Ticket));
       setTickets(ticketList);
-      const rtSnap = await getDocs(collection(db, 'requestTypes'));
+      const rtSnap = await getDocs(collection(database, 'requestTypes'));
       setRequestTypes(rtSnap.docs.map((d) => d.data().name as string).sort());
       const allAssigneeIds = ticketList.flatMap((t) => getAssigneeIds(t));
       const profileIds = [...new Set([...ticketList.map((t) => t.submitterId), ...allAssigneeIds])] as string[];
-      const profileDocs = await Promise.all(profileIds.map((id) => getDoc(doc(db, 'profiles', id))));
+      const profileDocs = await Promise.all(profileIds.map((id) => getDoc(doc(database, 'profiles', id))));
       const profileMap: Record<string, Profile> = {};
       profileDocs.forEach((p) => { if (p.exists()) profileMap[p.id] = { id: p.id, ...p.data() } as Profile; });
       setProfiles(profileMap);
-      const adminSnap = await getDocs(query(collection(db, 'profiles'), where('role', 'in', ['admin', 'superadmin'])));
+      const adminSnap = await getDocs(query(collection(database, 'profiles'), where('role', 'in', ['admin', 'superadmin'])));
       setAdminProfiles(adminSnap.docs.map((d) => ({ id: d.id, ...d.data() } as Profile)));
     } catch (err) {
       console.error('Failed to fetch admin data:', err);
@@ -74,12 +78,15 @@ export function AdminDashboardPage() {
 
   const pendingMessage = (() => {
     if (!pendingChange) return '';
-    const { ticket, value } = pendingChange;
+    // Narrow on the discriminant FIRST so `value` is the specific member type
+    // (string[] vs TicketStatus/TicketPriority) inside each branch.
     if (pendingChange.type === 'assignees') {
+      const { ticket, value } = pendingChange;
       if (value.length === 0) return `Remove all assignees from ${ticket.id}?`;
       const names = value.map((id) => adminProfiles.find((a) => a.id === id)?.name || 'Unknown').join(', ');
       return `Set assignees for ${ticket.id} to: ${names}?`;
     }
+    const { ticket, value } = pendingChange;
     return `Change ${pendingChange.type} for ${ticket.id} to "${value}"?`;
   })();
 
@@ -109,7 +116,7 @@ export function AdminDashboardPage() {
         const email = assigneeDoc.data()?.email;
         if (email) {
           await sendMail(email, `${ticket.id} has been assigned to you`,
-            `<p>Ticket <strong>${ticket.id}</strong> — ${ticket.title} — has been assigned to you.</p><p><a href="${ticketUrl(ticket.id)}">View ticket →</a></p>`);
+            `<p>Ticket <strong>${ticket.id}</strong> — ${escapeHtml(ticket.title)} — has been assigned to you.</p><p><a href="${ticketUrl(ticket.id)}">View ticket →</a></p>`);
         } else {
           console.warn(`Skipping assignee notification for ${ticket.id}: profile ${addedId} has no email field. Have them sign in once to self-heal, or fix via /admin/team.`);
         }
@@ -130,7 +137,7 @@ export function AdminDashboardPage() {
       const submitterEmail = submitterDoc.data()?.email;
       if (submitterEmail) {
         await sendMail(submitterEmail, `${ticket.id} status changed to ${value}`,
-          `<p>Your ticket <strong>${ticket.id}</strong> — ${ticket.title} — has been updated to <strong>${value}</strong>.</p><p><a href="${ticketUrl(ticket.id)}">View ticket →</a></p>`);
+          `<p>Your ticket <strong>${ticket.id}</strong> — ${escapeHtml(ticket.title)} — has been updated to <strong>${value}</strong>.</p><p><a href="${ticketUrl(ticket.id)}">View ticket →</a></p>`);
       }
     } else {
       const { ticket, value } = change;

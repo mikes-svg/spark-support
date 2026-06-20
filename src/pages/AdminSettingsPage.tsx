@@ -3,6 +3,7 @@ import { collection, doc, updateDoc, deleteDoc, addDoc, serverTimestamp, getDocs
 import { db } from '../lib/firebase';
 import { Plus, Trash2, Edit2, Check, X } from 'lucide-react';
 import { AssigneeSelector } from '../components/AssigneeSelector';
+import { ConfirmModal } from '../components/ConfirmModal';
 import { getOrSeedRequestTypes } from '../lib/seedRequestTypes';
 import { getDefaultAssigneeIds, isAdminRole } from '../types';
 import { PageSpinner } from '../components/PageSpinner';
@@ -22,6 +23,8 @@ export function AdminSettingsPage() {
   const [loading, setLoading] = useState(true);
   const [editingType, setEditingType] = useState<string | null>(null);
   const [editTypeName, setEditTypeName] = useState('');
+  const [deleteTarget, setDeleteTarget] = useState<RequestType | null>(null);
+  const [actionError, setActionError] = useState('');
 
   useEffect(() => {
     if (!db) { setLoading(false); return; }
@@ -40,38 +43,79 @@ export function AdminSettingsPage() {
   }, []);
 
   const toggleRequestTypeActive = async (rt: RequestType) => {
-    setRequestTypes((prev) => prev.map((t) => t.id === rt.id ? { ...t, active: !t.active } : t));
     if (!db) return;
-    await updateDoc(doc(db, 'requestTypes', rt.id), { active: !rt.active });
+    const next = !rt.active;
+    setActionError('');
+    setRequestTypes((prev) => prev.map((t) => t.id === rt.id ? { ...t, active: next } : t));
+    try {
+      await updateDoc(doc(db, 'requestTypes', rt.id), { active: next });
+    } catch (err) {
+      console.error('Failed to update status:', err);
+      setRequestTypes((prev) => prev.map((t) => t.id === rt.id ? { ...t, active: rt.active } : t));
+      setActionError('Could not update the status. Please try again.');
+    }
   };
 
   const saveTypeName = async (rt: RequestType) => {
-    if (!editTypeName.trim()) return;
-    setRequestTypes((prev) => prev.map((t) => t.id === rt.id ? { ...t, name: editTypeName.trim() } : t));
+    const newName = editTypeName.trim();
+    if (!newName || newName === rt.name) { setEditingType(null); return; }
+    if (!db) { setEditingType(null); return; }
+    setActionError('');
+    setRequestTypes((prev) => prev.map((t) => t.id === rt.id ? { ...t, name: newName } : t));
     setEditingType(null);
-    if (!db) return;
-    await updateDoc(doc(db, 'requestTypes', rt.id), { name: editTypeName.trim() });
+    try {
+      await updateDoc(doc(db, 'requestTypes', rt.id), { name: newName });
+    } catch (err) {
+      console.error('Failed to rename type:', err);
+      setRequestTypes((prev) => prev.map((t) => t.id === rt.id ? { ...t, name: rt.name } : t));
+      setActionError('Could not rename the type. Please try again.');
+    }
   };
 
   const updateDefaultAssignees = async (rt: RequestType, assigneeIds: string[]) => {
-    setRequestTypes((prev) => prev.map((t) => t.id === rt.id ? { ...t, defaultAssigneeIds: assigneeIds, defaultAssigneeId: null } : t));
     if (!db) return;
-    await updateDoc(doc(db, 'requestTypes', rt.id), { defaultAssigneeIds: assigneeIds, defaultAssigneeId: null });
+    const prevAssignees = getDefaultAssigneeIds(rt);
+    setActionError('');
+    setRequestTypes((prev) => prev.map((t) => t.id === rt.id ? { ...t, defaultAssigneeIds: assigneeIds, defaultAssigneeId: null } : t));
+    try {
+      await updateDoc(doc(db, 'requestTypes', rt.id), { defaultAssigneeIds: assigneeIds, defaultAssigneeId: null });
+    } catch (err) {
+      console.error('Failed to update default assignees:', err);
+      setRequestTypes((prev) => prev.map((t) => t.id === rt.id ? { ...t, defaultAssigneeIds: prevAssignees, defaultAssigneeId: null } : t));
+      setActionError('Could not update default assignees. Please try again.');
+    }
   };
 
-  const deleteRequestType = async (id: string) => {
-    setRequestTypes((prev) => prev.filter((t) => t.id !== id));
-    if (!db) return;
-    await deleteDoc(doc(db, 'requestTypes', id));
+  const confirmDeleteRequestType = async () => {
+    const target = deleteTarget;
+    setDeleteTarget(null);
+    if (!target || !db) return;
+    setActionError('');
+    setRequestTypes((prev) => prev.filter((t) => t.id !== target.id));
+    try {
+      await deleteDoc(doc(db, 'requestTypes', target.id));
+    } catch (err) {
+      console.error('Failed to delete type:', err);
+      setRequestTypes((prev) => [...prev, target].sort((a, b) => a.name.localeCompare(b.name)));
+      setActionError('Could not delete the type. Please try again.');
+    }
   };
 
   const addRequestType = async () => {
     const name = window.prompt('Enter new request type name:');
-    if (!name?.trim()) return;
-    const newType: RequestType = { id: `rt-${Date.now()}`, name: name.trim(), defaultAssigneeIds: [], active: true };
-    setRequestTypes((prev) => [...prev, newType].sort((a, b) => a.name.localeCompare(b.name)));
+    const trimmed = name?.trim();
+    if (!trimmed) return;
     if (!db) return;
-    await addDoc(collection(db, 'requestTypes'), { name: name.trim(), defaultAssigneeIds: [], active: true, createdAt: serverTimestamp() });
+    setActionError('');
+    try {
+      // Write first, then add the row with the REAL Firestore id so edit/toggle/
+      // delete on the new row target the right document (not a fabricated id).
+      const docRef = await addDoc(collection(db, 'requestTypes'), { name: trimmed, defaultAssigneeIds: [], active: true, createdAt: serverTimestamp() });
+      setRequestTypes((prev) => [...prev, { id: docRef.id, name: trimmed, defaultAssigneeIds: [], active: true }].sort((a, b) => a.name.localeCompare(b.name)));
+    } catch (err) {
+      console.error('Failed to add type:', err);
+      setActionError('Could not add the request type. Please try again.');
+    }
   };
 
   if (loading) return <PageSpinner />;
@@ -80,6 +124,9 @@ export function AdminSettingsPage() {
 
   return (
     <div className="space-y-8 max-w-5xl mx-auto">
+      {actionError && (
+        <p className="text-sm text-red-700 bg-red-50 border border-red-200 px-4 py-3 rounded-md" role="alert">{actionError}</p>
+      )}
       <div className="bg-white shadow-sm rounded-xl border border-gray-200 overflow-hidden">
         <div className="px-6 py-5 border-b border-gray-200 bg-gray-50/50 flex justify-between items-center">
           <div>
@@ -121,7 +168,7 @@ export function AdminSettingsPage() {
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium space-x-3">
                     <button onClick={() => { setEditingType(type.id); setEditTypeName(type.name); }} className="text-gray-400 hover:text-brand-dark transition-colors inline-block"><Edit2 className="h-4 w-4" /></button>
-                    <button onClick={() => deleteRequestType(type.id)} className="text-red-400 hover:text-red-600 transition-colors inline-block"><Trash2 className="h-4 w-4" /></button>
+                    <button onClick={() => setDeleteTarget(type)} aria-label={`Delete ${type.name}`} className="text-red-400 hover:text-red-600 transition-colors inline-block"><Trash2 className="h-4 w-4" /></button>
                   </td>
                 </tr>
               ))}
@@ -129,6 +176,15 @@ export function AdminSettingsPage() {
           </table>
         </div>
       </div>
+      <ConfirmModal
+        open={!!deleteTarget}
+        title="Delete Request Type"
+        message={deleteTarget ? `Delete "${deleteTarget.name}"? Existing tickets keep their label, but this type will no longer be selectable on new requests or appear as a dashboard filter. This can't be undone — consider marking it Inactive instead.` : ''}
+        confirmLabel="Delete"
+        danger
+        onConfirm={confirmDeleteRequestType}
+        onCancel={() => setDeleteTarget(null)}
+      />
     </div>
   );
 }

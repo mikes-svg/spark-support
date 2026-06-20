@@ -15,12 +15,14 @@ export function DashboardPage() {
   const [tickets, setTickets] = useState<Ticket[]>([]);
   const [profiles, setProfiles] = useState<Record<string, Profile>>({});
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(false);
 
   useEffect(() => {
     if (!user || !db) { setLoading(false); return; }
 
     async function fetchTickets() {
       try {
+        setError(false);
         const q = query(collection(db!, 'tickets'), where('participants', 'array-contains', user!.id), orderBy('createdAt', 'desc'));
         const snap = await getDocs(q);
         const ticketList = snap.docs.map((d) => ({ id: d.id, ...d.data() } as Ticket));
@@ -33,6 +35,7 @@ export function DashboardPage() {
         setProfiles(profileMap);
       } catch (err) {
         console.error('Failed to fetch tickets:', err);
+        setError(true);
       } finally {
         setLoading(false);
       }
@@ -85,6 +88,8 @@ export function DashboardPage() {
             <tbody className="bg-white divide-y divide-gray-200">
               {loading ? (
                 <tr><td colSpan={6} className="px-6 py-12 text-center text-sm text-gray-400">Loading…</td></tr>
+              ) : error ? (
+                <tr><td colSpan={6} className="px-6 py-12 text-center text-sm text-red-600">Couldn't load your requests. Check your connection and refresh.</td></tr>
               ) : tickets.length > 0 ? (
                 tickets.map((ticket) => {
                   const assignees = getAssigneeIds(ticket).map((id) => profiles[id]).filter(Boolean);

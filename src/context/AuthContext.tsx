@@ -171,7 +171,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [authError, setAuthError] = useState<string | null>(null);
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
+    // Capture into a local const so the non-null narrowing survives into the
+    // async callback closure (the imported `auth` is a mutable binding).
+    const authInstance = auth;
+    if (!authInstance) { setLoading(false); return; }
+    const unsubscribe = onAuthStateChanged(authInstance, async (firebaseUser) => {
       if (firebaseUser) {
         try {
           const profile = await getOrCreateProfile(firebaseUser);
@@ -181,7 +185,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           const code = (err as { code?: string }).code;
           if (code === 'not-invited') {
             const attemptedEmail = firebaseUser.email || 'your account';
-            await signOut(auth);
+            await signOut(authInstance);
             setUser(null);
             setAuthError(`Access denied. ${attemptedEmail} has not been invited to this portal. Contact your administrator to request access.`);
             setLoading(false);
@@ -209,7 +213,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const logout = async () => {
-    await signOut(auth);
+    if (auth) await signOut(auth);
     setUser(null);
     setAuthError(null);
   };

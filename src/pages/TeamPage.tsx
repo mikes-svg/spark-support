@@ -70,6 +70,7 @@ function Cell({ allowed }: { allowed: boolean }) {
 export function TeamPage() {
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [loading, setLoading] = useState(true);
+  const [actionError, setActionError] = useState('');
   const [showInviteModal, setShowInviteModal] = useState(false);
   const [inviteForm, setInviteForm] = useState({ name: '', email: '', role: 'user' as Profile['role'] });
   const [inviting, setInviting] = useState(false);
@@ -98,8 +99,18 @@ export function TeamPage() {
     })();
   }, []);
 
+  // Guard against locking everyone out: the last Administrator can't be demoted
+  // or deleted (Firestore admin access keys off the profile role).
+  const superadminCount = profiles.filter((p) => p.role === 'superadmin').length;
+  const isLastSuperadmin = (p: Profile) => p.role === 'superadmin' && superadminCount <= 1;
+
   const requestRoleChange = (profile: Profile, newRole: Profile['role']) => {
     if (newRole === profile.role) return;
+    if (newRole !== 'superadmin' && isLastSuperadmin(profile)) {
+      setActionError(`${profile.name} is the only Administrator. Promote another user before changing this role.`);
+      return;
+    }
+    setActionError('');
     setRoleChange({ profile, newRole });
   };
 
@@ -107,16 +118,36 @@ export function TeamPage() {
     if (!roleChange) return;
     const { profile, newRole } = roleChange;
     setRoleChange(null);
-    setProfiles((prev) => prev.map((p) => p.id === profile.id ? { ...p, role: newRole } : p));
     if (!db) return;
-    await updateDoc(doc(db, 'profiles', profile.id), { role: newRole });
+    setActionError('');
+    setProfiles((prev) => prev.map((p) => p.id === profile.id ? { ...p, role: newRole } : p));
+    try {
+      await updateDoc(doc(db, 'profiles', profile.id), { role: newRole });
+    } catch (err) {
+      console.error('Failed to change role:', err);
+      setProfiles((prev) => prev.map((p) => p.id === profile.id ? { ...p, role: profile.role } : p));
+      setActionError('Could not change the role. Please try again.');
+    }
   };
 
   const deleteUser = async () => {
-    if (!deleteTarget) return;
-    setProfiles((prev) => prev.filter((p) => p.id !== deleteTarget.id));
-    if (db) await deleteDoc(doc(db, 'profiles', deleteTarget.id));
+    const target = deleteTarget;
     setDeleteTarget(null);
+    if (!target) return;
+    if (isLastSuperadmin(target)) {
+      setActionError(`${target.name} is the only Administrator and can't be deleted. Promote another user first.`);
+      return;
+    }
+    setActionError('');
+    setProfiles((prev) => prev.filter((p) => p.id !== target.id));
+    if (!db) return;
+    try {
+      await deleteDoc(doc(db, 'profiles', target.id));
+    } catch (err) {
+      console.error('Failed to delete user:', err);
+      setProfiles((prev) => [...prev, target].sort((a, b) => a.name.localeCompare(b.name)));
+      setActionError('Could not delete the user. Please try again.');
+    }
   };
 
   const saveUserName = async (profile: Profile) => {
@@ -126,10 +157,17 @@ export function TeamPage() {
     }
     const newName = editUserName.trim();
     const newPhotoURL = `https://ui-avatars.com/api/?name=${encodeURIComponent(newName)}&background=1B4332&color=D4A843`;
-    setProfiles((prev) => prev.map((p) => p.id === profile.id ? { ...p, name: newName, photoURL: newPhotoURL } : p));
     setEditingUser(null);
+    setActionError('');
+    setProfiles((prev) => prev.map((p) => p.id === profile.id ? { ...p, name: newName, photoURL: newPhotoURL } : p));
     if (!db) return;
-    await updateDoc(doc(db, 'profiles', profile.id), { name: newName, photoURL: newPhotoURL });
+    try {
+      await updateDoc(doc(db, 'profiles', profile.id), { name: newName, photoURL: newPhotoURL });
+    } catch (err) {
+      console.error('Failed to rename user:', err);
+      setProfiles((prev) => prev.map((p) => p.id === profile.id ? { ...p, name: profile.name, photoURL: profile.photoURL } : p));
+      setActionError('Could not rename the user. Please try again.');
+    }
   };
 
   const handleInviteUser = async () => {
@@ -199,6 +237,9 @@ export function TeamPage() {
 
   return (
     <div className="space-y-8 max-w-5xl mx-auto">
+      {actionError && (
+        <p className="text-sm text-red-700 bg-red-50 border border-red-200 px-4 py-3 rounded-md" role="alert">{actionError}</p>
+      )}
       {/* Manage Users */}
       <div className="bg-white shadow-sm rounded-xl border border-gray-200 overflow-hidden">
         <div className="px-6 py-5 border-b border-gray-200 bg-gray-50/50 flex justify-between items-center">
