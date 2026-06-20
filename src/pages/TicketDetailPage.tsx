@@ -13,7 +13,6 @@ import { PageSpinner } from '../components/PageSpinner';
 import { getAssigneeIds, isScheduled, isAdminRole, isSuperadminRole } from '../types';
 import type { TicketStatus, TicketPriority, Ticket, Profile } from '../types';
 import { toDate, localDateTimeMin } from '../lib/dates';
-import { sendMail, ticketUrl, escapeHtml } from '../lib/mail';
 import {
   updateTicketStatus,
   updateTicketPriority,
@@ -170,33 +169,10 @@ export function TicketDetailPage() {
       const isFirstResponse =
         user.id !== ticket.submitterId && !priorNonSubmitterReply;
       await logTicketComment(ticket.id, user.id, isFirstResponse);
-
-      // Email other parties: participants + anyone mentioned (deduped, excluding commenter)
-      const safeBody = escapeHtml(body);
-      const safeName = escapeHtml(user.name);
-      const currentAssigneeIds = getAssigneeIds(ticket);
-      const recipientIds = [
-        ...new Set([ticket.submitterId, ...currentAssigneeIds, ...mentionedIds]),
-      ].filter((pid) => pid && pid !== user.id);
-      for (const recipientId of recipientIds) {
-        const recipientDoc = await getDoc(doc(db, 'profiles', recipientId));
-        const recipientEmail = recipientDoc.data()?.email;
-        if (!recipientEmail) continue;
-        const wasMentioned = mentionedIds.includes(recipientId);
-        const subject = wasMentioned
-          ? `${user.name} mentioned you on ${ticket.id}: ${ticket.title}`
-          : `New comment on ${ticket.id}: ${ticket.title}`;
-        const lead = wasMentioned
-          ? `<p><strong>${safeName}</strong> mentioned you in a comment on <strong>${ticket.id}</strong>:</p>`
-          : `<p><strong>${safeName}</strong> commented on <strong>${ticket.id}</strong>:</p>`;
-        await sendMail(
-          recipientEmail,
-          subject,
-          `${lead}<p>${safeBody}</p><p><a href="${ticketUrl(ticket.id)}">View ticket →</a></p><hr style="margin:16px 0;border:none;border-top:1px solid #e5e7eb"/><p style="color:#9ca3af;font-size:12px">Please do not reply to this email. To respond, <a href="${ticketUrl(ticket.id)}">click here to view the ticket</a> and add your comment there.</p>`
-        );
-      }
+      // Comment notification emails (participants + @mentions) are sent
+      // server-side by the onCommentCreated Cloud Function.
     } catch (err) {
-      console.error('Comment saved, but a notification step failed:', err);
+      console.error('Comment saved, but the audit-log step failed:', err);
     }
   };
 
@@ -230,15 +206,8 @@ export function TicketDetailPage() {
       console.error('Failed to update status:', err);
       setTicket(prev);
       alert('Failed to update status. Please try again.');
-      return;
     }
-
-    const submitterDoc = await getDoc(doc(db, 'profiles', ticket.submitterId));
-    const submitterEmail = submitterDoc.data()?.email;
-    if (submitterEmail) {
-      await sendMail(submitterEmail, `${ticket.id} status changed to ${newStatus}`,
-        `<p>Your ticket <strong>${ticket.id}</strong> — ${escapeHtml(ticket.title)} — has been updated to <strong>${newStatus}</strong>.</p><p><a href="${ticketUrl(ticket.id)}">View ticket →</a></p>`);
-    }
+    // The submitter notification is sent server-side by onTicketUpdated.
   };
 
   const handlePriorityChange = async (newPriority: TicketPriority) => {
@@ -277,19 +246,15 @@ export function TicketDetailPage() {
       return;
     }
 
-    if (scheduled) return; // no notifications until go-live
+    if (scheduled) return; // assignees notified on go-live
 
-    // Email every newly added assignee
+    // Load any newly-added assignees we don't have yet so their chips render.
+    // Assignee notification emails are sent server-side by onTicketUpdated.
     for (const addedId of added) {
+      if (profiles[addedId]) continue;
       const assigneeDoc = await getDoc(doc(db, 'profiles', addedId));
       const assigneeData = assigneeDoc.data();
-      if (assigneeData?.email) {
-        await sendMail(assigneeData.email, `${ticket.id} has been assigned to you`,
-          `<p>Ticket <strong>${ticket.id}</strong> — ${escapeHtml(ticket.title)} — has been assigned to you.</p><p><a href="${ticketUrl(ticket.id)}">View ticket →</a></p>`);
-      } else {
-        console.warn(`Skipping assignee notification for ${ticket.id}: profile ${addedId} has no email field. Have them sign in once to self-heal, or fix via /admin/team.`);
-      }
-      if (!profiles[addedId] && assigneeData) {
+      if (assigneeData) {
         setProfiles((prev) => ({ ...prev, [addedId]: { id: addedId, name: assigneeData.name, photoURL: assigneeData.photoURL, email: assigneeData.email } }));
       }
     }

@@ -10,7 +10,6 @@ import { StatusBadge } from '../components/Badges';
 import { getAssigneeIds, isSuperadminRole } from '../types';
 import type { TicketStatus, TicketPriority, Ticket, Profile } from '../types';
 import { formatDate, formatDateTime } from '../lib/dates';
-import { sendMail, ticketUrl, escapeHtml } from '../lib/mail';
 import {
   updateTicketStatus,
   updateTicketPriority,
@@ -98,7 +97,6 @@ export function AdminDashboardPage() {
     if (change.type === 'assignees') {
       const { ticket, value: newAssigneeIds } = change;
       const oldAssigneeIds = getAssigneeIds(ticket);
-      const added = newAssigneeIds.filter((id) => !oldAssigneeIds.includes(id));
       const participants = [...new Set([ticket.submitterId, ...newAssigneeIds])];
       setTickets((prev) => prev.map((t) => t.id === ticket.id ? { ...t, assigneeIds: newAssigneeIds, assigneeId: null, participants } : t));
       try {
@@ -109,18 +107,7 @@ export function AdminDashboardPage() {
         alert('Failed to update assignees. Please try again.');
         return;
       }
-
-      // Email newly added assignees
-      for (const addedId of added) {
-        const assigneeDoc = await getDoc(doc(db, 'profiles', addedId));
-        const email = assigneeDoc.data()?.email;
-        if (email) {
-          await sendMail(email, `${ticket.id} has been assigned to you`,
-            `<p>Ticket <strong>${ticket.id}</strong> — ${escapeHtml(ticket.title)} — has been assigned to you.</p><p><a href="${ticketUrl(ticket.id)}">View ticket →</a></p>`);
-        } else {
-          console.warn(`Skipping assignee notification for ${ticket.id}: profile ${addedId} has no email field. Have them sign in once to self-heal, or fix via /admin/team.`);
-        }
-      }
+      // Assignee notification emails are sent server-side by onTicketUpdated.
     } else if (change.type === 'status') {
       const { ticket, value } = change;
       setTickets((prev) => prev.map((t) => t.id === ticket.id ? { ...t, status: value } : t));
@@ -132,13 +119,7 @@ export function AdminDashboardPage() {
         alert('Failed to update status. Please try again.');
         return;
       }
-
-      const submitterDoc = await getDoc(doc(db, 'profiles', ticket.submitterId));
-      const submitterEmail = submitterDoc.data()?.email;
-      if (submitterEmail) {
-        await sendMail(submitterEmail, `${ticket.id} status changed to ${value}`,
-          `<p>Your ticket <strong>${ticket.id}</strong> — ${escapeHtml(ticket.title)} — has been updated to <strong>${value}</strong>.</p><p><a href="${ticketUrl(ticket.id)}">View ticket →</a></p>`);
-      }
+      // The submitter notification is sent server-side by onTicketUpdated.
     } else {
       const { ticket, value } = change;
       setTickets((prev) => prev.map((t) => t.id === ticket.id ? { ...t, priority: value } : t));

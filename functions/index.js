@@ -65,6 +65,11 @@ async function sendMail(to, subject, html) {
   await db.collection('mail').add({ to, message: { subject, html } });
 }
 
+/** Absolute URL to a ticket detail page. */
+function ticketLink(ticketId) {
+  return `${APP_URL}/tickets/${ticketId}`;
+}
+
 // ─── Role assignment (server-authoritative) ──────────────────────────────────
 // Roles are decided HERE, never by the client, so an authenticated user can't
 // elevate their own profile. The allowlist lives in this function's environment
@@ -301,5 +306,152 @@ exports.activateScheduledTickets = onSchedule(
     }
 
     logger.info(`Activated ${activated} scheduled tickets`);
+  }
+);
+
+// ─── Notification triggers (server-authoritative email) ──────────────────────
+// All ticket email is sent from these Firestore triggers, so the client never
+// writes to the `mail` collection (rules forbid it) — closing the open-relay
+// surface. User-supplied text is HTML-escaped before interpolation.
+
+exports.onTicketCreated = onDocumentCreated(
+  { document: 'tickets/{ticketId}', region: REGION },
+  async (event) => {
+    const snap = event.data;
+    if (!snap) return;
+    const ticket = snap.data();
+    const ticketId = event.params.ticketId;
+    const link = ticketLink(ticketId);
+    const safeTitle = escapeHtml(ticket.title);
+    const safeType = escapeHtml(ticket.type);
+    const safePriority = escapeHtml(ticket.priority);
+
+    try {
+      const submitterDoc = await db.collection('profiles').doc(ticket.submitterId).get();
+      const submitterEmail = submitterDoc.data()?.email;
+
+      if (ticket.status === 'Scheduled') {
+        // Assignees are notified on go-live (activateScheduledTickets); just
+        // confirm the schedule to the submitter.
+        if (submitterEmail && ticket.scheduledFor?.toDate) {
+          const goLive = ticket.scheduledFor.toDate().toLocaleString('en-US', { timeZone: 'America/Los_Angeles' });
+          await sendMail(
+            submitterEmail,
+            `Your request ${ticketId} is scheduled for ${goLive}`,
+            `<p>Your support request has been scheduled and will go live on <strong>${escapeHtml(goLive)}</strong>. Assignees will be notified then.</p><p><strong>${ticketId}</strong> — ${safeTitle}</p><p>Priority: ${safePriority} · Type: ${safeType}</p><p><a href="${link}">View ticket →</a></p>`,
+          );
+        }
+        return;
+      }
+
+      // Open ticket: confirm to the submitter, then notify each assignee.
+      if (submitterEmail) {
+        await sendMail(
+          submitterEmail,
+          `Your request ${ticketId} has been submitted`,
+          `<p>Your support request has been submitted successfully.</p><p><strong>${ticketId}</strong> — ${safeTitle}</p><p>Priority: ${safePriority} · Type: ${safeType}</p><p><a href="${link}">View ticket →</a></p>`,
+        );
+      }
+      const emails = await emailsForAssignees(getAssigneeIds(ticket));
+      for (const email of emails) {
+        await sendMail(
+          email,
+          `New ${ticket.priority} ticket: ${ticket.title}`,
+          `<p>A new support request has been assigned to you.</p><p><strong>${ticketId}</strong> — ${safeTitle}</p><p><a href="${link}">View ticket →</a></p>`,
+        );
+      }
+    } catch (err) {
+      logger.error(`onTicketCreated mail failed for ${ticketId}`, err);
+    }
+  }
+);
+
+exports.onTicketUpdated = onDocumentUpdated(
+  { document: 'tickets/{ticketId}', region: REGION },
+  async (event) => {
+    const before = event.data?.before?.data();
+    const after = event.data?.after?.data();
+    if (!before || !after) return;
+    const ticketId = event.params.ticketId;
+    const link = ticketLink(ticketId);
+    const safeTitle = escapeHtml(after.title);
+
+    try {
+      // Status change → notify the submitter. Skip the Scheduled→Open go-live
+      // flip, which activateScheduledTickets already handles for assignees.
+      if (before.status !== after.status && before.status !== 'Scheduled') {
+        const submitterDoc = await db.collection('profiles').doc(after.submitterId).get();
+        const submitterEmail = submitterDoc.data()?.email;
+        if (submitterEmail) {
+          await sendMail(
+            submitterEmail,
+            `${ticketId} status changed to ${after.status}`,
+            `<p>Your ticket <strong>${ticketId}</strong> — ${safeTitle} — has been updated to <strong>${escapeHtml(after.status)}</strong>.</p><p><a href="${link}">View ticket →</a></p>`,
+          );
+        }
+      }
+
+      // Newly added assignees → notify them (not while still scheduled).
+      if (after.status !== 'Scheduled') {
+        const beforeIds = getAssigneeIds(before);
+        const afterIds = getAssigneeIds(after);
+        const added = afterIds.filter((id) => !beforeIds.includes(id));
+        const emails = await emailsForAssignees(added);
+        for (const email of emails) {
+          await sendMail(
+            email,
+            `${ticketId} has been assigned to you`,
+            `<p>Ticket <strong>${ticketId}</strong> — ${safeTitle} — has been assigned to you.</p><p><a href="${link}">View ticket →</a></p>`,
+          );
+        }
+      }
+    } catch (err) {
+      logger.error(`onTicketUpdated mail failed for ${ticketId}`, err);
+    }
+  }
+);
+
+exports.onCommentCreated = onDocumentCreated(
+  { document: 'comments/{commentId}', region: REGION },
+  async (event) => {
+    const snap = event.data;
+    if (!snap) return;
+    const c = snap.data();
+
+    try {
+      const ticketSnap = await db.collection('tickets').doc(c.ticketId).get();
+      if (!ticketSnap.exists) return;
+      const ticket = ticketSnap.data();
+      const link = ticketLink(c.ticketId);
+
+      const authorDoc = await db.collection('profiles').doc(c.userId).get();
+      const authorName = authorDoc.data()?.name || 'Someone';
+      const safeName = escapeHtml(authorName);
+      const safeBody = escapeHtml(c.body || '');
+
+      const mentioned = Array.isArray(c.mentionedIds) ? c.mentionedIds : [];
+      const participants = Array.isArray(ticket.participants) ? ticket.participants : [];
+      const recipientIds = [...new Set([...participants, ...mentioned])].filter((id) => id && id !== c.userId);
+
+      for (const rid of recipientIds) {
+        const rdoc = await db.collection('profiles').doc(rid).get();
+        const email = rdoc.data()?.email;
+        if (!email) continue;
+        const wasMentioned = mentioned.includes(rid);
+        const subject = wasMentioned
+          ? `${authorName} mentioned you on ${c.ticketId}: ${ticket.title}`
+          : `New comment on ${c.ticketId}: ${ticket.title}`;
+        const lead = wasMentioned
+          ? `<p><strong>${safeName}</strong> mentioned you in a comment on <strong>${c.ticketId}</strong>:</p>`
+          : `<p><strong>${safeName}</strong> commented on <strong>${c.ticketId}</strong>:</p>`;
+        await sendMail(
+          email,
+          subject,
+          `${lead}<p>${safeBody}</p><p><a href="${link}">View ticket →</a></p><hr style="margin:16px 0;border:none;border-top:1px solid #e5e7eb"/><p style="color:#9ca3af;font-size:12px">Please do not reply to this email. To respond, <a href="${link}">click here to view the ticket</a> and add your comment there.</p>`,
+        );
+      }
+    } catch (err) {
+      logger.error('onCommentCreated mail failed', err);
+    }
   }
 );

@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
-import { getDoc, doc, setDoc, runTransaction, serverTimestamp, Timestamp } from 'firebase/firestore';
+import { doc, setDoc, runTransaction, serverTimestamp, Timestamp } from 'firebase/firestore';
 import { ref, uploadBytes } from 'firebase/storage';
 import { db, storage } from '../lib/firebase';
 import { useAuth } from '../context/AuthContext';
@@ -8,7 +8,6 @@ import { UploadCloud, X } from 'lucide-react';
 import { getOrSeedRequestTypes } from '../lib/seedRequestTypes';
 import { getDefaultAssigneeIds, isSuperadminRole } from '../types';
 import { logTicketCreated } from '../lib/ticketEvents';
-import { sendMail, ticketUrl, escapeHtml } from '../lib/mail';
 import { localDateTimeMin } from '../lib/dates';
 
 // Attachment constraints, mirrored in the dropzone helper text below.
@@ -126,53 +125,19 @@ export function SubmitRequestPage() {
       return;
     }
 
-    // Phase 2 — attachments + notifications. The ticket already exists, so a
-    // failure here must NOT look like a failed submission (which would prompt a
-    // duplicate). Log it and continue to the dashboard.
+    // Phase 2 — attachments. The ticket already exists, so a failure here must
+    // NOT look like a failed submission (which would prompt a duplicate).
+    // Notifications (submitter confirmation + assignee emails) are sent
+    // server-side by the onTicketCreated Cloud Function.
     try {
-      const safeTitle = escapeHtml(title);
-      const safeType = escapeHtml(type);
-      const safePriority = escapeHtml(priority);
-
       if (storage) {
         for (const file of files) {
           const fileRef = ref(storage, `attachments/${ticketId}/${file.name}`);
           await uploadBytes(fileRef, file);
         }
       }
-
-      if (isFutureScheduled) {
-        const goLive = scheduledDate!.toLocaleString();
-        await sendMail(
-          user.email,
-          `Your request ${ticketId} is scheduled for ${goLive}`,
-          `<p>Your support request has been scheduled and will go live on <strong>${escapeHtml(goLive)}</strong>. Assignees will be notified then.</p><p><strong>${ticketId}</strong> — ${safeTitle}</p><p>Priority: ${safePriority} · Type: ${safeType}</p><p><a href="${ticketUrl(ticketId)}">View ticket →</a></p>`,
-        );
-      } else {
-        // Email submitter confirmation
-        await sendMail(
-          user.email,
-          `Your request ${ticketId} has been submitted`,
-          `<p>Your support request has been submitted successfully.</p><p><strong>${ticketId}</strong> — ${safeTitle}</p><p>Priority: ${safePriority} · Type: ${safeType}</p><p><a href="${ticketUrl(ticketId)}">View ticket →</a></p>`,
-        );
-
-        // Email each assignee
-        for (const assigneeId of assigneeIds) {
-          const assigneeDoc = await getDoc(doc(db, 'profiles', assigneeId));
-          const assigneeEmail = assigneeDoc.data()?.email;
-          if (assigneeEmail) {
-            await sendMail(
-              assigneeEmail,
-              `New ${priority} ticket: ${title}`,
-              `<p>A new support request has been assigned to you.</p><p><strong>${ticketId}</strong> — ${safeTitle}</p><p><a href="${ticketUrl(ticketId)}">View ticket →</a></p>`,
-            );
-          } else {
-            console.warn(`Skipping assignee notification for ${ticketId}: profile ${assigneeId} has no email field. Have them sign in once to self-heal, or fix via /admin/team.`);
-          }
-        }
-      }
     } catch (err) {
-      console.error('Ticket created, but a post-submit step (upload/email) failed:', err);
+      console.error('Ticket created, but attachment upload failed:', err);
     }
 
     navigate('/');

@@ -95,17 +95,12 @@ service cloud.firestore {
       allow delete: if false;
     }
 
-    // Email trigger queue (Firebase Trigger Email extension).
-    //
-    // KNOWN GAP (open relay): any signed-in user can create arbitrary {to,
-    // message} docs that the extension sends from the verified domain. The
-    // client currently writes here directly (lib/mail.ts), so locking this down
-    // means moving all sends server-side (Firestore-triggered Cloud Functions on
-    // ticket/comment writes) and then setting client create to false. Until
-    // then this is an abuse surface limited to authenticated users.
+    // Email trigger queue (Firebase Trigger Email extension). All sends now come
+    // from Firestore-triggered Cloud Functions (onTicketCreated/Updated,
+    // onCommentCreated, reminders, activation) using the Admin SDK, so clients
+    // have no access — closing the open-relay surface.
     match /mail/{mailId} {
-      allow create: if isSignedIn();
-      allow read, update, delete: if false;
+      allow read, write: if false;
     }
   }
 }
