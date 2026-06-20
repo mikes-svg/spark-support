@@ -17,12 +17,15 @@
  */
 
 const { onSchedule } = require('firebase-functions/v2/scheduler');
+const { onCall, HttpsError } = require('firebase-functions/v2/https');
+const { onDocumentCreated, onDocumentUpdated } = require('firebase-functions/v2/firestore');
 const { logger } = require('firebase-functions');
 const admin = require('firebase-admin');
 
 admin.initializeApp();
 const db = admin.firestore();
 
+const REGION = 'us-central1';
 const APP_URL = 'https://support.sparkmanage.com';
 
 /**
@@ -55,6 +58,104 @@ async function emailsForAssignees(assigneeIds) {
   );
   return [...new Set(docs.map((d) => d.data()?.email).filter(Boolean))];
 }
+
+/** Queue a single email via the Trigger Email extension's `mail` collection. */
+async function sendMail(to, subject, html) {
+  if (!to) return;
+  await db.collection('mail').add({ to, message: { subject, html } });
+}
+
+// ─── Role assignment (server-authoritative) ──────────────────────────────────
+// Roles are decided HERE, never by the client, so an authenticated user can't
+// elevate their own profile. The allowlist lives in this function's environment
+// (SUPERADMIN_EMAILS / ADMIN_EMAILS, comma-separated) — set via functions config,
+// NOT in the shipped client bundle.
+
+const ROLE_RANK = { user: 0, admin: 1, superadmin: 2 };
+
+function highestRole(roles) {
+  let best = 'user';
+  for (const r of roles) {
+    const norm = typeof r === 'string' ? r.toLowerCase() : r;
+    if (ROLE_RANK[norm] !== undefined && ROLE_RANK[norm] > ROLE_RANK[best]) best = norm;
+  }
+  return best;
+}
+
+function envEmails(name) {
+  return (process.env[name] || '')
+    .split(',')
+    .map((e) => e.trim().toLowerCase())
+    .filter(Boolean);
+}
+
+function allowlistRole(email) {
+  if (envEmails('SUPERADMIN_EMAILS').includes(email)) return 'superadmin';
+  if (envEmails('ADMIN_EMAILS').includes(email)) return 'admin';
+  return 'user';
+}
+
+function nameFromEmail(email) {
+  return (
+    email.split('@')[0].split(/[._-]/).filter(Boolean)
+      .map((p) => p[0].toUpperCase() + p.slice(1).toLowerCase()).join(' ') || email
+  );
+}
+
+/**
+ * Called by the client on sign-in. Creates or self-heals the caller's profile
+ * with a SERVER-decided role (env allowlist or the highest pre-registration
+ * invite), migrates/cleans any pre-reg email-slug duplicates, and returns the
+ * profile. Throws `permission-denied` for uninvited, non-allowlisted accounts.
+ */
+exports.ensureProfile = onCall({ region: REGION }, async (request) => {
+  const auth = request.auth;
+  if (!auth) throw new HttpsError('unauthenticated', 'Sign in required.');
+
+  const uid = auth.uid;
+  const token = auth.token || {};
+  const email = (token.email || '').toLowerCase();
+  if (!email) throw new HttpsError('failed-precondition', 'Account has no email.');
+
+  const profileRef = db.collection('profiles').doc(uid);
+  const profileSnap = await profileRef.get();
+
+  // Pre-registration / duplicate docs created by a superadmin under an
+  // email-slug id, to be migrated into this UID profile.
+  const dupSnap = await db.collection('profiles').where('email', '==', email).get();
+  const dupes = dupSnap.docs.filter((d) => d.id !== uid);
+
+  const allow = allowlistRole(email);
+  const firstTime = !profileSnap.exists;
+
+  // Gate: a brand-new account that was neither invited (no pre-reg dupe) nor on
+  // the allowlist is denied — no profile is created.
+  if (firstTime && dupes.length === 0 && allow === 'user') {
+    throw new HttpsError('permission-denied', 'not-invited');
+  }
+
+  const existing = profileSnap.exists ? profileSnap.data() : {};
+  const dupeRoles = dupes.map((d) => d.data().role);
+  const role = highestRole([existing.role, allow, ...dupeRoles]);
+
+  const dupeName = dupes.map((d) => d.data().name).find(Boolean);
+  const name = token.name || existing.name || dupeName || nameFromEmail(email);
+  const photoURL = token.picture || existing.photoURL ||
+    `https://ui-avatars.com/api/?name=${encodeURIComponent(name)}&background=1B4332&color=D4A843`;
+
+  const data = { name, email, photoURL, role };
+  if (firstTime) data.createdAt = admin.firestore.FieldValue.serverTimestamp();
+  await profileRef.set(data, { merge: true });
+
+  // Migrate then remove pre-reg duplicates.
+  if (dupes.length) {
+    const batch = db.batch();
+    dupes.forEach((d) => batch.delete(d.ref));
+    await batch.commit();
+  }
+
+  return { id: uid, name, email, photoURL, role };
+});
 
 exports.sendTicketReminders = onSchedule(
   {

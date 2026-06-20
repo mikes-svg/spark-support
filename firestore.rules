@@ -27,25 +27,19 @@ service cloud.firestore {
 
     match /profiles/{userId} {
       allow read: if isSignedIn();
-      // Team management (inviting users, changing roles) is superadmin-only.
-      // Users may still create/update their OWN profile doc (sign-in self-heal).
-      //
-      // KNOWN GAP (privilege escalation): because the self-heal flow assigns
-      // `role` client-side from a build-time email whitelist, these rules must
-      // currently allow a user to write their own `role` — which means any
-      // authenticated user can set role:'superadmin' on their own profile from
-      // the console and gain full admin. The proper fix is to assign roles
-      // server-side (Cloud Function + custom claims, or an admin-only allowlist
-      // doc the rules read) and then forbid client writes to `role`. Tracked
-      // separately; do not treat self-role-write as intended.
-      allow create: if request.auth.uid == userId || isSuperAdmin();
-      allow update: if request.auth.uid == userId || isSuperAdmin();
-      // Superadmins can delete any profile. Users can also delete profile docs
-      // whose email matches their own — this lets the sign-in flow auto-clean up
-      // pre-registration docs (email-slug ids) that have already been migrated
-      // to the user's UID profile.
-      allow delete: if isSuperAdmin() ||
-        (isSignedIn() && resource.data.email == request.auth.token.email);
+      // Roles are assigned server-side: the `ensureProfile` Cloud Function (Admin
+      // SDK, bypasses these rules) creates/heals profiles on sign-in, and
+      // superadmins manage the team. Clients may NOT create their own profile or
+      // change `role` — this closes the self-elevation hole where any signed-in
+      // user could set role:'superadmin' on their own doc.
+      allow create: if isSuperAdmin();
+      // A user may edit their own non-role fields (e.g. name); role must be
+      // unchanged. Superadmins may change anything.
+      allow update: if isSuperAdmin()
+        || (request.auth.uid == userId && request.resource.data.role == resource.data.role);
+      // Pre-registration dup cleanup now happens server-side in ensureProfile,
+      // so only superadmins delete profiles.
+      allow delete: if isSuperAdmin();
     }
 
     match /tickets/{ticketId} {

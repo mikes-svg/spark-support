@@ -1,11 +1,7 @@
 import { useState, createContext, useContext, useEffect, ReactNode } from 'react';
-import {
-  onAuthStateChanged,
-  signOut,
-  User as FirebaseUser,
-} from 'firebase/auth';
-import { doc, getDoc, setDoc, deleteDoc, collection, getDocs, serverTimestamp } from 'firebase/firestore';
-import { auth, db } from '../lib/firebase';
+import { onAuthStateChanged, signOut } from 'firebase/auth';
+import { httpsCallable } from 'firebase/functions';
+import { auth, functions } from '../lib/firebase';
 import type { Role } from '../types';
 
 export interface Profile {
@@ -26,164 +22,30 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-function isSuperadminEmail(email: string): boolean {
-  const superEmails = (import.meta.env.VITE_SUPERADMIN_EMAILS || '').split(',').map((e: string) => e.trim().toLowerCase()).filter(Boolean);
-  return superEmails.includes(email.toLowerCase());
-}
-
-function isAdminEmail(email: string): boolean {
-  const adminEmails = (import.meta.env.VITE_ADMIN_EMAILS || '').split(',').map((e: string) => e.trim().toLowerCase()).filter(Boolean);
-  return adminEmails.includes(email.toLowerCase());
-}
-
-function roleForEmail(email: string, existingRole?: string): Role {
-  if (isSuperadminEmail(email)) return 'superadmin';
-  if (isAdminEmail(email)) return 'admin';
-  return (existingRole as Role) || 'user';
-}
-
-const ROLE_RANK: Record<string, number> = { user: 0, admin: 1, superadmin: 2 };
-
-function highestRole(roles: (string | undefined)[]): string | undefined {
-  const valid = roles.filter((r): r is string => !!r && ROLE_RANK[r] !== undefined);
-  if (valid.length === 0) return undefined;
-  return valid.sort((a, b) => ROLE_RANK[b] - ROLE_RANK[a])[0];
-}
-
-async function getOrCreateProfile(firebaseUser: FirebaseUser): Promise<Profile> {
-  const profileRef = doc(db!, 'profiles', firebaseUser.uid);
-  const profileSnap = await getDoc(profileRef);
-  const email = (firebaseUser.email || '').toLowerCase();
-
-  // Find any pre-reg / duplicate docs by email (case-insensitive)
-  const allProfilesSnap = await getDocs(collection(db!, 'profiles'));
-  const dupes = allProfilesSnap.docs.filter((d) => {
-    if (d.id === firebaseUser.uid) return false;
-    return (d.data().email || '').toLowerCase() === email;
-  });
-
-  // ─── Existing UID profile path ───────────────────────────────────────
-  if (profileSnap.exists()) {
-    const data = profileSnap.data();
-    const updates: Record<string, unknown> = {};
-
-    // Self-heal any mis-cased role (e.g. "Superadmin" → "superadmin") so strict equality checks work.
-    const normalizedRole = typeof data.role === 'string' ? data.role.toLowerCase() : data.role;
-    if (normalizedRole !== data.role) {
-      data.role = normalizedRole;
-      updates.role = normalizedRole;
-    }
-
-    // Apply highest role from env whitelist OR from any pre-reg dupe (whichever is higher)
-    const envRole = isSuperadminEmail(email) ? 'superadmin' : isAdminEmail(email) ? 'admin' : null;
-    const dupeRoles = dupes.map((d) => {
-      const r = d.data().role;
-      return typeof r === 'string' ? r.toLowerCase() : r;
-    });
-    const candidateRoles = [data.role, envRole, ...dupeRoles];
-    const newRole = highestRole(candidateRoles);
-    if (newRole && newRole !== data.role && (ROLE_RANK[newRole] ?? 0) > (ROLE_RANK[data.role] ?? 0)) {
-      updates.role = newRole;
-    }
-
-    // Sync email from Google if missing/stale. Without this, a profile that
-    // was created without an email field never self-heals, and assignment
-    // notifications silently skip the user.
-    if (firebaseUser.email) {
-      const fbEmailLower = firebaseUser.email.toLowerCase();
-      const currentEmailLower = (data.email || '').toLowerCase();
-      if (currentEmailLower !== fbEmailLower) {
-        updates.email = fbEmailLower;
-      }
-    }
-
-    // Sync Google photo if current is placeholder
-    if (firebaseUser.photoURL && (!data.photoURL || data.photoURL.includes('ui-avatars.com'))) {
-      updates.photoURL = firebaseUser.photoURL;
-    }
-
-    // Sync Google name if current looks generated/placeholder
-    if (firebaseUser.displayName && firebaseUser.displayName !== data.name) {
-      const emailPrefix = email.split('@')[0];
-      const looksGenerated = !data.name
-        || data.name.toLowerCase() === emailPrefix.toLowerCase()
-        || data.name.toLowerCase() === emailPrefix.replace(/[._-]+/g, ' ').toLowerCase()
-        // Also overwrite if current name matches a dupe's name (means it was set by a pre-reg)
-        || dupes.some((d) => (d.data().name || '').toLowerCase() === data.name.toLowerCase());
-      if (looksGenerated) {
-        updates.name = firebaseUser.displayName;
-      }
-    }
-
-    if (Object.keys(updates).length > 0) {
-      await setDoc(profileRef, updates, { merge: true });
-    }
-    // Delete dupes
-    for (const d of dupes) {
-      await deleteDoc(doc(db!, 'profiles', d.id));
-    }
-    return { id: profileSnap.id, ...data, ...updates } as Profile;
-  }
-
-  // ─── First-time sign-in path ─────────────────────────────────────────
-  // Deny access if the user is NOT pre-registered and NOT in an env whitelist.
-  // This prevents random Google accounts from joining without invitation.
-  const isWhitelisted = isSuperadminEmail(email) || isAdminEmail(email);
-  if (dupes.length === 0 && !isWhitelisted) {
-    const err: Error & { code?: string } = new Error('not-invited');
-    err.code = 'not-invited';
-    throw err;
-  }
-
-  // Inherit role from highest pre-reg dupe (or env), prefer Google name/photo
-  const dupeRole = highestRole(dupes.map((d) => {
-    const r = d.data().role;
-    return typeof r === 'string' ? r.toLowerCase() : r;
-  }));
-  const role = roleForEmail(email, dupeRole);
-
-  const fallbackName = email.split('@')[0].split(/[._-]/).filter(Boolean).map((p) => p[0].toUpperCase() + p.slice(1).toLowerCase()).join(' ') || email;
-  const displayName = firebaseUser.displayName || fallbackName;
-  const photoURL = firebaseUser.photoURL || `https://ui-avatars.com/api/?name=${encodeURIComponent(displayName)}&background=1B4332&color=D4A843`;
-
-  const newProfile = {
-    name: displayName,
-    email,
-    photoURL,
-    role,
-    createdAt: serverTimestamp(),
-  };
-  await setDoc(profileRef, newProfile);
-
-  // Clean up dupes
-  for (const d of dupes) {
-    await deleteDoc(doc(db!, 'profiles', d.id));
-  }
-
-  return { id: firebaseUser.uid, ...newProfile, createdAt: undefined } as unknown as Profile;
-
-  // Brand new user — create fresh profile
-}
-
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<Profile | null>(null);
   const [loading, setLoading] = useState(true);
   const [authError, setAuthError] = useState<string | null>(null);
 
   useEffect(() => {
-    // Capture into a local const so the non-null narrowing survives into the
-    // async callback closure (the imported `auth` is a mutable binding).
     const authInstance = auth;
-    if (!authInstance) { setLoading(false); return; }
+    if (!authInstance || !functions) { setLoading(false); return; }
+
+    // Role is assigned server-side: the client no longer reads any allowlist or
+    // writes its own role. On sign-in we ask the `ensureProfile` Cloud Function
+    // to create/heal the profile and tell us who we are.
+    const ensureProfile = httpsCallable<void, Profile>(functions, 'ensureProfile');
+
     const unsubscribe = onAuthStateChanged(authInstance, async (firebaseUser) => {
       if (firebaseUser) {
         try {
-          const profile = await getOrCreateProfile(firebaseUser);
-          setUser(profile);
+          const res = await ensureProfile();
+          setUser(res.data as Profile);
           setAuthError(null);
         } catch (err) {
-          const code = (err as { code?: string }).code;
-          if (code === 'not-invited') {
+          const code = String((err as { code?: string }).code || '');
+          const message = String((err as { message?: string }).message || '');
+          if (code.includes('permission-denied') || message.includes('not-invited')) {
             const attemptedEmail = firebaseUser.email || 'your account';
             await signOut(authInstance);
             setUser(null);
@@ -191,17 +53,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             setLoading(false);
             return;
           }
-          console.warn('Firestore profile fetch failed, using Firebase user data:', err);
-          const displayName = firebaseUser.displayName || firebaseUser.email?.split('@')[0] || 'User';
-          setUser({
-            id: firebaseUser.uid,
-            name: displayName,
-            email: firebaseUser.email || '',
-            photoURL:
-              firebaseUser.photoURL ||
-              `https://ui-avatars.com/api/?name=${encodeURIComponent(displayName)}&background=1B4332&color=D4A843`,
-            role: roleForEmail(firebaseUser.email || ''),
-          });
+          // Transient/unknown failure: sign out rather than leave a broken,
+          // role-less session. The user can retry.
+          console.error('Sign-in could not be completed:', err);
+          await signOut(authInstance);
+          setUser(null);
+          setAuthError('We could not complete sign-in. Please try again.');
+          setLoading(false);
+          return;
         }
       } else {
         setUser(null);
