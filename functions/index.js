@@ -162,6 +162,52 @@ exports.ensureProfile = onCall({ region: REGION }, async (request) => {
   return { id: uid, name, email, photoURL, role };
 });
 
+/**
+ * Returns a ticket's attachments (name + tokenized download URL) to callers who
+ * are participants or admins of that ticket. Storage rules deny direct client
+ * reads/listing, so this is the only read path — closing the enumeration hole
+ * where any signed-in user could list/read any ticket's files by path.
+ *
+ * Uses each file's existing Firebase download token (set by the client SDK on
+ * upload) to build the download URL, so no signed-URL/IAM setup is required.
+ */
+exports.getTicketAttachments = onCall({ region: REGION }, async (request) => {
+  const auth = request.auth;
+  if (!auth) throw new HttpsError('unauthenticated', 'Sign in required.');
+  const ticketId = request.data?.ticketId;
+  if (!ticketId || typeof ticketId !== 'string') {
+    throw new HttpsError('invalid-argument', 'ticketId is required.');
+  }
+
+  const ticketSnap = await db.collection('tickets').doc(ticketId).get();
+  if (!ticketSnap.exists) throw new HttpsError('not-found', 'Ticket not found.');
+  const ticket = ticketSnap.data();
+
+  const profileSnap = await db.collection('profiles').doc(auth.uid).get();
+  const role = profileSnap.data()?.role;
+  const isAdmin = role === 'admin' || role === 'superadmin';
+  const isParticipant = Array.isArray(ticket.participants) && ticket.participants.includes(auth.uid);
+  if (!isAdmin && !isParticipant) {
+    throw new HttpsError('permission-denied', 'You do not have access to this ticket.');
+  }
+
+  const bucket = admin.storage().bucket();
+  const [files] = await bucket.getFiles({ prefix: `attachments/${ticketId}/` });
+  const attachments = [];
+  for (const file of files) {
+    const [md] = await file.getMetadata();
+    const tokens = md.metadata?.firebaseStorageDownloadTokens;
+    if (!tokens) continue; // not client-uploaded / no shareable token
+    const token = String(tokens).split(',')[0];
+    const encodedPath = encodeURIComponent(file.name);
+    attachments.push({
+      name: file.name.split('/').pop(),
+      url: `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/${encodedPath}?alt=media&token=${token}`,
+    });
+  }
+  return attachments;
+});
+
 exports.sendTicketReminders = onSchedule(
   {
     schedule: 'every 24 hours',

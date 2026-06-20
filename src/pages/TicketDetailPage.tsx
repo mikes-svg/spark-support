@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import { doc, getDoc, deleteDoc, updateDoc, collection, query, where, orderBy, onSnapshot, addDoc, serverTimestamp, getDocs, writeBatch, Timestamp } from 'firebase/firestore';
-import { ref, uploadBytes, listAll, getDownloadURL } from 'firebase/storage';
-import { db, storage } from '../lib/firebase';
+import { ref, uploadBytes } from 'firebase/storage';
+import { httpsCallable } from 'firebase/functions';
+import { db, storage, functions } from '../lib/firebase';
 import { StatusBadge, PriorityBadge } from '../components/Badges';
 import { useAuth } from '../context/AuthContext';
 import { Send, ArrowLeft, Clock, Trash2, UploadCloud, FileText, CalendarClock } from 'lucide-react';
@@ -95,16 +96,12 @@ export function TicketDetailPage() {
       .then((snap) => setAllProfiles(snap.docs.map((d) => ({ id: d.id, ...d.data() } as Profile))))
       .catch(() => {});
 
-    // Load attachments
-    if (storage) {
-      const attachRef = ref(storage, `attachments/${id}`);
-      listAll(attachRef).then(async (res) => {
-        const files = await Promise.all(res.items.map(async (item) => ({
-          name: item.name,
-          url: await getDownloadURL(item),
-        })));
-        setAttachments(files);
-      }).catch(() => { /* no attachments folder yet */ });
+    // Attachments are listed via a participation-gated Cloud Function (storage
+    // rules deny direct client reads); it returns tokenized download URLs.
+    if (functions && id) {
+      httpsCallable<{ ticketId: string }, Attachment[]>(functions, 'getTicketAttachments')({ ticketId: id })
+        .then((res) => setAttachments(res.data))
+        .catch((err) => { console.warn('Failed to load attachments:', err); });
     }
 
     let unsubscribe: (() => void) | undefined;
@@ -186,14 +183,15 @@ export function TicketDetailPage() {
     if (accepted.length === 0) return;
     setUploading(true);
     try {
-      const newAttachments: Attachment[] = [];
       for (const file of accepted) {
         const fileRef = ref(storage, `attachments/${ticket.id}/${file.name}`);
         await uploadBytes(fileRef, file);
-        const url = await getDownloadURL(fileRef);
-        newAttachments.push({ name: file.name, url });
       }
-      setAttachments((prev) => [...prev, ...newAttachments]);
+      // Refresh the (gated) attachment list with fresh tokenized URLs.
+      if (functions) {
+        const res = await httpsCallable<{ ticketId: string }, Attachment[]>(functions, 'getTicketAttachments')({ ticketId: ticket.id });
+        setAttachments(res.data);
+      }
     } catch (err) {
       console.error('Failed to upload files:', err);
       setUploadError('Upload failed. Please try again.');
