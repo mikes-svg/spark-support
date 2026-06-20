@@ -18,10 +18,26 @@ service cloud.firestore {
       return isSignedIn() && (role() == 'admin' || role() == 'superadmin');
     }
 
+    // True if the signed-in user is a participant of the given ticket. Used to
+    // gate comments / audit events to the people who can see the ticket itself.
+    function isTicketParticipant(ticketId) {
+      return isSignedIn() &&
+        get(/databases/$(database)/documents/tickets/$(ticketId)).data.participants.hasAny([request.auth.uid]);
+    }
+
     match /profiles/{userId} {
       allow read: if isSignedIn();
       // Team management (inviting users, changing roles) is superadmin-only.
       // Users may still create/update their OWN profile doc (sign-in self-heal).
+      //
+      // KNOWN GAP (privilege escalation): because the self-heal flow assigns
+      // `role` client-side from a build-time email whitelist, these rules must
+      // currently allow a user to write their own `role` — which means any
+      // authenticated user can set role:'superadmin' on their own profile from
+      // the console and gain full admin. The proper fix is to assign roles
+      // server-side (Cloud Function + custom claims, or an admin-only allowlist
+      // doc the rules read) and then forbid client writes to `role`. Tracked
+      // separately; do not treat self-role-write as intended.
       allow create: if request.auth.uid == userId || isSuperAdmin();
       allow update: if request.auth.uid == userId || isSuperAdmin();
       // Superadmins can delete any profile. Users can also delete profile docs
@@ -47,8 +63,13 @@ service cloud.firestore {
     }
 
     match /comments/{commentId} {
-      allow read: if isSignedIn();
-      allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
+      // Comments are visible only to the ticket's participants and admins,
+      // mirroring the tickets read rule — not to anyone who can guess an id.
+      allow read: if isAdmin() || isTicketParticipant(resource.data.ticketId);
+      // The author must be themselves AND able to see the ticket they comment on.
+      allow create: if isSignedIn()
+        && request.resource.data.userId == request.auth.uid
+        && (isAdmin() || isTicketParticipant(request.resource.data.ticketId));
       allow delete: if isSuperAdmin();
     }
 
@@ -56,7 +77,11 @@ service cloud.firestore {
     // readable by admins (who can see analytics). Never edited or deleted.
     match /ticketEvents/{eventId} {
       allow read: if isAdmin();
-      allow create: if isSignedIn() && request.resource.data.actorId == request.auth.uid;
+      // The actor must be themselves AND involved in the ticket, so users can't
+      // forge audit events for arbitrary tickets and skew analytics.
+      allow create: if isSignedIn()
+        && request.resource.data.actorId == request.auth.uid
+        && (isAdmin() || isTicketParticipant(request.resource.data.ticketId));
       allow update, delete: if false;
     }
 
@@ -66,10 +91,24 @@ service cloud.firestore {
     }
 
     match /meta/{docId} {
-      allow read, write: if isSignedIn();
+      allow read: if isSignedIn();
+      // The only doc here is the ticket counter. Allow initial create and a
+      // strictly monotonic increment so a signed-in user can't rewrite it
+      // backwards and cause ticket-ID collisions.
+      allow create: if isSignedIn() && request.resource.data.count is int;
+      allow update: if isSignedIn() && request.resource.data.count is int
+        && request.resource.data.count > resource.data.count;
+      allow delete: if false;
     }
 
-    // Email trigger queue (Firebase Trigger Email extension)
+    // Email trigger queue (Firebase Trigger Email extension).
+    //
+    // KNOWN GAP (open relay): any signed-in user can create arbitrary {to,
+    // message} docs that the extension sends from the verified domain. The
+    // client currently writes here directly (lib/mail.ts), so locking this down
+    // means moving all sends server-side (Firestore-triggered Cloud Functions on
+    // ticket/comment writes) and then setting client create to false. Until
+    // then this is an abuse surface limited to authenticated users.
     match /mail/{mailId} {
       allow create: if isSignedIn();
       allow read, update, delete: if false;
