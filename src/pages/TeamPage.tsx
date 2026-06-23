@@ -3,7 +3,9 @@ import { collection, getDocs, doc, updateDoc, deleteDoc, setDoc, serverTimestamp
 import { db } from '../lib/firebase';
 import { Trash2, Edit2, Check, X, UserPlus, Users } from 'lucide-react';
 import { ConfirmModal } from '../components/ConfirmModal';
+import { Modal } from '../components/Modal';
 import { PageSpinner } from '../components/PageSpinner';
+import { Avatar } from '../components/Avatar';
 import { roleLabel } from '../types';
 
 interface Profile { id: string; name: string; email: string; photoURL: string; role: 'superadmin' | 'admin' | 'user'; }
@@ -70,6 +72,7 @@ function Cell({ allowed }: { allowed: boolean }) {
 export function TeamPage() {
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [loading, setLoading] = useState(true);
+  const [actionError, setActionError] = useState('');
   const [showInviteModal, setShowInviteModal] = useState(false);
   const [inviteForm, setInviteForm] = useState({ name: '', email: '', role: 'user' as Profile['role'] });
   const [inviting, setInviting] = useState(false);
@@ -98,8 +101,18 @@ export function TeamPage() {
     })();
   }, []);
 
+  // Guard against locking everyone out: the last Administrator can't be demoted
+  // or deleted (Firestore admin access keys off the profile role).
+  const superadminCount = profiles.filter((p) => p.role === 'superadmin').length;
+  const isLastSuperadmin = (p: Profile) => p.role === 'superadmin' && superadminCount <= 1;
+
   const requestRoleChange = (profile: Profile, newRole: Profile['role']) => {
     if (newRole === profile.role) return;
+    if (newRole !== 'superadmin' && isLastSuperadmin(profile)) {
+      setActionError(`${profile.name} is the only Administrator. Promote another user before changing this role.`);
+      return;
+    }
+    setActionError('');
     setRoleChange({ profile, newRole });
   };
 
@@ -107,16 +120,36 @@ export function TeamPage() {
     if (!roleChange) return;
     const { profile, newRole } = roleChange;
     setRoleChange(null);
-    setProfiles((prev) => prev.map((p) => p.id === profile.id ? { ...p, role: newRole } : p));
     if (!db) return;
-    await updateDoc(doc(db, 'profiles', profile.id), { role: newRole });
+    setActionError('');
+    setProfiles((prev) => prev.map((p) => p.id === profile.id ? { ...p, role: newRole } : p));
+    try {
+      await updateDoc(doc(db, 'profiles', profile.id), { role: newRole });
+    } catch (err) {
+      console.error('Failed to change role:', err);
+      setProfiles((prev) => prev.map((p) => p.id === profile.id ? { ...p, role: profile.role } : p));
+      setActionError('Could not change the role. Please try again.');
+    }
   };
 
   const deleteUser = async () => {
-    if (!deleteTarget) return;
-    setProfiles((prev) => prev.filter((p) => p.id !== deleteTarget.id));
-    if (db) await deleteDoc(doc(db, 'profiles', deleteTarget.id));
+    const target = deleteTarget;
     setDeleteTarget(null);
+    if (!target) return;
+    if (isLastSuperadmin(target)) {
+      setActionError(`${target.name} is the only Administrator and can't be deleted. Promote another user first.`);
+      return;
+    }
+    setActionError('');
+    setProfiles((prev) => prev.filter((p) => p.id !== target.id));
+    if (!db) return;
+    try {
+      await deleteDoc(doc(db, 'profiles', target.id));
+    } catch (err) {
+      console.error('Failed to delete user:', err);
+      setProfiles((prev) => [...prev, target].sort((a, b) => a.name.localeCompare(b.name)));
+      setActionError('Could not delete the user. Please try again.');
+    }
   };
 
   const saveUserName = async (profile: Profile) => {
@@ -126,10 +159,17 @@ export function TeamPage() {
     }
     const newName = editUserName.trim();
     const newPhotoURL = `https://ui-avatars.com/api/?name=${encodeURIComponent(newName)}&background=1B4332&color=D4A843`;
-    setProfiles((prev) => prev.map((p) => p.id === profile.id ? { ...p, name: newName, photoURL: newPhotoURL } : p));
     setEditingUser(null);
+    setActionError('');
+    setProfiles((prev) => prev.map((p) => p.id === profile.id ? { ...p, name: newName, photoURL: newPhotoURL } : p));
     if (!db) return;
-    await updateDoc(doc(db, 'profiles', profile.id), { name: newName, photoURL: newPhotoURL });
+    try {
+      await updateDoc(doc(db, 'profiles', profile.id), { name: newName, photoURL: newPhotoURL });
+    } catch (err) {
+      console.error('Failed to rename user:', err);
+      setProfiles((prev) => prev.map((p) => p.id === profile.id ? { ...p, name: profile.name, photoURL: profile.photoURL } : p));
+      setActionError('Could not rename the user. Please try again.');
+    }
   };
 
   const handleInviteUser = async () => {
@@ -137,16 +177,26 @@ export function TeamPage() {
     setInviting(true);
     setInviteError('');
     try {
-      const existing = profiles.find((p) => p.email.toLowerCase() === inviteForm.email.trim().toLowerCase());
+      const emailTrim = inviteForm.email.trim();
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailTrim)) {
+        setInviteError('Please enter a valid email address.');
+        return;
+      }
+      const existing = profiles.find((p) => p.email.toLowerCase() === emailTrim.toLowerCase());
       if (existing) {
         setInviteError('A user with this email already exists.');
         return;
       }
       const displayName = inviteForm.name.trim();
       const photoURL = `https://ui-avatars.com/api/?name=${encodeURIComponent(displayName)}&background=1B4332&color=D4A843`;
-      const emailLower = inviteForm.email.trim().toLowerCase();
+      const emailLower = emailTrim.toLowerCase();
       const profileData = { name: displayName, email: emailLower, photoURL, role: inviteForm.role, createdAt: serverTimestamp() };
       const profileId = emailLower.replace(/[^a-z0-9]/g, '_');
+      // Two different emails can slug to the same id; refuse rather than overwrite.
+      if (profiles.some((p) => p.id === profileId && p.email.toLowerCase() !== emailLower)) {
+        setInviteError('This email conflicts with an existing user id. Please contact support to resolve it.');
+        return;
+      }
       if (db) await setDoc(doc(db, 'profiles', profileId), profileData);
       const newProfile: Profile = { id: profileId, ...profileData, role: inviteForm.role };
       setProfiles((prev) => [...prev, newProfile].sort((a, b) => a.name.localeCompare(b.name)));
@@ -178,6 +228,13 @@ export function TeamPage() {
         try {
           const displayName = nameFromEmail(email);
           const profileId = email.replace(/[^a-z0-9]/g, '_');
+          // Skip slug collisions (a different email mapping to the same id) so an
+          // import can't silently overwrite an existing or just-created user.
+          if (profiles.some((p) => p.id === profileId && p.email.toLowerCase() !== email) ||
+              newProfiles.some((p) => p.id === profileId)) {
+            errors.push(`${email}: conflicts with an existing user id, skipped`);
+            continue;
+          }
           const photoURL = `https://ui-avatars.com/api/?name=${encodeURIComponent(displayName)}&background=1B4332&color=D4A843`;
           const data = { name: displayName, email, photoURL, role: bulkRole, createdAt: serverTimestamp() };
           await setDoc(doc(db, 'profiles', profileId), data);
@@ -199,6 +256,9 @@ export function TeamPage() {
 
   return (
     <div className="space-y-8 max-w-5xl mx-auto">
+      {actionError && (
+        <p className="text-sm text-red-700 bg-red-50 border border-red-200 px-4 py-3 rounded-md" role="alert">{actionError}</p>
+      )}
       {/* Manage Users */}
       <div className="bg-white shadow-sm rounded-xl border border-gray-200 overflow-hidden">
         <div className="px-6 py-5 border-b border-gray-200 bg-gray-50/50 flex justify-between items-center">
@@ -225,7 +285,7 @@ export function TeamPage() {
                 <tr key={profile.id}>
                   <td className="px-6 py-4 whitespace-nowrap">
                     <div className="flex items-center">
-                      <img className="h-8 w-8 rounded-full mr-3" src={profile.photoURL} alt="" />
+                      <Avatar className="h-8 w-8 rounded-full mr-3" src={profile.photoURL} name={profile.name} />
                       {editingUser === profile.id ? (
                         <div className="flex items-center gap-1">
                           <input type="text" value={editUserName} onChange={(e) => setEditUserName(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') saveUserName(profile); if (e.key === 'Escape') setEditingUser(null); }} className="border border-gray-300 rounded px-2 py-1 text-sm w-40 focus:outline-none focus:ring-2 focus:ring-brand-dark" autoFocus />
@@ -302,11 +362,9 @@ export function TeamPage() {
       </div>
 
       {/* Invite modal */}
-      {showInviteModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md mx-4 overflow-hidden">
-            <div className="px-6 py-5 border-b border-gray-200 flex justify-between items-center">
-              <h3 className="text-lg font-serif font-semibold text-gray-900">Add New User</h3>
+      <Modal open={showInviteModal} onClose={() => { setShowInviteModal(false); setInviteError(''); }} labelledBy="invite-title" widthClass="max-w-md">
+          <div className="px-6 py-5 border-b border-gray-200 flex justify-between items-center">
+              <h3 id="invite-title" className="text-lg font-serif font-semibold text-gray-900">Add New User</h3>
               <button onClick={() => { setShowInviteModal(false); setInviteError(''); }} className="text-gray-400 hover:text-gray-600"><X className="h-5 w-5" /></button>
             </div>
             <div className="p-6 space-y-4">
@@ -335,16 +393,13 @@ export function TeamPage() {
                 {inviting ? 'Creating…' : 'Add User'}
               </button>
             </div>
-          </div>
-        </div>
-      )}
+      </Modal>
+
 
       {/* Bulk invite modal */}
-      {showBulkModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg mx-4 overflow-hidden">
+      <Modal open={showBulkModal} onClose={() => { setShowBulkModal(false); setBulkResult(null); }} labelledBy="bulk-title" widthClass="max-w-lg">
             <div className="px-6 py-5 border-b border-gray-200 flex justify-between items-center">
-              <h3 className="text-lg font-serif font-semibold text-gray-900">Bulk Invite Users</h3>
+              <h3 id="bulk-title" className="text-lg font-serif font-semibold text-gray-900">Bulk Invite Users</h3>
               <button onClick={() => { setShowBulkModal(false); setBulkResult(null); }} className="text-gray-400 hover:text-gray-600"><X className="h-5 w-5" /></button>
             </div>
             <div className="p-6 space-y-4">
@@ -353,7 +408,7 @@ export function TeamPage() {
               </p>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Emails</label>
-                <textarea value={bulkEmails} onChange={(e) => setBulkEmails(e.target.value)} rows={8} placeholder={'alice@company.com\nbob@company.com\ncharlie@company.com'} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-brand-dark" />
+                <textarea value={bulkEmails} onChange={(e) => { setBulkEmails(e.target.value); if (bulkResult) setBulkResult(null); }} rows={8} placeholder={'alice@company.com\nbob@company.com\ncharlie@company.com'} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-brand-dark" />
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Assign Role</label>
@@ -385,9 +440,7 @@ export function TeamPage() {
                 {bulkImporting ? 'Importing…' : 'Import Users'}
               </button>
             </div>
-          </div>
-        </div>
-      )}
+      </Modal>
 
       <ConfirmModal
         open={!!deleteTarget}

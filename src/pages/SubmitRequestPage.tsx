@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
-import { getDoc, doc, setDoc, runTransaction, serverTimestamp, Timestamp } from 'firebase/firestore';
+import { doc, setDoc, runTransaction, serverTimestamp, Timestamp } from 'firebase/firestore';
 import { ref, uploadBytes } from 'firebase/storage';
 import { db, storage } from '../lib/firebase';
 import { useAuth } from '../context/AuthContext';
@@ -8,8 +8,8 @@ import { UploadCloud, X } from 'lucide-react';
 import { getOrSeedRequestTypes } from '../lib/seedRequestTypes';
 import { getDefaultAssigneeIds, isSuperadminRole } from '../types';
 import { logTicketCreated } from '../lib/ticketEvents';
-import { sendMail, ticketUrl } from '../lib/mail';
 import { localDateTimeMin } from '../lib/dates';
+import { partitionFiles, ATTACHMENT_HINT } from '../lib/attachments';
 
 interface RequestType {
   id: string;
@@ -25,6 +25,8 @@ export function SubmitRequestPage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [files, setFiles] = useState<File[]>([]);
   const [requestTypes, setRequestTypes] = useState<RequestType[]>([]);
+  const [submitError, setSubmitError] = useState('');
+  const [fileError, setFileError] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -34,7 +36,9 @@ export function SubmitRequestPage() {
   }, []);
 
   const addFiles = (newFiles: FileList | File[]) => {
-    setFiles((prev) => [...prev, ...Array.from(newFiles)]);
+    const { accepted, rejected } = partitionFiles(Array.from(newFiles));
+    setFileError(rejected.length ? `Skipped: ${rejected.join(', ')}. ${ATTACHMENT_HINT}` : '');
+    if (accepted.length) setFiles((prev) => [...prev, ...accepted]);
   };
 
   const removeFile = (index: number) => {
@@ -49,6 +53,7 @@ export function SubmitRequestPage() {
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     if (!user || !db) return;
+    setSubmitError('');
     setIsSubmitting(true);
 
     const form = e.currentTarget;
@@ -69,9 +74,12 @@ export function SubmitRequestPage() {
     const scheduledDate = scheduledRaw ? new Date(scheduledRaw) : null;
     const isFutureScheduled = !!scheduledDate && scheduledDate.getTime() > Date.now();
 
+    // Phase 1 — create the ticket. A failure here means nothing was saved, so
+    // surface a clear error and let the user retry without minting a duplicate.
+    let ticketId: string;
     try {
       const counterRef = doc(db, 'meta', 'ticketCounter');
-      const ticketId = await runTransaction(db, async (tx) => {
+      ticketId = await runTransaction(db, async (tx) => {
         const counterDoc = await tx.get(counterRef);
         const count = (counterDoc.data()?.count ?? 1048) + 1;
         tx.set(counterRef, { count }, { merge: true });
@@ -96,50 +104,29 @@ export function SubmitRequestPage() {
       // For scheduled tickets the 'created' audit event is logged on activation
       // so analytics clock from the go-live date, not from when it was scheduled.
       if (!isFutureScheduled) await logTicketCreated(ticketId, user.id);
+    } catch (err) {
+      console.error('Failed to create ticket:', err);
+      setSubmitError('Sorry, we could not submit your request. Please check your connection and try again.');
+      setIsSubmitting(false);
+      return;
+    }
 
+    // Phase 2 — attachments. The ticket already exists, so a failure here must
+    // NOT look like a failed submission (which would prompt a duplicate).
+    // Notifications (submitter confirmation + assignee emails) are sent
+    // server-side by the onTicketCreated Cloud Function.
+    try {
       if (storage) {
         for (const file of files) {
           const fileRef = ref(storage, `attachments/${ticketId}/${file.name}`);
           await uploadBytes(fileRef, file);
         }
       }
-
-      if (isFutureScheduled) {
-        const goLive = scheduledDate!.toLocaleString();
-        await sendMail(
-          user.email,
-          `Your request ${ticketId} is scheduled for ${goLive}`,
-          `<p>Your support request has been scheduled and will go live on <strong>${goLive}</strong>. Assignees will be notified then.</p><p><strong>${ticketId}</strong> — ${title}</p><p>Priority: ${priority} · Type: ${type}</p><p><a href="${ticketUrl(ticketId)}">View ticket →</a></p>`,
-        );
-      } else {
-        // Email submitter confirmation
-        await sendMail(
-          user.email,
-          `Your request ${ticketId} has been submitted`,
-          `<p>Your support request has been submitted successfully.</p><p><strong>${ticketId}</strong> — ${title}</p><p>Priority: ${priority} · Type: ${type}</p><p><a href="${ticketUrl(ticketId)}">View ticket →</a></p>`,
-        );
-
-        // Email each assignee
-        for (const assigneeId of assigneeIds) {
-          const assigneeDoc = await getDoc(doc(db, 'profiles', assigneeId));
-          const assigneeEmail = assigneeDoc.data()?.email;
-          if (assigneeEmail) {
-            await sendMail(
-              assigneeEmail,
-              `New ${priority} ticket: ${title}`,
-              `<p>A new support request has been assigned to you.</p><p><strong>${ticketId}</strong> — ${title}</p><p><a href="${ticketUrl(ticketId)}">View ticket →</a></p>`,
-            );
-          } else {
-            console.warn(`Skipping assignee notification for ${ticketId}: profile ${assigneeId} has no email field. Have them sign in once to self-heal, or fix via /admin/team.`);
-          }
-        }
-      }
-
-      navigate('/');
     } catch (err) {
-      console.error('Failed to submit ticket:', err);
-      setIsSubmitting(false);
+      console.error('Ticket created, but attachment upload failed:', err);
     }
+
+    navigate('/');
   };
 
   const canSchedule = isSuperadminRole(user?.role);
@@ -157,15 +144,15 @@ export function SubmitRequestPage() {
         <form onSubmit={handleSubmit} className="p-6 space-y-6">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
             <div>
-              <label htmlFor="type" className="block text-sm font-medium text-gray-700">Request Type</label>
-              <select id="type" name="type" required className="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-brand-dark focus:border-brand-dark sm:text-sm rounded-md border">
+              <label htmlFor="type" className="block text-sm font-medium text-gray-700">Request Type <span className="text-red-500" aria-hidden="true">*</span></label>
+              <select id="type" name="type" required aria-required="true" className="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-brand-dark focus:border-brand-dark sm:text-sm rounded-md border">
                 <option value="">Select a type…</option>
                 {requestTypes.map((rt) => <option key={rt.id} value={rt.name}>{rt.name}</option>)}
               </select>
             </div>
             <div>
-              <label htmlFor="priority" className="block text-sm font-medium text-gray-700">Priority</label>
-              <select id="priority" name="priority" required className="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-brand-dark focus:border-brand-dark sm:text-sm rounded-md border">
+              <label htmlFor="priority" className="block text-sm font-medium text-gray-700">Priority <span className="text-red-500" aria-hidden="true">*</span></label>
+              <select id="priority" name="priority" required aria-required="true" className="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-brand-dark focus:border-brand-dark sm:text-sm rounded-md border">
                 <option value="Low">Low</option>
                 <option value="Medium">Medium</option>
                 <option value="High">High</option>
@@ -175,13 +162,13 @@ export function SubmitRequestPage() {
           </div>
 
           <div>
-            <label htmlFor="title" className="block text-sm font-medium text-gray-700">Title</label>
-            <input type="text" name="title" id="title" required placeholder="Brief summary of the issue" className="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-brand-dark focus:border-brand-dark sm:text-sm border p-2" />
+            <label htmlFor="title" className="block text-sm font-medium text-gray-700">Title <span className="text-red-500" aria-hidden="true">*</span></label>
+            <input type="text" name="title" id="title" required aria-required="true" placeholder="Brief summary of the issue" className="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-brand-dark focus:border-brand-dark sm:text-sm border p-2" />
           </div>
 
           <div>
-            <label htmlFor="description" className="block text-sm font-medium text-gray-700">Description</label>
-            <textarea id="description" name="description" rows={5} required placeholder="Provide as much detail as possible…" className="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-brand-dark focus:border-brand-dark sm:text-sm border p-2" />
+            <label htmlFor="description" className="block text-sm font-medium text-gray-700">Description <span className="text-red-500" aria-hidden="true">*</span></label>
+            <textarea id="description" name="description" rows={5} required aria-required="true" placeholder="Provide as much detail as possible…" className="mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-brand-dark focus:border-brand-dark sm:text-sm border p-2" />
           </div>
 
           <div>
@@ -196,7 +183,8 @@ export function SubmitRequestPage() {
                 <p className="text-xs text-gray-500">PNG, JPG, PDF up to 10MB</p>
               </div>
             </div>
-            <input ref={fileInputRef} type="file" className="hidden" multiple onChange={(e) => { if (e.target.files && e.target.files.length > 0) { const picked = Array.from(e.target.files); setFiles((prev) => [...prev, ...picked]); } e.target.value = ''; }} />
+            <input ref={fileInputRef} type="file" accept=".png,.jpg,.jpeg,.pdf,image/png,image/jpeg,application/pdf" className="hidden" multiple onChange={(e) => { if (e.target.files && e.target.files.length > 0) addFiles(e.target.files); e.target.value = ''; }} />
+            {fileError && <p className="mt-2 text-xs text-red-600" role="alert">{fileError}</p>}
             {files.length > 0 && (
               <ul className="mt-3 space-y-1">
                 {files.map((file, idx) => (
@@ -229,6 +217,10 @@ export function SubmitRequestPage() {
                 Leave blank to submit now. If set to a future date, the ticket stays hidden until then, and goes live — notifying assignees — on that date.
               </p>
             </div>
+          )}
+
+          {submitError && (
+            <p className="text-sm text-red-700 bg-red-50 border border-red-200 px-4 py-3 rounded-md" role="alert">{submitError}</p>
           )}
 
           <div className="pt-4 flex items-center justify-end gap-4 border-t border-gray-200">

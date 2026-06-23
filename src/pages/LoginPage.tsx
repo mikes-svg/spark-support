@@ -15,6 +15,11 @@ export function LoginPage() {
     if (user) navigate('/', { replace: true });
   }, [user, navigate]);
 
+  // If sign-in is denied/fails during profile resolution, re-enable the button.
+  useEffect(() => {
+    if (authError) setSsoLoading(false);
+  }, [authError]);
+
   const handleGoogleSSO = async () => {
     if (!auth || !googleProvider) return;
     setSsoLoading(true);
@@ -22,12 +27,14 @@ export function LoginPage() {
     clearAuthError();
     try {
       await signInWithPopup(auth, googleProvider);
+      // Keep the loading state: AuthContext is now resolving the profile
+      // (ensureProfile). The redirect fires once `user` resolves; the effect
+      // above clears loading if it's denied.
     } catch (err: unknown) {
       const code = (err as { code?: string }).code;
       if (code !== 'auth/popup-closed-by-user' && code !== 'auth/cancelled-popup-request') {
         setError('Google sign-in failed. Please try again.');
       }
-    } finally {
       setSsoLoading(false);
     }
   };
@@ -71,7 +78,7 @@ export function LoginPage() {
                 <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/>
               </svg>
             )}
-            Sign in with Google
+            {ssoLoading ? 'Signing in…' : 'Sign in with Google'}
           </button>
         </div>
       </div>
