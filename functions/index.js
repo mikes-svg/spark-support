@@ -144,7 +144,10 @@ exports.ensureProfile = onCall({ region: REGION }, async (request) => {
   const role = highestRole([existing.role, allow, ...dupeRoles]);
 
   const dupeName = dupes.map((d) => d.data().name).find(Boolean);
-  const name = token.name || existing.name || dupeName || nameFromEmail(email);
+  // Prefer the already-stored name over the Google token, so a superadmin's
+  // Team-page rename sticks instead of being reset to the Google display name
+  // on the user's next sign-in. Google's name only seeds a brand-new profile.
+  const name = existing.name || token.name || dupeName || nameFromEmail(email);
   const photoURL = token.picture || existing.photoURL ||
     `https://ui-avatars.com/api/?name=${encodeURIComponent(name)}&background=1B4332&color=D4A843`;
 
