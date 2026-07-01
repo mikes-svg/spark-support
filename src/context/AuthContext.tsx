@@ -1,9 +1,33 @@
-import { useState, createContext, useContext, useEffect, ReactNode } from 'react';
+import { useState, createContext, useContext, useEffect, useRef, ReactNode } from 'react';
 import {
   onAuthStateChanged,
+  signInWithCustomToken,
   signOut,
   User as FirebaseUser,
 } from 'firebase/auth';
+
+/**
+ * Single sign-on via the Spark badge: if the user already signed in at the hub,
+ * ask the hub (with credentials, so the shared badge cookie is sent) for a
+ * spark-auth custom token and sign in with it — no second login. Only runs when
+ * central auth is on (the token is for the spark-auth project). Returns true if
+ * it signed the user in (onAuthStateChanged then fires with the user).
+ */
+async function trySparkSSO(): Promise<boolean> {
+  try {
+    if (import.meta.env.VITE_USE_CENTRAL_AUTH !== 'true' || !auth) return false;
+    const hub = import.meta.env.VITE_SPARK_HUB_URL;
+    if (!hub) return false;
+    const res = await fetch(`${hub}/api/custom-token`, { credentials: 'include' });
+    if (!res.ok) return false;
+    const { token } = await res.json();
+    if (!token) return false;
+    await signInWithCustomToken(auth, token);
+    return true;
+  } catch {
+    return false;
+  }
+}
 import { doc, getDoc, setDoc, deleteDoc, collection, getDocs, serverTimestamp } from 'firebase/firestore';
 import { auth, db } from '../lib/firebase';
 import type { Role } from '../types';
@@ -169,6 +193,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<Profile | null>(null);
   const [loading, setLoading] = useState(true);
   const [authError, setAuthError] = useState<string | null>(null);
+  const ssoTried = useRef(false);
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
@@ -200,6 +225,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           });
         }
       } else {
+        // Not signed in here — try single sign-on via the Spark badge (once).
+        if (!ssoTried.current) {
+          ssoTried.current = true;
+          const ok = await trySparkSSO();
+          if (ok) return; // onAuthStateChanged will fire again with the signed-in user
+        }
         setUser(null);
       }
       setLoading(false);
