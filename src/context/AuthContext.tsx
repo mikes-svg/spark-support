@@ -8,17 +8,18 @@ import {
 
 /**
  * Single sign-on via the Spark badge: if the user already signed in at the hub,
- * ask the hub (with credentials, so the shared badge cookie is sent) for a
- * spark-auth custom token and sign in with it — no second login. Only runs when
- * central auth is on (the token is for the spark-auth project). Returns true if
- * it signed the user in (onAuthStateChanged then fires with the user).
+ * call OUR OWN same-origin /api/sso — it reads the shared badge cookie, verifies
+ * it, and mints a token for THIS project (spark-support). Signing in with it
+ * means the client is authenticated to Support's own Firestore, so the real role
+ * (profiles/, e.g. superadmin) reads correctly. (Using the hub's spark-auth
+ * token instead would be cross-project and get every read denied → role "user".)
+ * Only runs when central auth is on. Returns true if it signed the user in
+ * (onAuthStateChanged then fires with the user).
  */
 async function trySparkSSO(): Promise<boolean> {
   try {
     if (import.meta.env.VITE_USE_CENTRAL_AUTH !== 'true' || !auth) return false;
-    const hub = import.meta.env.VITE_SPARK_HUB_URL;
-    if (!hub) return false;
-    const res = await fetch(`${hub}/api/custom-token`, { credentials: 'include' });
+    const res = await fetch('/api/sso', { credentials: 'include' });
     if (!res.ok) return false;
     const { token } = await res.json();
     if (!token) return false;

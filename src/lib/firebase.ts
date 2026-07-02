@@ -45,19 +45,21 @@ try {
   console.warn('Data Firebase project not configured — Firestore/Storage disabled.');
 }
 
-// Auth — handled independently so login works even if the data project config
-// is missing (useful for local testing of the central login on its own).
+// Auth — ALWAYS the data project (spark-support), so tokens are valid for this
+// portal's own Firestore (profiles/tickets). Single sign-on is delivered by our
+// own /api/sso endpoint, which verifies the shared Spark badge and mints a
+// data-project custom token — NOT a spark-auth token. (A spark-auth token would
+// be cross-project and rejected by this project's Firestore, dropping every user
+// to role "user". See api/sso.js.) Google login stays on the data project too,
+// so the tool keeps its own independent login if central is ever down.
 try {
   googleProvider = new GoogleAuthProvider();
-  if (USE_CENTRAL_AUTH) {
-    // Authentication comes from the shared spark-auth project (separate app
-    // instance so it doesn't disturb the data app). Restrict to company accounts.
-    const authApp = initializeApp(SPARK_AUTH_CONFIG, 'spark-auth');
-    auth = getAuth(authApp);
-    googleProvider.setCustomParameters({ hd: 'sparkmanage.com' });
-  } else if (app) {
-    // Legacy path — login still happens in the data project (unchanged).
+  if (app) {
     auth = getAuth(app);
+    if (USE_CENTRAL_AUTH) {
+      // Restrict the Google-login fallback to company accounts.
+      googleProvider.setCustomParameters({ hd: 'sparkmanage.com' });
+    }
   }
 } catch (e) {
   console.warn('Auth not configured — running in mock/dev mode');
