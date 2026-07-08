@@ -17,17 +17,25 @@ import {
  * (onAuthStateChanged then fires with the user).
  */
 async function trySparkSSO(): Promise<boolean> {
-  try {
-    if (import.meta.env.VITE_USE_CENTRAL_AUTH !== 'true' || !auth) return false;
-    const res = await fetch('/api/sso', { credentials: 'include' });
-    if (!res.ok) return false;
-    const { token } = await res.json();
-    if (!token) return false;
-    await signInWithCustomToken(auth, token);
-    return true;
-  } catch {
-    return false;
+  if (import.meta.env.VITE_USE_CENTRAL_AUTH !== 'true' || !auth) return false;
+  // Retry a few times: the badge cookie can lag on first load and /api/sso may
+  // cold-start, so one attempt isn't enough — otherwise we'd flash the login screen.
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const res = await fetch('/api/sso', { credentials: 'include' });
+      if (res.ok) {
+        const { token } = await res.json();
+        if (token) {
+          await signInWithCustomToken(auth, token);
+          return true;
+        }
+      }
+    } catch {
+      /* retry */
+    }
+    if (attempt < 2) await new Promise((r) => setTimeout(r, 700));
   }
+  return false;
 }
 import { doc, getDoc, setDoc, deleteDoc, collection, getDocs, serverTimestamp } from 'firebase/firestore';
 import { auth, db } from '../lib/firebase';
