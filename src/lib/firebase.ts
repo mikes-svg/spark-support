@@ -2,6 +2,7 @@ import { initializeApp, FirebaseApp } from 'firebase/app';
 import { Auth, getAuth, GoogleAuthProvider } from 'firebase/auth';
 import { Firestore, getFirestore } from 'firebase/firestore';
 import { FirebaseStorage, getStorage } from 'firebase/storage';
+import { Functions, getFunctions } from 'firebase/functions';
 
 // ── DATA project (this portal's own Firestore + Storage) ───────────────
 // Unchanged: Support's tickets, profiles, files all stay in its own project.
@@ -34,6 +35,7 @@ let app: FirebaseApp | null = null;
 let auth: Auth | null = null;
 let db: Firestore | null = null;
 let storage: FirebaseStorage | null = null;
+let functions: Functions | null = null;
 let googleProvider: GoogleAuthProvider | null = null;
 
 // Data app — Firestore + Storage live here, exactly as before.
@@ -41,6 +43,10 @@ try {
   app = initializeApp(firebaseConfig);
   db = getFirestore(app);
   storage = getStorage(app);
+  // Cloud Functions (prod: server-side ticket mail lives here). googleProvider
+  // and auth are set up below in the auth block so SSO keeps auth on the data
+  // project — do NOT initialize googleProvider here.
+  functions = getFunctions(app, 'us-central1');
 } catch (e) {
   console.warn('Data Firebase project not configured — Firestore/Storage disabled.');
 }
@@ -65,4 +71,4 @@ try {
   console.warn('Auth not configured — running in mock/dev mode');
 }
 
-export { auth, db, storage, googleProvider };
+export { auth, db, storage, functions, googleProvider };

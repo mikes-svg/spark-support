@@ -1,16 +1,29 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { collection, query, orderBy, getDocs, doc, getDoc, where } from 'firebase/firestore';
+import {
+  collection,
+  query,
+  orderBy,
+  where,
+  limit,
+  startAfter,
+  getDocs,
+  getCountFromServer,
+  doc,
+  getDoc,
+  type QueryDocumentSnapshot,
+  type DocumentData,
+} from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { useAuth } from '../context/AuthContext';
 import { Filter, AlertCircle, CheckCircle2, Clock, RefreshCw } from 'lucide-react';
 import { ConfirmModal } from '../components/ConfirmModal';
 import { AssigneeSelector } from '../components/AssigneeSelector';
 import { StatusBadge } from '../components/Badges';
+import { Avatar } from '../components/Avatar';
 import { getAssigneeIds, isSuperadminRole } from '../types';
 import type { TicketStatus, TicketPriority, Ticket, Profile } from '../types';
 import { formatDate, formatDateTime } from '../lib/dates';
-import { sendMail, ticketUrl } from '../lib/mail';
 import {
   updateTicketStatus,
   updateTicketPriority,
@@ -19,6 +32,10 @@ import {
 
 const STATUSES: TicketStatus[] = ['Open', 'In Progress', 'On Hold', 'Resolved'];
 const PRIORITIES: TicketPriority[] = ['Low', 'Medium', 'High', 'Urgent'];
+const COUNT_STATUSES: TicketStatus[] = ['Open', 'In Progress', 'On Hold', 'Resolved', 'Scheduled'];
+const PAGE_SIZE = 50;
+
+type Counts = Record<string, number>;
 
 export function AdminDashboardPage() {
   const navigate = useNavigate();
@@ -27,8 +44,12 @@ export function AdminDashboardPage() {
   const [profiles, setProfiles] = useState<Record<string, Profile>>({});
   const [adminProfiles, setAdminProfiles] = useState<Profile[]>([]);
   const [requestTypes, setRequestTypes] = useState<string[]>([]);
+  const [counts, setCounts] = useState<Counts | null>(null);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [hasMore, setHasMore] = useState(false);
+  const [error, setError] = useState(false);
   // Default view hides Resolved tickets so admins focus on actionable work.
   // 'Active' = anything not Resolved; 'All' = include Resolved; else exact status match.
   const [statusFilter, setStatusFilter] = useState('Active');
@@ -37,33 +58,110 @@ export function AdminDashboardPage() {
   // Scheduled (not-yet-live) tickets are hidden by default; this toggle reveals them.
   const [showScheduled, setShowScheduled] = useState(false);
 
-  const fetchData = useCallback(async (showLoading = true) => {
-    if (!db) { setLoading(false); return; }
-    if (showLoading) setLoading(true);
-    else setRefreshing(true);
+  // Pagination cursor and a live mirror of loaded profiles (read inside async
+  // loaders without stale-closure re-fetches).
+  const cursorRef = useRef<QueryDocumentSnapshot<DocumentData> | null>(null);
+  const profilesRef = useRef<Record<string, Profile>>({});
+  useEffect(() => { profilesRef.current = profiles; }, [profiles]);
+
+  // Which statuses the list query should fetch, given the status filter + the
+  // show-scheduled toggle. Status is filtered SERVER-side (one composite index);
+  // type/assignee are narrowed client-side on the loaded pages.
+  const statusesForFilter = useCallback((): TicketStatus[] => {
+    if (statusFilter === 'All') {
+      return showScheduled
+        ? ['Open', 'In Progress', 'On Hold', 'Resolved', 'Scheduled']
+        : ['Open', 'In Progress', 'On Hold', 'Resolved'];
+    }
+    if (statusFilter === 'Active') {
+      return showScheduled
+        ? ['Open', 'In Progress', 'On Hold', 'Scheduled']
+        : ['Open', 'In Progress', 'On Hold'];
+    }
+    return [statusFilter as TicketStatus];
+  }, [statusFilter, showScheduled]);
+
+  const loadProfilesFor = useCallback(async (pageTickets: Ticket[], database: NonNullable<typeof db>) => {
+    const ids = [...new Set(pageTickets.flatMap((t) => [t.submitterId, ...getAssigneeIds(t)]))]
+      .filter((id) => id && !profilesRef.current[id]) as string[];
+    if (ids.length === 0) return;
+    const docs = await Promise.all(ids.map((id) => getDoc(doc(database, 'profiles', id))));
+    setProfiles((prev) => {
+      const next = { ...prev };
+      docs.forEach((p) => { if (p.exists()) next[p.id] = { id: p.id, ...p.data() } as Profile; });
+      return next;
+    });
+  }, []);
+
+  // Aggregate counts straight from the server (no full-collection read), so the
+  // stat cards stay accurate at any data size.
+  const fetchCounts = useCallback(async () => {
+    const database = db;
+    if (!database) return;
     try {
-      const ticketsSnap = await getDocs(query(collection(db, 'tickets'), orderBy('createdAt', 'desc')));
-      const ticketList = ticketsSnap.docs.map((d) => ({ id: d.id, ...d.data() } as Ticket));
-      setTickets(ticketList);
-      const rtSnap = await getDocs(collection(db, 'requestTypes'));
-      setRequestTypes(rtSnap.docs.map((d) => d.data().name as string).sort());
-      const allAssigneeIds = ticketList.flatMap((t) => getAssigneeIds(t));
-      const profileIds = [...new Set([...ticketList.map((t) => t.submitterId), ...allAssigneeIds])] as string[];
-      const profileDocs = await Promise.all(profileIds.map((id) => getDoc(doc(db, 'profiles', id))));
-      const profileMap: Record<string, Profile> = {};
-      profileDocs.forEach((p) => { if (p.exists()) profileMap[p.id] = { id: p.id, ...p.data() } as Profile; });
-      setProfiles(profileMap);
-      const adminSnap = await getDocs(query(collection(db, 'profiles'), where('role', 'in', ['admin', 'superadmin'])));
-      setAdminProfiles(adminSnap.docs.map((d) => ({ id: d.id, ...d.data() } as Profile)));
+      const results = await Promise.all(
+        COUNT_STATUSES.map((s) => getCountFromServer(query(collection(database, 'tickets'), where('status', '==', s)))),
+      );
+      const c: Counts = {};
+      COUNT_STATUSES.forEach((s, i) => { c[s] = results[i].data().count; });
+      setCounts(c);
     } catch (err) {
-      console.error('Failed to fetch admin data:', err);
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
+      console.error('Failed to load ticket counts:', err);
     }
   }, []);
 
-  useEffect(() => { fetchData(); }, [fetchData]);
+  const loadPage = useCallback(async (reset: boolean) => {
+    const database = db;
+    if (!database) { setLoading(false); return; }
+    if (reset) { setLoading(true); cursorRef.current = null; }
+    else setLoadingMore(true);
+    try {
+      const statuses = statusesForFilter();
+      const col = collection(database, 'tickets');
+      const q = !reset && cursorRef.current
+        ? query(col, where('status', 'in', statuses), orderBy('createdAt', 'desc'), startAfter(cursorRef.current), limit(PAGE_SIZE))
+        : query(col, where('status', 'in', statuses), orderBy('createdAt', 'desc'), limit(PAGE_SIZE));
+      const snap = await getDocs(q);
+      const pageTickets = snap.docs.map((d) => ({ id: d.id, ...d.data() } as Ticket));
+      cursorRef.current = snap.docs[snap.docs.length - 1] ?? cursorRef.current;
+      setHasMore(snap.size === PAGE_SIZE);
+      setTickets((prev) => (reset ? pageTickets : [...prev, ...pageTickets]));
+      await loadProfilesFor(pageTickets, database);
+      setError(false);
+    } catch (err) {
+      console.error('Failed to load admin tickets:', err);
+      setError(true);
+    } finally {
+      setLoading(false);
+      setLoadingMore(false);
+    }
+  }, [statusesForFilter, loadProfilesFor]);
+
+  // Static data (admin directory + request types) loads once.
+  useEffect(() => {
+    const database = db;
+    if (!database) return;
+    (async () => {
+      try {
+        const rtSnap = await getDocs(collection(database, 'requestTypes'));
+        setRequestTypes(rtSnap.docs.map((d) => d.data().name as string).sort());
+        const adminSnap = await getDocs(query(collection(database, 'profiles'), where('role', 'in', ['admin', 'superadmin'])));
+        setAdminProfiles(adminSnap.docs.map((d) => ({ id: d.id, ...d.data() } as Profile)));
+      } catch (err) {
+        console.error('Failed to load admin directory/types:', err);
+      }
+    })();
+    fetchCounts();
+  }, [fetchCounts]);
+
+  // (Re)load the first page whenever the server-side filter changes.
+  useEffect(() => { loadPage(true); }, [loadPage]);
+
+  const refreshAll = useCallback(async () => {
+    setRefreshing(true);
+    await Promise.all([fetchCounts(), loadPage(true)]);
+    setRefreshing(false);
+  }, [fetchCounts, loadPage]);
 
   const [pendingChange, setPendingChange] = useState<
     | { type: 'status'; ticket: Ticket; value: TicketStatus }
@@ -74,12 +172,15 @@ export function AdminDashboardPage() {
 
   const pendingMessage = (() => {
     if (!pendingChange) return '';
-    const { ticket, value } = pendingChange;
+    // Narrow on the discriminant FIRST so `value` is the specific member type
+    // (string[] vs TicketStatus/TicketPriority) inside each branch.
     if (pendingChange.type === 'assignees') {
+      const { ticket, value } = pendingChange;
       if (value.length === 0) return `Remove all assignees from ${ticket.id}?`;
       const names = value.map((id) => adminProfiles.find((a) => a.id === id)?.name || 'Unknown').join(', ');
       return `Set assignees for ${ticket.id} to: ${names}?`;
     }
+    const { ticket, value } = pendingChange;
     return `Change ${pendingChange.type} for ${ticket.id} to "${value}"?`;
   })();
 
@@ -91,7 +192,6 @@ export function AdminDashboardPage() {
     if (change.type === 'assignees') {
       const { ticket, value: newAssigneeIds } = change;
       const oldAssigneeIds = getAssigneeIds(ticket);
-      const added = newAssigneeIds.filter((id) => !oldAssigneeIds.includes(id));
       const participants = [...new Set([ticket.submitterId, ...newAssigneeIds])];
       setTickets((prev) => prev.map((t) => t.id === ticket.id ? { ...t, assigneeIds: newAssigneeIds, assigneeId: null, participants } : t));
       try {
@@ -102,18 +202,7 @@ export function AdminDashboardPage() {
         alert('Failed to update assignees. Please try again.');
         return;
       }
-
-      // Email newly added assignees
-      for (const addedId of added) {
-        const assigneeDoc = await getDoc(doc(db, 'profiles', addedId));
-        const email = assigneeDoc.data()?.email;
-        if (email) {
-          await sendMail(email, `${ticket.id} has been assigned to you`,
-            `<p>Ticket <strong>${ticket.id}</strong> — ${ticket.title} — has been assigned to you.</p><p><a href="${ticketUrl(ticket.id)}">View ticket →</a></p>`);
-        } else {
-          console.warn(`Skipping assignee notification for ${ticket.id}: profile ${addedId} has no email field. Have them sign in once to self-heal, or fix via /admin/team.`);
-        }
-      }
+      // Assignee notification emails are sent server-side by onTicketUpdated.
     } else if (change.type === 'status') {
       const { ticket, value } = change;
       setTickets((prev) => prev.map((t) => t.id === ticket.id ? { ...t, status: value } : t));
@@ -125,13 +214,9 @@ export function AdminDashboardPage() {
         alert('Failed to update status. Please try again.');
         return;
       }
-
-      const submitterDoc = await getDoc(doc(db, 'profiles', ticket.submitterId));
-      const submitterEmail = submitterDoc.data()?.email;
-      if (submitterEmail) {
-        await sendMail(submitterEmail, `${ticket.id} status changed to ${value}`,
-          `<p>Your ticket <strong>${ticket.id}</strong> — ${ticket.title} — has been updated to <strong>${value}</strong>.</p><p><a href="${ticketUrl(ticket.id)}">View ticket →</a></p>`);
-      }
+      // The submitter notification is sent server-side by onTicketUpdated.
+      // Status changed → refresh the server-side count cards.
+      fetchCounts();
     } else {
       const { ticket, value } = change;
       setTickets((prev) => prev.map((t) => t.id === ticket.id ? { ...t, priority: value } : t));
@@ -145,14 +230,12 @@ export function AdminDashboardPage() {
     }
   };
 
-  const filteredTickets = tickets.filter((t) => {
-    // Hide not-yet-live scheduled tickets unless the user opts in.
-    if (t.status === 'Scheduled' && !showScheduled) return false;
-    if (statusFilter === 'Active') {
-      if (t.status === 'Resolved') return false;
-    } else if (statusFilter !== 'All' && t.status !== statusFilter) {
-      return false;
-    }
+  // Status + scheduled are filtered server-side; narrow the loaded pages by
+  // type/assignee here, and re-apply the status set so optimistic status changes
+  // that move a ticket out of view disappear immediately.
+  const activeStatuses = statusesForFilter();
+  const visibleTickets = tickets.filter((t) => {
+    if (!activeStatuses.includes(t.status)) return false;
     if (typeFilter && t.type !== typeFilter) return false;
     if (assigneeFilter && !getAssigneeIds(t).includes(assigneeFilter)) return false;
     return true;
@@ -160,11 +243,8 @@ export function AdminDashboardPage() {
 
   // Scheduling is a superadmin-only feature; only they can reveal scheduled tickets.
   const isSuperadmin = isSuperadminRole(user?.role);
-  const scheduledCount = tickets.filter((t) => t.status === 'Scheduled').length;
-  const openCount = tickets.filter((t) => t.status === 'Open').length;
-  const inProgressCount = tickets.filter((t) => t.status === 'In Progress').length;
-  const onHoldCount = tickets.filter((t) => t.status === 'On Hold').length;
-  const resolvedCount = tickets.filter((t) => t.status === 'Resolved').length;
+  const scheduledCount = counts?.Scheduled ?? 0;
+  const clientFiltered = typeFilter !== '' || assigneeFilter !== '';
 
   const handleStatClick = (filter: string) => {
     // Re-clicking the active stat card returns to the default 'Active' view
@@ -177,10 +257,10 @@ export function AdminDashboardPage() {
     <div className="space-y-6">
       <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-4">
         {[
-          { label: 'Open', value: loading ? '—' : openCount, Icon: Clock, color: 'bg-blue-100 text-blue-600', filter: 'Open' },
-          { label: 'In Progress', value: loading ? '—' : inProgressCount, Icon: AlertCircle, color: 'bg-amber-100 text-amber-600', filter: 'In Progress' },
-          { label: 'On Hold', value: loading ? '—' : onHoldCount, Icon: Clock, color: 'bg-orange-100 text-orange-600', filter: 'On Hold' },
-          { label: 'Resolved', value: loading ? '—' : resolvedCount, Icon: CheckCircle2, color: 'bg-emerald-100 text-emerald-600', filter: 'Resolved' },
+          { label: 'Open', value: counts ? counts.Open : '—', Icon: Clock, color: 'bg-blue-100 text-blue-600', filter: 'Open' },
+          { label: 'In Progress', value: counts ? counts['In Progress'] : '—', Icon: AlertCircle, color: 'bg-amber-100 text-amber-600', filter: 'In Progress' },
+          { label: 'On Hold', value: counts ? counts['On Hold'] : '—', Icon: Clock, color: 'bg-orange-100 text-orange-600', filter: 'On Hold' },
+          { label: 'Resolved', value: counts ? counts.Resolved : '—', Icon: CheckCircle2, color: 'bg-emerald-100 text-emerald-600', filter: 'Resolved' },
         ].map(({ label, value, Icon, color, filter }) => (
           <div
             key={label}
@@ -222,7 +302,7 @@ export function AdminDashboardPage() {
           </button>
         )}
         <button onClick={() => { setStatusFilter('Active'); setTypeFilter(''); setAssigneeFilter(''); setShowScheduled(false); }} className="text-sm text-brand-gold hover:text-yellow-700 font-medium">Reset Filters</button>
-        <button onClick={() => fetchData(false)} disabled={refreshing} className="ml-auto p-2 text-gray-400 hover:text-brand-dark transition-colors rounded-md hover:bg-gray-100 disabled:opacity-50" title="Refresh">
+        <button onClick={refreshAll} disabled={refreshing} className="ml-auto p-2 text-gray-400 hover:text-brand-dark transition-colors rounded-md hover:bg-gray-100 disabled:opacity-50" title="Refresh">
           <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} />
         </button>
       </div>
@@ -240,8 +320,10 @@ export function AdminDashboardPage() {
             <tbody className="bg-white divide-y divide-gray-200">
               {loading ? (
                 <tr><td colSpan={6} className="px-6 py-12 text-center text-sm text-gray-400">Loading…</td></tr>
-              ) : filteredTickets.length > 0 ? (
-                filteredTickets.map((ticket) => {
+              ) : error ? (
+                <tr><td colSpan={6} className="px-6 py-12 text-center text-sm text-red-600">Couldn't load tickets. Check your connection and refresh.</td></tr>
+              ) : visibleTickets.length > 0 ? (
+                visibleTickets.map((ticket) => {
                   const submitter = profiles[ticket.submitterId];
                   const ticketAssigneeIds = getAssigneeIds(ticket);
                   return (
@@ -249,7 +331,7 @@ export function AdminDashboardPage() {
                       <td className="px-6 py-4 whitespace-nowrap text-sm font-mono text-gray-500">{ticket.id}</td>
                       <td className="px-6 py-4 whitespace-nowrap">
                         <div className="flex items-center">
-                          {submitter && <img className="h-8 w-8 rounded-full mr-3" src={submitter.photoURL} alt="" />}
+                          {submitter && <Avatar className="h-8 w-8 rounded-full mr-3" src={submitter.photoURL} name={submitter.name} />}
                           <div className="text-sm font-medium text-gray-900">{submitter?.name || '—'}</div>
                         </div>
                       </td>
@@ -301,6 +383,23 @@ export function AdminDashboardPage() {
             </tbody>
           </table>
         </div>
+        {!loading && !error && (visibleTickets.length > 0 || hasMore) && (
+          <div className="px-6 py-3 border-t border-gray-200 flex items-center justify-between text-sm text-gray-500">
+            <span>
+              Showing {visibleTickets.length} ticket{visibleTickets.length === 1 ? '' : 's'}
+              {clientFiltered && ' (type/assignee filters apply to loaded tickets — load more to search further back)'}
+            </span>
+            {hasMore && (
+              <button
+                onClick={() => loadPage(false)}
+                disabled={loadingMore}
+                className="px-4 py-1.5 text-sm font-medium rounded-md border border-gray-300 text-gray-700 hover:bg-gray-50 disabled:opacity-50 transition-colors"
+              >
+                {loadingMore ? 'Loading…' : 'Load more'}
+              </button>
+            )}
+          </div>
+        )}
       </div>
       <ConfirmModal
         open={!!pendingChange}

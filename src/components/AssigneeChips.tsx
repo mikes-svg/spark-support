@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useLayoutEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { Plus, X, Users } from 'lucide-react';
 import type { Profile } from '../types';
+import { Avatar } from './Avatar';
 
 interface Props {
   value: string[];
@@ -73,7 +74,7 @@ export function AssigneeChips({ value, onChange, admins, disabled }: Props) {
             key={p.id}
             className="inline-flex items-center gap-1.5 pl-1 pr-1 py-0.5 bg-brand-dark/10 text-brand-dark text-xs rounded-full"
           >
-            <img src={p.photoURL} alt="" className="w-5 h-5 rounded-full" />
+            <Avatar src={p.photoURL} name={p.name} className="w-5 h-5 rounded-full" />
             <span className="max-w-[110px] truncate">{p.name}</span>
             {!disabled && (
               <button
@@ -130,7 +131,7 @@ export function AssigneeChips({ value, onChange, admins, disabled }: Props) {
                   onClick={() => add(a.id)}
                   className="w-full flex items-center gap-2 px-3 py-2 hover:bg-gray-50 text-left"
                 >
-                  <img src={a.photoURL} alt="" className="w-6 h-6 rounded-full flex-shrink-0" />
+                  <Avatar src={a.photoURL} name={a.name} className="w-6 h-6 rounded-full flex-shrink-0" />
                   <span className="text-sm text-gray-900 truncate">{a.name}</span>
                 </button>
               ))

@@ -2,7 +2,13 @@ rules_version = '2';
 service firebase.storage {
   match /b/{bucket}/o {
     match /attachments/{ticketId}/{filename} {
-      allow read: if request.auth != null;
+      // Direct client reads/listing are denied: any signed-in user could
+      // otherwise enumerate and read any ticket's attachments by path. Reads go
+      // through the participation-gated getTicketAttachments Cloud Function,
+      // which returns tokenized download URLs.
+      allow read: if false;
+      // Uploads stay client-side; size + type are enforced here. (Participation
+      // can't be checked in Storage rules — they can't read Firestore.)
       allow write: if request.auth != null
         && request.resource.size < 10 * 1024 * 1024
         && request.resource.contentType.matches('image/.*|application/pdf');

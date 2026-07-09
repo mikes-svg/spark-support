@@ -1,15 +1,19 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   collection,
+  getCountFromServer,
   getDocs,
   orderBy,
   query,
+  where,
+  Timestamp,
 } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { getAssigneeIds } from '../types';
 import type { TicketStatus, TicketPriority, Ticket, Profile } from '../types';
 import { toDate } from '../lib/dates';
 import { PageSpinner } from '../components/PageSpinner';
+import { Avatar } from '../components/Avatar';
 import {
   Clock,
   TrendingUp,
@@ -76,7 +80,12 @@ function startOfDay(d: Date): Date {
 }
 
 function isoDate(d: Date): string {
-  return d.toISOString().slice(0, 10);
+  // Use LOCAL date parts (not toISOString, which is UTC) so the default custom
+  // range and the date-input max land on the right calendar day in any timezone.
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
 }
 
 function parseLocalDate(s: string): Date {
@@ -87,20 +96,28 @@ function parseLocalDate(s: string): Date {
 export function AnalyticsPage() {
   const [tickets, setTickets] = useState<Ticket[]>([]);
   const [events, setEvents] = useState<TicketEvent[]>([]);
+  // Whether the audit log has ANY events — gates the legacy updatedAt fallback
+  // (distinct from "no events in the selected range").
+  const [eventsExist, setEventsExist] = useState(false);
   const [profiles, setProfiles] = useState<Record<string, Profile>>({});
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(false);
   const [preset, setPreset] = useState<RangePreset>('30d');
   const [customStart, setCustomStart] = useState<string>(isoDate(startOfDay(new Date(Date.now() - 30 * 86_400_000))));
   const [customEnd, setCustomEnd] = useState<string>(isoDate(startOfDay(new Date())));
 
+  // Tickets + profiles load once: the full set is needed for "open right now"
+  // and for resolution times of tickets created before the selected range.
+  // ticketEvents (the fastest-growing collection) are NOT loaded here — only a
+  // cheap existence count; the events themselves load per-range below.
   useEffect(() => {
     if (!db) { setLoading(false); return; }
     (async () => {
       try {
-        const [ticketsSnap, eventsSnap, profilesSnap] = await Promise.all([
+        const [ticketsSnap, profilesSnap, eventsCount] = await Promise.all([
           getDocs(query(collection(db!, 'tickets'), orderBy('createdAt', 'desc'))),
-          getDocs(query(collection(db!, 'ticketEvents'), orderBy('createdAt', 'asc'))).catch(() => null),
           getDocs(collection(db!, 'profiles')),
+          getCountFromServer(collection(db!, 'ticketEvents')).catch(() => null),
         ]);
         // Exclude scheduled (not-yet-live) tickets — they have no real activity
         // until their go-live date, when they become 'Open' with a reset createdAt.
@@ -109,14 +126,14 @@ export function AnalyticsPage() {
             .map((d) => ({ id: d.id, ...d.data() } as Ticket))
             .filter((t) => t.status !== 'Scheduled'),
         );
-        if (eventsSnap) {
-          setEvents(eventsSnap.docs.map((d) => ({ id: d.id, ...d.data() } as TicketEvent)));
-        }
         const map: Record<string, Profile> = {};
         profilesSnap.docs.forEach((d) => { map[d.id] = { id: d.id, ...d.data() } as Profile; });
         setProfiles(map);
+        setEventsExist(!!eventsCount && eventsCount.data().count > 0);
+        setError(false);
       } catch (err) {
         console.error('Failed to load analytics data:', err);
+        setError(true);
       } finally {
         setLoading(false);
       }
@@ -138,15 +155,41 @@ export function AnalyticsPage() {
     return { start, end };
   }, [preset, customStart, customEnd]);
 
-  const inRange = (d: Date | null): boolean => {
-    if (!d) return false;
-    return d >= range.start && d <= range.end;
-  };
+  const inRange = useCallback(
+    (d: Date | null): boolean => {
+      if (!d) return false;
+      return d >= range.start && d <= range.end;
+    },
+    [range],
+  );
 
   const ticketsInRange = useMemo(
     () => tickets.filter((t) => inRange(toDate(t.createdAt))),
-    [tickets, range],
+    [tickets, inRange],
   );
+
+  // Load only the audit events within the selected range — every event-based
+  // metric below is range-scoped anyway, so this is equivalent to loading the
+  // whole collection and filtering, but reads far less as the log grows.
+  useEffect(() => {
+    const database = db;
+    if (!database || !eventsExist) { setEvents([]); return; }
+    let cancelled = false;
+    (async () => {
+      try {
+        const snap = await getDocs(query(
+          collection(database, 'ticketEvents'),
+          where('createdAt', '>=', Timestamp.fromDate(range.start)),
+          where('createdAt', '<=', Timestamp.fromDate(range.end)),
+          orderBy('createdAt', 'asc'),
+        ));
+        if (!cancelled) setEvents(snap.docs.map((d) => ({ id: d.id, ...d.data() } as TicketEvent)));
+      } catch (err) {
+        if (!cancelled) { console.error('Failed to load analytics events:', err); setEvents([]); }
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [range, eventsExist]);
 
   // ---------- METRICS ----------
 
@@ -295,8 +338,10 @@ export function AnalyticsPage() {
         }
       }
     });
-    // Fallback: if no events, also count tickets currently Resolved by their updatedAt
-    if (events.length === 0) {
+    // Fallback only when the audit log doesn't exist at all (legacy data): count
+    // tickets currently Resolved by their updatedAt. When events exist we trust
+    // them, even if the selected range happens to contain none.
+    if (!eventsExist) {
       tickets.forEach((t) => {
         if (t.status === 'Resolved') {
           const d = toDate(t.updatedAt);
@@ -308,7 +353,7 @@ export function AnalyticsPage() {
       });
     }
     return buckets;
-  }, [tickets, events, range]);
+  }, [tickets, events, range, eventsExist]);
 
   if (loading) {
     return <PageSpinner />;
@@ -316,6 +361,11 @@ export function AnalyticsPage() {
 
   return (
     <div className="space-y-6">
+      {error && (
+        <p className="text-sm text-red-700 bg-red-50 border border-red-200 px-4 py-3 rounded-md" role="alert">
+          Couldn't load analytics data. Some figures may be missing — check your connection and refresh.
+        </p>
+      )}
       {/* Header + range filter */}
       <div className="bg-white shadow-sm rounded-lg border border-gray-200 p-4 flex flex-wrap items-center gap-3">
         <span className="text-sm font-medium text-gray-700">Time range:</span>
@@ -502,7 +552,7 @@ export function AnalyticsPage() {
                 <tr key={row.id}>
                   <td className="py-2 pr-4">
                     <div className="flex items-center gap-2">
-                      {row.photoURL && <img src={row.photoURL} alt="" className="w-6 h-6 rounded-full" />}
+                      <Avatar src={row.photoURL} name={row.name} className="w-6 h-6 rounded-full" />
                       <span className="text-gray-900">{row.name}</span>
                     </div>
                   </td>
@@ -524,7 +574,7 @@ export function AnalyticsPage() {
             {topSubmitters.map((s) => (
               <li key={s.id} className="flex items-center justify-between text-sm">
                 <div className="flex items-center gap-2">
-                  {s.photoURL && <img src={s.photoURL} alt="" className="w-6 h-6 rounded-full" />}
+                  <Avatar src={s.photoURL} name={s.name} className="w-6 h-6 rounded-full" />
                   <span className="text-gray-900">{s.name}</span>
                 </div>
                 <span className="font-semibold text-gray-900">{s.count}</span>

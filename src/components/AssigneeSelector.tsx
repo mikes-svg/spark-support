@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { Check, ChevronDown, Users } from 'lucide-react';
 import type { Profile } from '../types';
+import { Avatar } from './Avatar';
 
 interface Props {
   value: string[];
@@ -48,7 +49,7 @@ export function AssigneeSelector({ value, onChange, admins, disabled, variant = 
           ) : variant === 'compact' ? (
             <div className="flex -space-x-2">
               {selected.slice(0, 3).map((p) => (
-                <img key={p.id} src={p.photoURL} alt={p.name} title={p.name} className="w-6 h-6 rounded-full border-2 border-white" />
+                <Avatar key={p.id} src={p.photoURL} name={p.name} className="w-6 h-6 rounded-full border-2 border-white" />
               ))}
               {selected.length > 3 && (
                 <span className="flex items-center justify-center w-6 h-6 rounded-full bg-gray-200 text-xs font-medium text-gray-600 border-2 border-white">
@@ -60,7 +61,7 @@ export function AssigneeSelector({ value, onChange, admins, disabled, variant = 
             <div className="flex flex-wrap gap-1 min-w-0">
               {selected.map((p) => (
                 <span key={p.id} className="inline-flex items-center gap-1 px-2 py-0.5 bg-brand-dark/10 text-brand-dark text-xs rounded-full">
-                  <img src={p.photoURL} alt="" className="w-4 h-4 rounded-full" />
+                  <Avatar src={p.photoURL} name={p.name} className="w-4 h-4 rounded-full" />
                   {p.name.split(' ')[0]}
                 </span>
               ))}
@@ -92,7 +93,7 @@ export function AssigneeSelector({ value, onChange, admins, disabled, variant = 
                   <div className={`w-4 h-4 rounded border flex items-center justify-center flex-shrink-0 ${checked ? 'bg-brand-dark border-brand-dark' : 'border-gray-300'}`}>
                     {checked && <Check className="h-3 w-3 text-white" />}
                   </div>
-                  <img src={a.photoURL} alt="" className="w-6 h-6 rounded-full flex-shrink-0" />
+                  <Avatar src={a.photoURL} name={a.name} className="w-6 h-6 rounded-full flex-shrink-0" />
                   <span className="text-sm text-gray-900 truncate">{a.name}</span>
                 </button>
               );

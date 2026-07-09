@@ -1,8 +1,9 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import { doc, getDoc, deleteDoc, updateDoc, collection, query, where, orderBy, onSnapshot, addDoc, serverTimestamp, getDocs, writeBatch, Timestamp } from 'firebase/firestore';
-import { ref, uploadBytes, listAll, getDownloadURL } from 'firebase/storage';
-import { db, storage } from '../lib/firebase';
+import { ref, uploadBytes } from 'firebase/storage';
+import { httpsCallable } from 'firebase/functions';
+import { db, storage, functions } from '../lib/firebase';
 import { StatusBadge, PriorityBadge } from '../components/Badges';
 import { useAuth } from '../context/AuthContext';
 import { Send, ArrowLeft, Clock, Trash2, UploadCloud, FileText, CalendarClock } from 'lucide-react';
@@ -10,10 +11,11 @@ import { ConfirmModal } from '../components/ConfirmModal';
 import { AssigneeChips } from '../components/AssigneeChips';
 import { MentionTextarea, renderCommentBody } from '../components/MentionTextarea';
 import { PageSpinner } from '../components/PageSpinner';
+import { Avatar } from '../components/Avatar';
 import { getAssigneeIds, isScheduled, isAdminRole, isSuperadminRole } from '../types';
 import type { TicketStatus, TicketPriority, Ticket, Profile } from '../types';
 import { toDate, localDateTimeMin } from '../lib/dates';
-import { sendMail, ticketUrl } from '../lib/mail';
+import { partitionFiles, ATTACHMENT_HINT } from '../lib/attachments';
 import {
   updateTicketStatus,
   updateTicketPriority,
@@ -39,9 +41,11 @@ export function TicketDetailPage() {
   const [profiles, setProfiles] = useState<Record<string, Profile>>({});
   const [ticketComments, setTicketComments] = useState<Comment[]>([]);
   const [newComment, setNewComment] = useState('');
+  const [postingComment, setPostingComment] = useState(false);
   const [loading, setLoading] = useState(true);
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState('');
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [showCancelConfirm, setShowCancelConfirm] = useState(false);
   const [rescheduling, setRescheduling] = useState(false);
@@ -49,6 +53,15 @@ export function TicketDetailPage() {
   const [adminProfiles, setAdminProfiles] = useState<Profile[]>([]);
   const [allProfiles, setAllProfiles] = useState<Profile[]>([]);
   const [pendingMentionIds, setPendingMentionIds] = useState<string[]>([]);
+
+  // Mirror `profiles` into a ref so the comments listener (whose effect only
+  // depends on `id`) can read the latest loaded profiles instead of the stale
+  // closure value, avoiding redundant re-fetches of authors we already have.
+  const profilesRef = useRef<Record<string, Profile>>({});
+  useEffect(() => { profilesRef.current = profiles; }, [profiles]);
+
+  // Auto-scroll the discussion to the newest comment as it grows.
+  const commentsEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (!id || !db) { setLoading(false); return; }
@@ -83,16 +96,12 @@ export function TicketDetailPage() {
       .then((snap) => setAllProfiles(snap.docs.map((d) => ({ id: d.id, ...d.data() } as Profile))))
       .catch(() => {});
 
-    // Load attachments
-    if (storage) {
-      const attachRef = ref(storage, `attachments/${id}`);
-      listAll(attachRef).then(async (res) => {
-        const files = await Promise.all(res.items.map(async (item) => ({
-          name: item.name,
-          url: await getDownloadURL(item),
-        })));
-        setAttachments(files);
-      }).catch(() => { /* no attachments folder yet */ });
+    // Attachments are listed via a participation-gated Cloud Function (storage
+    // rules deny direct client reads); it returns tokenized download URLs.
+    if (functions && id) {
+      httpsCallable<{ ticketId: string }, Attachment[]>(functions, 'getTicketAttachments')({ ticketId: id })
+        .then((res) => setAttachments(res.data))
+        .catch((err) => { console.warn('Failed to load attachments:', err); });
     }
 
     let unsubscribe: (() => void) | undefined;
@@ -102,7 +111,7 @@ export function TicketDetailPage() {
         const comments = snap.docs.map((d) => ({ id: d.id, ...d.data() } as Comment));
         setTicketComments(comments);
         const commentUserIds = [...new Set(comments.map((c) => c.userId))];
-        const missing = commentUserIds.filter((uid) => !profiles[uid]);
+        const missing = commentUserIds.filter((uid) => !profilesRef.current[uid]);
         if (missing.length) {
           const newProfileDocs = await Promise.all(missing.map((uid) => getDoc(doc(db!, 'profiles', uid))));
           setProfiles((prev) => {
@@ -118,67 +127,74 @@ export function TicketDetailPage() {
     return () => { if (unsubscribe) unsubscribe(); };
   }, [id]);
 
+  // Keep the discussion scrolled to the newest comment.
+  useEffect(() => {
+    commentsEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [ticketComments]);
+
   const handleAddComment = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
-    if (!newComment.trim() || !user || !ticket || !db) return;
+    // Guard against double-submit (Enter + click) which would post duplicates.
+    if (!newComment.trim() || !user || !ticket || !db || postingComment) return;
     const body = newComment.trim();
     const mentionedIds = pendingMentionIds.filter((id) => id !== user.id);
+
+    setPostingComment(true);
+    try {
+      await addDoc(collection(db, 'comments'), {
+        ticketId: ticket.id,
+        userId: user.id,
+        body,
+        mentionedIds,
+        createdAt: serverTimestamp(),
+      });
+    } catch (err) {
+      // Keep the typed text in the composer so the user doesn't lose it.
+      console.error('Failed to post comment:', err);
+      alert('Failed to post your comment. Please try again.');
+      setPostingComment(false);
+      return;
+    }
+    // Comment persisted — safe to clear the composer now.
     setNewComment('');
     setPendingMentionIds([]);
-    await addDoc(collection(db, 'comments'), {
-      ticketId: ticket.id,
-      userId: user.id,
-      body,
-      mentionedIds,
-      createdAt: serverTimestamp(),
-    });
+    setPostingComment(false);
 
-    // Audit log: first-response time only counts when a non-submitter comments first.
-    const priorNonSubmitterReply = ticketComments.some(
-      (c) => c.userId !== ticket.submitterId,
-    );
-    const isFirstResponse =
-      user.id !== ticket.submitterId && !priorNonSubmitterReply;
-    await logTicketComment(ticket.id, user.id, isFirstResponse);
-
-    // Email other parties: participants + anyone mentioned (deduped, excluding commenter)
-    const currentAssigneeIds = getAssigneeIds(ticket);
-    const recipientIds = [
-      ...new Set([ticket.submitterId, ...currentAssigneeIds, ...mentionedIds]),
-    ].filter((pid) => pid && pid !== user.id);
-    for (const recipientId of recipientIds) {
-      const recipientDoc = await getDoc(doc(db, 'profiles', recipientId));
-      const recipientEmail = recipientDoc.data()?.email;
-      if (!recipientEmail) continue;
-      const wasMentioned = mentionedIds.includes(recipientId);
-      const subject = wasMentioned
-        ? `${user.name} mentioned you on ${ticket.id}: ${ticket.title}`
-        : `New comment on ${ticket.id}: ${ticket.title}`;
-      const lead = wasMentioned
-        ? `<p><strong>${user.name}</strong> mentioned you in a comment on <strong>${ticket.id}</strong>:</p>`
-        : `<p><strong>${user.name}</strong> commented on <strong>${ticket.id}</strong>:</p>`;
-      await sendMail(
-        recipientEmail,
-        subject,
-        `${lead}<p>${body}</p><p><a href="${ticketUrl(ticket.id)}">View ticket →</a></p><hr style="margin:16px 0;border:none;border-top:1px solid #e5e7eb"/><p style="color:#9ca3af;font-size:12px">Please do not reply to this email. To respond, <a href="${ticketUrl(ticket.id)}">click here to view the ticket</a> and add your comment there.</p>`
+    // Audit log + notifications are best-effort and must not error the saved comment.
+    try {
+      // First-response time only counts when a non-submitter comments first.
+      const priorNonSubmitterReply = ticketComments.some(
+        (c) => c.userId !== ticket.submitterId,
       );
+      const isFirstResponse =
+        user.id !== ticket.submitterId && !priorNonSubmitterReply;
+      await logTicketComment(ticket.id, user.id, isFirstResponse);
+      // Comment notification emails (participants + @mentions) are sent
+      // server-side by the onCommentCreated Cloud Function.
+    } catch (err) {
+      console.error('Comment saved, but the audit-log step failed:', err);
     }
   };
 
   const handleUploadFiles = async (files: FileList) => {
     if (!ticket || !storage || files.length === 0) return;
+    const { accepted, rejected } = partitionFiles(Array.from(files));
+    setUploadError(rejected.length ? `Skipped: ${rejected.join(', ')}. ${ATTACHMENT_HINT}` : '');
+    if (accepted.length === 0) return;
     setUploading(true);
     try {
-      const newAttachments: Attachment[] = [];
-      for (const file of Array.from(files)) {
+      for (const file of accepted) {
         const fileRef = ref(storage, `attachments/${ticket.id}/${file.name}`);
         await uploadBytes(fileRef, file);
-        const url = await getDownloadURL(fileRef);
-        newAttachments.push({ name: file.name, url });
       }
-      setAttachments((prev) => [...prev, ...newAttachments]);
+      // Refresh the (gated) attachment list with fresh tokenized URLs.
+      if (functions) {
+        const res = await httpsCallable<{ ticketId: string }, Attachment[]>(functions, 'getTicketAttachments')({ ticketId: ticket.id });
+        setAttachments(res.data);
+      }
     } catch (err) {
       console.error('Failed to upload files:', err);
+      setUploadError('Upload failed. Please try again.');
     } finally {
       setUploading(false);
     }
@@ -195,15 +211,8 @@ export function TicketDetailPage() {
       console.error('Failed to update status:', err);
       setTicket(prev);
       alert('Failed to update status. Please try again.');
-      return;
     }
-
-    const submitterDoc = await getDoc(doc(db, 'profiles', ticket.submitterId));
-    const submitterEmail = submitterDoc.data()?.email;
-    if (submitterEmail) {
-      await sendMail(submitterEmail, `${ticket.id} status changed to ${newStatus}`,
-        `<p>Your ticket <strong>${ticket.id}</strong> — ${ticket.title} — has been updated to <strong>${newStatus}</strong>.</p><p><a href="${ticketUrl(ticket.id)}">View ticket →</a></p>`);
-    }
+    // The submitter notification is sent server-side by onTicketUpdated.
   };
 
   const handlePriorityChange = async (newPriority: TicketPriority) => {
@@ -242,19 +251,15 @@ export function TicketDetailPage() {
       return;
     }
 
-    if (scheduled) return; // no notifications until go-live
+    if (scheduled) return; // assignees notified on go-live
 
-    // Email every newly added assignee
+    // Load any newly-added assignees we don't have yet so their chips render.
+    // Assignee notification emails are sent server-side by onTicketUpdated.
     for (const addedId of added) {
+      if (profiles[addedId]) continue;
       const assigneeDoc = await getDoc(doc(db, 'profiles', addedId));
       const assigneeData = assigneeDoc.data();
-      if (assigneeData?.email) {
-        await sendMail(assigneeData.email, `${ticket.id} has been assigned to you`,
-          `<p>Ticket <strong>${ticket.id}</strong> — ${ticket.title} — has been assigned to you.</p><p><a href="${ticketUrl(ticket.id)}">View ticket →</a></p>`);
-      } else {
-        console.warn(`Skipping assignee notification for ${ticket.id}: profile ${addedId} has no email field. Have them sign in once to self-heal, or fix via /admin/team.`);
-      }
-      if (!profiles[addedId] && assigneeData) {
+      if (assigneeData) {
         setProfiles((prev) => ({ ...prev, [addedId]: { id: addedId, name: assigneeData.name, photoURL: assigneeData.photoURL, email: assigneeData.email } }));
       }
     }
@@ -409,6 +414,7 @@ export function TicketDetailPage() {
               </label>
             </div>
             <div className="p-4">
+              {uploadError && <p className="text-xs text-red-600 mb-2" role="alert">{uploadError}</p>}
               {attachments.length === 0 ? (
                 <p className="text-sm text-gray-400 text-center py-2">No attachments.</p>
               ) : (
@@ -437,7 +443,7 @@ export function TicketDetailPage() {
                 const isOwn = comment.userId === user?.id;
                 return (
                   <div key={comment.id} className={`flex items-end gap-2 ${isOwn ? 'flex-row-reverse' : ''}`}>
-                    <img src={commentUser?.photoURL || `https://ui-avatars.com/api/?name=User&background=1B4332&color=D4A843`} alt="" className="w-8 h-8 rounded-full border border-gray-200 flex-shrink-0" />
+                    <Avatar src={commentUser?.photoURL} name={commentUser?.name} className="w-8 h-8 rounded-full border border-gray-200 flex-shrink-0" />
                     <div className={`max-w-[75%] ${isOwn ? 'items-end' : 'items-start'} flex flex-col`}>
                       <div className={`flex items-baseline gap-2 ${isOwn ? 'flex-row-reverse' : ''}`}>
                         <span className="font-medium text-xs text-gray-600">{commentUser?.name || 'Unknown'}</span>
@@ -448,6 +454,7 @@ export function TicketDetailPage() {
                   </div>
                 );
               })}
+              <div ref={commentsEndRef} />
             </div>
             <div className="p-4 border-t border-gray-200 bg-gray-50">
               <form onSubmit={handleAddComment} className="flex items-end gap-3">
@@ -460,7 +467,7 @@ export function TicketDetailPage() {
                   className="flex-1 w-full border-gray-300 rounded-lg shadow-sm focus:ring-brand-dark focus:border-brand-dark sm:text-sm border p-3 resize-none"
                   onSubmit={() => handleAddComment()}
                 />
-                <button type="submit" disabled={!newComment.trim()} className="p-3 bg-brand-dark text-white rounded-lg hover:bg-[#153427] disabled:opacity-50 transition-colors shadow-sm">
+                <button type="submit" disabled={!newComment.trim() || postingComment} aria-label="Send comment" className="p-3 bg-brand-dark text-white rounded-lg hover:bg-[#153427] disabled:opacity-50 transition-colors shadow-sm">
                   <Send className="w-5 h-5" />
                 </button>
               </form>
@@ -498,7 +505,7 @@ export function TicketDetailPage() {
               <div>
                 <span className="block text-xs font-medium text-gray-500 uppercase mb-1">Submitter</span>
                 <div className="flex items-center gap-2 mt-1">
-                  {submitter && <img src={submitter.photoURL} alt="" className="w-6 h-6 rounded-full" />}
+                  {submitter && <Avatar src={submitter.photoURL} name={submitter.name} className="w-6 h-6 rounded-full" />}
                   <span className="text-sm text-gray-900">{submitter?.name || '—'}</span>
                 </div>
               </div>
@@ -510,7 +517,7 @@ export function TicketDetailPage() {
                   <div className="flex flex-wrap gap-2 mt-1">
                     {assignees.map((a) => (
                       <div key={a.id} className="flex items-center gap-1.5 bg-gray-100 rounded-full pl-1 pr-2 py-0.5">
-                        <img src={a.photoURL} alt="" className="w-5 h-5 rounded-full" />
+                        <Avatar src={a.photoURL} name={a.name} className="w-5 h-5 rounded-full" />
                         <span className="text-xs text-gray-900">{a.name}</span>
                       </div>
                     ))}

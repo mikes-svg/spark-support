@@ -18,18 +18,28 @@ service cloud.firestore {
       return isSignedIn() && (role() == 'admin' || role() == 'superadmin');
     }
 
+    // True if the signed-in user is a participant of the given ticket. Used to
+    // gate comments / audit events to the people who can see the ticket itself.
+    function isTicketParticipant(ticketId) {
+      return isSignedIn() &&
+        get(/databases/$(database)/documents/tickets/$(ticketId)).data.participants.hasAny([request.auth.uid]);
+    }
+
     match /profiles/{userId} {
       allow read: if isSignedIn();
-      // Team management (inviting users, changing roles) is superadmin-only.
-      // Users may still create/update their OWN profile doc (sign-in self-heal).
-      allow create: if request.auth.uid == userId || isSuperAdmin();
-      allow update: if request.auth.uid == userId || isSuperAdmin();
-      // Superadmins can delete any profile. Users can also delete profile docs
-      // whose email matches their own — this lets the sign-in flow auto-clean up
-      // pre-registration docs (email-slug ids) that have already been migrated
-      // to the user's UID profile.
-      allow delete: if isSuperAdmin() ||
-        (isSignedIn() && resource.data.email == request.auth.token.email);
+      // Roles are assigned server-side: the `ensureProfile` Cloud Function (Admin
+      // SDK, bypasses these rules) creates/heals profiles on sign-in, and
+      // superadmins manage the team. Clients may NOT create their own profile or
+      // change `role` — this closes the self-elevation hole where any signed-in
+      // user could set role:'superadmin' on their own doc.
+      allow create: if isSuperAdmin();
+      // A user may edit their own non-role fields (e.g. name); role must be
+      // unchanged. Superadmins may change anything.
+      allow update: if isSuperAdmin()
+        || (request.auth.uid == userId && request.resource.data.role == resource.data.role);
+      // Pre-registration dup cleanup now happens server-side in ensureProfile,
+      // so only superadmins delete profiles.
+      allow delete: if isSuperAdmin();
     }
 
     match /tickets/{ticketId} {
@@ -47,8 +57,13 @@ service cloud.firestore {
     }
 
     match /comments/{commentId} {
-      allow read: if isSignedIn();
-      allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
+      // Comments are visible only to the ticket's participants and admins,
+      // mirroring the tickets read rule — not to anyone who can guess an id.
+      allow read: if isAdmin() || isTicketParticipant(resource.data.ticketId);
+      // The author must be themselves AND able to see the ticket they comment on.
+      allow create: if isSignedIn()
+        && request.resource.data.userId == request.auth.uid
+        && (isAdmin() || isTicketParticipant(request.resource.data.ticketId));
       allow delete: if isSuperAdmin();
     }
 
@@ -56,7 +71,11 @@ service cloud.firestore {
     // readable by admins (who can see analytics). Never edited or deleted.
     match /ticketEvents/{eventId} {
       allow read: if isAdmin();
-      allow create: if isSignedIn() && request.resource.data.actorId == request.auth.uid;
+      // The actor must be themselves AND involved in the ticket, so users can't
+      // forge audit events for arbitrary tickets and skew analytics.
+      allow create: if isSignedIn()
+        && request.resource.data.actorId == request.auth.uid
+        && (isAdmin() || isTicketParticipant(request.resource.data.ticketId));
       allow update, delete: if false;
     }
 
@@ -66,13 +85,22 @@ service cloud.firestore {
     }
 
     match /meta/{docId} {
-      allow read, write: if isSignedIn();
+      allow read: if isSignedIn();
+      // The only doc here is the ticket counter. Allow initial create and a
+      // strictly monotonic increment so a signed-in user can't rewrite it
+      // backwards and cause ticket-ID collisions.
+      allow create: if isSignedIn() && request.resource.data.count is int;
+      allow update: if isSignedIn() && request.resource.data.count is int
+        && request.resource.data.count > resource.data.count;
+      allow delete: if false;
     }
 
-    // Email trigger queue (Firebase Trigger Email extension)
+    // Email trigger queue (Firebase Trigger Email extension). All sends now come
+    // from Firestore-triggered Cloud Functions (onTicketCreated/Updated,
+    // onCommentCreated, reminders, activation) using the Admin SDK, so clients
+    // have no access — closing the open-relay surface.
     match /mail/{mailId} {
-      allow create: if isSignedIn();
-      allow read, update, delete: if false;
+      allow read, write: if false;
     }
   }
 }
