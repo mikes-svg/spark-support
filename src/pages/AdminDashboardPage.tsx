@@ -16,7 +16,7 @@ import {
 } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { useAuth } from '../context/AuthContext';
-import { Filter, AlertCircle, CheckCircle2, Clock, RefreshCw } from 'lucide-react';
+import { Filter, AlertCircle, CheckCircle2, Clock, RefreshCw, Search, X } from 'lucide-react';
 import { ConfirmModal } from '../components/ConfirmModal';
 import { AssigneeSelector } from '../components/AssigneeSelector';
 import { StatusBadge } from '../components/Badges';
@@ -55,6 +55,9 @@ export function AdminDashboardPage() {
   const [statusFilter, setStatusFilter] = useState('Active');
   const [typeFilter, setTypeFilter] = useState('');
   const [assigneeFilter, setAssigneeFilter] = useState('');
+  // Free-text search over loaded tickets (id, title, description, type, and
+  // submitter/assignee names). Client-side, so it only searches loaded pages.
+  const [search, setSearch] = useState('');
   // Scheduled (not-yet-live) tickets are hidden by default; this toggle reveals them.
   const [showScheduled, setShowScheduled] = useState(false);
 
@@ -234,17 +237,25 @@ export function AdminDashboardPage() {
   // type/assignee here, and re-apply the status set so optimistic status changes
   // that move a ticket out of view disappear immediately.
   const activeStatuses = statusesForFilter();
+  const q = search.trim().toLowerCase();
+  const matchesSearch = (t: Ticket) => {
+    if (!q) return true;
+    const names = [t.submitterId, ...getAssigneeIds(t)].map((id) => profiles[id]?.name || '');
+    return [t.id, t.title, t.description || '', t.type, ...names]
+      .some((field) => field.toLowerCase().includes(q));
+  };
   const visibleTickets = tickets.filter((t) => {
     if (!activeStatuses.includes(t.status)) return false;
     if (typeFilter && t.type !== typeFilter) return false;
     if (assigneeFilter && !getAssigneeIds(t).includes(assigneeFilter)) return false;
+    if (!matchesSearch(t)) return false;
     return true;
   });
 
   // Scheduling is a superadmin-only feature; only they can reveal scheduled tickets.
   const isSuperadmin = isSuperadminRole(user?.role);
   const scheduledCount = counts?.Scheduled ?? 0;
-  const clientFiltered = typeFilter !== '' || assigneeFilter !== '';
+  const clientFiltered = typeFilter !== '' || assigneeFilter !== '' || q !== '';
 
   const handleStatClick = (filter: string) => {
     // Re-clicking the active stat card returns to the default 'Active' view
@@ -280,6 +291,27 @@ export function AdminDashboardPage() {
 
       <div className="bg-white shadow-sm rounded-lg border border-gray-200 p-4 flex flex-wrap items-center gap-4">
         <div className="flex items-center text-gray-500 mr-2"><Filter className="w-5 h-5 mr-2" /><span className="text-sm font-medium">Filters:</span></div>
+        <div className="relative">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
+          <input
+            type="search"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search tickets…"
+            aria-label="Search tickets"
+            className="block w-56 pl-9 pr-8 py-2 text-sm border-gray-300 focus:outline-none focus:ring-brand-dark focus:border-brand-dark rounded-md border"
+          />
+          {search && (
+            <button
+              type="button"
+              onClick={() => setSearch('')}
+              aria-label="Clear search"
+              className="absolute right-2 top-1/2 -translate-y-1/2 p-0.5 text-gray-400 hover:text-gray-600"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          )}
+        </div>
         <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="block pl-3 pr-10 py-2 text-sm border-gray-300 focus:outline-none focus:ring-brand-dark focus:border-brand-dark rounded-md border">
           <option value="Active">Active (hide Resolved)</option>
           <option value="All">All Statuses</option>
@@ -301,7 +333,7 @@ export function AdminDashboardPage() {
             {showScheduled ? 'Hide scheduled' : `Show scheduled${scheduledCount ? ` (${scheduledCount})` : ''}`}
           </button>
         )}
-        <button onClick={() => { setStatusFilter('Active'); setTypeFilter(''); setAssigneeFilter(''); setShowScheduled(false); }} className="text-sm text-brand-gold hover:text-yellow-700 font-medium">Reset Filters</button>
+        <button onClick={() => { setStatusFilter('Active'); setTypeFilter(''); setAssigneeFilter(''); setShowScheduled(false); setSearch(''); }} className="text-sm text-brand-gold hover:text-yellow-700 font-medium">Reset Filters</button>
         <button onClick={refreshAll} disabled={refreshing} className="ml-auto p-2 text-gray-400 hover:text-brand-dark transition-colors rounded-md hover:bg-gray-100 disabled:opacity-50" title="Refresh">
           <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} />
         </button>
@@ -387,7 +419,7 @@ export function AdminDashboardPage() {
           <div className="px-6 py-3 border-t border-gray-200 flex items-center justify-between text-sm text-gray-500">
             <span>
               Showing {visibleTickets.length} ticket{visibleTickets.length === 1 ? '' : 's'}
-              {clientFiltered && ' (type/assignee filters apply to loaded tickets — load more to search further back)'}
+              {clientFiltered && ' (filters/search apply to loaded tickets — load more to reach further back)'}
             </span>
             {hasMore && (
               <button
