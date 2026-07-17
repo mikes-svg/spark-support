@@ -6,7 +6,7 @@ import { httpsCallable } from 'firebase/functions';
 import { db, storage, functions } from '../lib/firebase';
 import { StatusBadge, PriorityBadge } from '../components/Badges';
 import { useAuth } from '../context/AuthContext';
-import { Send, ArrowLeft, Clock, Trash2, UploadCloud, FileText, CalendarClock } from 'lucide-react';
+import { Send, ArrowLeft, Clock, Trash2, UploadCloud, FileText, CalendarClock, Pencil, X, Check } from 'lucide-react';
 import { ConfirmModal } from '../components/ConfirmModal';
 import { AssigneeChips } from '../components/AssigneeChips';
 import { MentionTextarea, renderCommentBody } from '../components/MentionTextarea';
@@ -27,6 +27,7 @@ interface Comment {
   id: string; ticketId: string; userId: string; body: string;
   mentionedIds?: string[];
   createdAt: { toDate: () => Date } | string | null;
+  editedAt?: { toDate: () => Date } | string | null;
 }
 interface Attachment { name: string; url: string; }
 
@@ -42,6 +43,13 @@ export function TicketDetailPage() {
   const [ticketComments, setTicketComments] = useState<Comment[]>([]);
   const [newComment, setNewComment] = useState('');
   const [postingComment, setPostingComment] = useState(false);
+  // Inline comment editing: which comment (if any) is open in the editor, plus
+  // its working text/mentions. `deletingComment` drives the delete confirm modal.
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editingText, setEditingText] = useState('');
+  const [editingMentionIds, setEditingMentionIds] = useState<string[]>([]);
+  const [savingEdit, setSavingEdit] = useState(false);
+  const [deletingComment, setDeletingComment] = useState<Comment | null>(null);
   const [loading, setLoading] = useState(true);
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [uploading, setUploading] = useState(false);
@@ -173,6 +181,53 @@ export function TicketDetailPage() {
       // server-side by the onCommentCreated Cloud Function.
     } catch (err) {
       console.error('Comment saved, but the audit-log step failed:', err);
+    }
+  };
+
+  const startEditComment = (comment: Comment) => {
+    setEditingId(comment.id);
+    setEditingText(comment.body);
+    setEditingMentionIds(comment.mentionedIds || []);
+  };
+
+  const cancelEditComment = () => {
+    setEditingId(null);
+    setEditingText('');
+    setEditingMentionIds([]);
+  };
+
+  const saveEditComment = async () => {
+    const body = editingText.trim();
+    if (!editingId || !body || !user || !db || savingEdit) return;
+    // Never store a self-mention (mirrors handleAddComment).
+    const mentionedIds = editingMentionIds.filter((mid) => mid !== user.id);
+    setSavingEdit(true);
+    try {
+      await updateDoc(doc(db, 'comments', editingId), {
+        body,
+        mentionedIds,
+        editedAt: serverTimestamp(),
+      });
+      cancelEditComment();
+    } catch (err) {
+      console.error('Failed to edit comment:', err);
+      alert('Failed to save your edit. Please try again.');
+    } finally {
+      setSavingEdit(false);
+    }
+  };
+
+  const handleDeleteComment = async () => {
+    if (!deletingComment || !db) return;
+    const target = deletingComment;
+    setDeletingComment(null);
+    // If the comment being deleted is open in the editor, close it.
+    if (editingId === target.id) cancelEditComment();
+    try {
+      await deleteDoc(doc(db, 'comments', target.id));
+    } catch (err) {
+      console.error('Failed to delete comment:', err);
+      alert('Failed to delete the comment. Please try again.');
     }
   };
 
@@ -441,15 +496,52 @@ export function TicketDetailPage() {
               {ticketComments.map((comment) => {
                 const commentUser = profiles[comment.userId];
                 const isOwn = comment.userId === user?.id;
+                const isEditing = editingId === comment.id;
                 return (
-                  <div key={comment.id} className={`flex items-end gap-2 ${isOwn ? 'flex-row-reverse' : ''}`}>
+                  <div key={comment.id} className={`group flex items-end gap-2 ${isOwn ? 'flex-row-reverse' : ''}`}>
                     <Avatar src={commentUser?.photoURL} name={commentUser?.name} className="w-8 h-8 rounded-full border border-gray-200 flex-shrink-0" />
                     <div className={`max-w-[75%] ${isOwn ? 'items-end' : 'items-start'} flex flex-col`}>
                       <div className={`flex items-baseline gap-2 ${isOwn ? 'flex-row-reverse' : ''}`}>
                         <span className="font-medium text-xs text-gray-600">{commentUser?.name || 'Unknown'}</span>
-                        <span className="text-[10px] text-gray-400">{(toDate(comment.createdAt) ?? new Date()).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</span>
+                        <span className="text-[10px] text-gray-400">
+                          {(toDate(comment.createdAt) ?? new Date()).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                          {comment.editedAt && <span className="italic"> · edited</span>}
+                        </span>
                       </div>
-                      <div className={`mt-1 p-3 rounded-2xl text-sm whitespace-pre-wrap break-words ${isOwn ? 'bg-brand-dark text-white rounded-br-sm' : 'bg-gray-100 text-gray-800 rounded-bl-sm'}`}>{renderCommentBody(comment.body, comment.mentionedIds || [], profiles, isOwn ? 'dark' : 'light')}</div>
+                      {isEditing ? (
+                        <div className="mt-1 w-full min-w-[220px]">
+                          <MentionTextarea
+                            value={editingText}
+                            onChange={(text, ids) => { setEditingText(text); setEditingMentionIds(ids); }}
+                            users={mentionableProfiles}
+                            rows={2}
+                            className="w-full border-gray-300 rounded-lg shadow-sm focus:ring-brand-dark focus:border-brand-dark sm:text-sm border p-2 resize-none"
+                            onSubmit={saveEditComment}
+                          />
+                          <div className="flex justify-end gap-2 mt-1">
+                            <button type="button" onClick={cancelEditComment} className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-gray-600 hover:text-gray-900">
+                              <X className="w-3.5 h-3.5" />Cancel
+                            </button>
+                            <button type="button" onClick={saveEditComment} disabled={!editingText.trim() || savingEdit} className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium text-white bg-brand-dark rounded-md hover:bg-[#153427] disabled:opacity-50 transition-colors">
+                              <Check className="w-3.5 h-3.5" />Save
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <>
+                          <div className={`mt-1 p-3 rounded-2xl text-sm whitespace-pre-wrap break-words ${isOwn ? 'bg-brand-dark text-white rounded-br-sm' : 'bg-gray-100 text-gray-800 rounded-bl-sm'}`}>{renderCommentBody(comment.body, comment.mentionedIds || [], profiles, isOwn ? 'dark' : 'light')}</div>
+                          {isOwn && (
+                            <div className="flex gap-3 mt-1 opacity-70 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
+                              <button type="button" onClick={() => startEditComment(comment)} className="inline-flex items-center gap-1 text-[11px] text-gray-400 hover:text-gray-700 transition-colors">
+                                <Pencil className="w-3 h-3" />Edit
+                              </button>
+                              <button type="button" onClick={() => setDeletingComment(comment)} className="inline-flex items-center gap-1 text-[11px] text-gray-400 hover:text-red-600 transition-colors">
+                                <Trash2 className="w-3 h-3" />Delete
+                              </button>
+                            </div>
+                          )}
+                        </>
+                      )}
                     </div>
                   </div>
                 );
@@ -568,6 +660,15 @@ export function TicketDetailPage() {
         danger
         onConfirm={handleCancelSchedule}
         onCancel={() => setShowCancelConfirm(false)}
+      />
+      <ConfirmModal
+        open={!!deletingComment}
+        title="Delete Comment"
+        message="Delete this comment? This cannot be undone."
+        confirmLabel="Delete"
+        danger
+        onConfirm={handleDeleteComment}
+        onCancel={() => setDeletingComment(null)}
       />
     </div>
   );

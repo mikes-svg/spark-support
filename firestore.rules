@@ -64,7 +64,17 @@ service cloud.firestore {
       allow create: if isSignedIn()
         && request.resource.data.userId == request.auth.uid
         && (isAdmin() || isTicketParticipant(request.resource.data.ticketId));
-      allow delete: if isSuperAdmin();
+      // The author may edit their own comment, but only its editable fields:
+      // the owner, ticket, and original timestamp are pinned so an edit can't
+      // reassign authorship, move the comment, or backdate it.
+      allow update: if isSignedIn()
+        && resource.data.userId == request.auth.uid
+        && request.resource.data.userId == resource.data.userId
+        && request.resource.data.ticketId == resource.data.ticketId
+        && request.resource.data.createdAt == resource.data.createdAt;
+      // Superadmins may delete any comment; authors may delete their own.
+      allow delete: if isSuperAdmin()
+        || (isSignedIn() && resource.data.userId == request.auth.uid);
     }
 
     // Audit log for ticket lifecycle events. Created by clients but only
