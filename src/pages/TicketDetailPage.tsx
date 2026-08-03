@@ -439,7 +439,7 @@ export function TicketDetailPage() {
                   className="block border-gray-300 rounded-md shadow-sm focus:ring-brand-dark focus:border-brand-dark sm:text-sm border p-2"
                 />
               </div>
-              <button onClick={handleReschedule} disabled={!rescheduleValue} className="px-4 py-2 text-sm font-medium text-white bg-brand-dark rounded-md hover:bg-[#153427] disabled:opacity-50 transition-colors">Save</button>
+              <button onClick={handleReschedule} disabled={!rescheduleValue} className="px-4 py-2 text-sm font-medium text-white bg-brand-dark rounded-md hover:bg-[#05391B] disabled:opacity-50 transition-colors">Save</button>
               <button onClick={() => setRescheduling(false)} className="px-4 py-2 text-sm font-medium text-gray-600 hover:text-gray-900">Dismiss</button>
             </div>
           )}
@@ -522,7 +522,7 @@ export function TicketDetailPage() {
                             <button type="button" onClick={cancelEditComment} className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-gray-600 hover:text-gray-900">
                               <X className="w-3.5 h-3.5" />Cancel
                             </button>
-                            <button type="button" onClick={saveEditComment} disabled={!editingText.trim() || savingEdit} className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium text-white bg-brand-dark rounded-md hover:bg-[#153427] disabled:opacity-50 transition-colors">
+                            <button type="button" onClick={saveEditComment} disabled={!editingText.trim() || savingEdit} className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium text-white bg-brand-dark rounded-md hover:bg-[#05391B] disabled:opacity-50 transition-colors">
                               <Check className="w-3.5 h-3.5" />Save
                             </button>
                           </div>
@@ -559,7 +559,7 @@ export function TicketDetailPage() {
                   className="flex-1 w-full border-gray-300 rounded-lg shadow-sm focus:ring-brand-dark focus:border-brand-dark sm:text-sm border p-3 resize-none"
                   onSubmit={() => handleAddComment()}
                 />
-                <button type="submit" disabled={!newComment.trim() || postingComment} aria-label="Send comment" className="p-3 bg-brand-dark text-white rounded-lg hover:bg-[#153427] disabled:opacity-50 transition-colors shadow-sm">
+                <button type="submit" disabled={!newComment.trim() || postingComment} aria-label="Send comment" className="p-3 bg-brand-dark text-white rounded-lg hover:bg-[#05391B] disabled:opacity-50 transition-colors shadow-sm">
                   <Send className="w-5 h-5" />
                 </button>
               </form>

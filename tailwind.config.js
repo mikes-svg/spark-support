@@ -8,7 +8,7 @@ export default {
     extend: {
       colors: {
         brand: {
-          dark: '#1B4332',
+          dark: '#064923',
           gold: '#D4A843',
           cream: '#F7F5F0',
         }

@@ -669,17 +669,17 @@ function TrendChart({ data }: { data: { date: Date; opened: number; resolved: nu
             </text>
           ) : null,
         )}
-        <path d={line('opened')} stroke="#1B4332" strokeWidth="2" fill="none" />
+        <path d={line('opened')} stroke="#064923" strokeWidth="2" fill="none" />
         <path d={line('resolved')} stroke="#D4A843" strokeWidth="2" fill="none" />
         {data.map((d, i) => (
           <g key={i}>
-            <circle cx={x(i)} cy={y(d.opened)} r="2.5" fill="#1B4332" />
+            <circle cx={x(i)} cy={y(d.opened)} r="2.5" fill="#064923" />
             <circle cx={x(i)} cy={y(d.resolved)} r="2.5" fill="#D4A843" />
           </g>
         ))}
       </svg>
       <div className="flex items-center gap-4 text-xs text-gray-600 mt-1 px-2">
-        <span className="flex items-center gap-1.5"><span className="w-3 h-0.5 bg-[#1B4332] inline-block" /> Opened</span>
+        <span className="flex items-center gap-1.5"><span className="w-3 h-0.5 bg-[#064923] inline-block" /> Opened</span>
         <span className="flex items-center gap-1.5"><span className="w-3 h-0.5 bg-[#D4A843] inline-block" /> Resolved</span>
       </div>
     </div>

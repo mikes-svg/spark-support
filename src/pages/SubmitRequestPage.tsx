@@ -225,7 +225,7 @@ export function SubmitRequestPage() {
 
           <div className="pt-4 flex items-center justify-end gap-4 border-t border-gray-200">
             <Link to="/" className="text-sm font-medium text-gray-700 hover:text-gray-900">Cancel</Link>
-            <button type="submit" disabled={isSubmitting} className="inline-flex justify-center py-2 px-6 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-brand-dark hover:bg-[#153427] focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-brand-dark disabled:opacity-50 transition-colors">
+            <button type="submit" disabled={isSubmitting} className="inline-flex justify-center py-2 px-6 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-brand-dark hover:bg-[#05391B] focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-brand-dark disabled:opacity-50 transition-colors">
               {isSubmitting ? 'Submitting…' : 'Submit Request'}
             </button>
           </div>

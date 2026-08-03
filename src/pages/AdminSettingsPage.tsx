@@ -218,7 +218,7 @@ export function AdminSettingsPage() {
         </div>
         <div className="px-6 py-4 border-t border-gray-200 flex justify-end gap-3 bg-gray-50/50">
           <button onClick={() => setShowAddModal(false)} className="px-4 py-2 text-sm font-medium text-gray-700 hover:text-gray-900">Cancel</button>
-          <button onClick={handleAddType} disabled={addingType || !newTypeName.trim()} className="px-5 py-2 text-sm font-medium rounded-lg bg-brand-dark text-white hover:bg-[#153427] disabled:opacity-50 transition-colors">
+          <button onClick={handleAddType} disabled={addingType || !newTypeName.trim()} className="px-5 py-2 text-sm font-medium rounded-lg bg-brand-dark text-white hover:bg-[#05391B] disabled:opacity-50 transition-colors">
             {addingType ? 'Adding…' : 'Add Type'}
           </button>
         </div>

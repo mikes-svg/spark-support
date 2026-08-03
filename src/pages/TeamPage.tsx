@@ -158,7 +158,7 @@ export function TeamPage() {
       return;
     }
     const newName = editUserName.trim();
-    const newPhotoURL = `https://ui-avatars.com/api/?name=${encodeURIComponent(newName)}&background=1B4332&color=D4A843`;
+    const newPhotoURL = `https://ui-avatars.com/api/?name=${encodeURIComponent(newName)}&background=064923&color=D4A843`;
     setEditingUser(null);
     setActionError('');
     setProfiles((prev) => prev.map((p) => p.id === profile.id ? { ...p, name: newName, photoURL: newPhotoURL } : p));
@@ -188,7 +188,7 @@ export function TeamPage() {
         return;
       }
       const displayName = inviteForm.name.trim();
-      const photoURL = `https://ui-avatars.com/api/?name=${encodeURIComponent(displayName)}&background=1B4332&color=D4A843`;
+      const photoURL = `https://ui-avatars.com/api/?name=${encodeURIComponent(displayName)}&background=064923&color=D4A843`;
       const emailLower = emailTrim.toLowerCase();
       const profileData = { name: displayName, email: emailLower, photoURL, role: inviteForm.role, createdAt: serverTimestamp() };
       const profileId = emailLower.replace(/[^a-z0-9]/g, '_');
@@ -235,7 +235,7 @@ export function TeamPage() {
             errors.push(`${email}: conflicts with an existing user id, skipped`);
             continue;
           }
-          const photoURL = `https://ui-avatars.com/api/?name=${encodeURIComponent(displayName)}&background=1B4332&color=D4A843`;
+          const photoURL = `https://ui-avatars.com/api/?name=${encodeURIComponent(displayName)}&background=064923&color=D4A843`;
           const data = { name: displayName, email, photoURL, role: bulkRole, createdAt: serverTimestamp() };
           await setDoc(doc(db, 'profiles', profileId), data);
           newProfiles.push({ id: profileId, name: displayName, email, photoURL, role: bulkRole });
@@ -389,7 +389,7 @@ export function TeamPage() {
             </div>
             <div className="px-6 py-4 border-t border-gray-200 flex justify-end gap-3">
               <button onClick={() => { setShowInviteModal(false); setInviteError(''); }} className="px-4 py-2 text-sm font-medium text-gray-700 hover:text-gray-900">Cancel</button>
-              <button onClick={handleInviteUser} disabled={inviting || !inviteForm.name || !inviteForm.email} className="px-5 py-2 text-sm font-medium rounded-lg bg-brand-dark text-white hover:bg-[#153427] disabled:opacity-50 transition-colors">
+              <button onClick={handleInviteUser} disabled={inviting || !inviteForm.name || !inviteForm.email} className="px-5 py-2 text-sm font-medium rounded-lg bg-brand-dark text-white hover:bg-[#05391B] disabled:opacity-50 transition-colors">
                 {inviting ? 'Creating…' : 'Add User'}
               </button>
             </div>
@@ -436,7 +436,7 @@ export function TeamPage() {
             </div>
             <div className="px-6 py-4 border-t border-gray-200 flex justify-end gap-3">
               <button onClick={() => { setShowBulkModal(false); setBulkResult(null); }} className="px-4 py-2 text-sm font-medium text-gray-700 hover:text-gray-900">Close</button>
-              <button onClick={handleBulkImport} disabled={bulkImporting || !bulkEmails.trim()} className="px-5 py-2 text-sm font-medium rounded-lg bg-brand-dark text-white hover:bg-[#153427] disabled:opacity-50 transition-colors">
+              <button onClick={handleBulkImport} disabled={bulkImporting || !bulkEmails.trim()} className="px-5 py-2 text-sm font-medium rounded-lg bg-brand-dark text-white hover:bg-[#05391B] disabled:opacity-50 transition-colors">
                 {bulkImporting ? 'Importing…' : 'Import Users'}
               </button>
             </div>

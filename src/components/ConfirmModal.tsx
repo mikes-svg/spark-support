@@ -67,7 +67,7 @@ export function ConfirmModal({ open, title, message, confirmLabel = 'Confirm', c
           <button
             ref={confirmRef}
             onClick={onConfirm}
-            className={`px-5 py-2 text-sm font-medium rounded-lg text-white transition-colors ${danger ? 'bg-red-600 hover:bg-red-700' : 'bg-brand-dark hover:bg-[#153427]'}`}
+            className={`px-5 py-2 text-sm font-medium rounded-lg text-white transition-colors ${danger ? 'bg-red-600 hover:bg-red-700' : 'bg-brand-dark hover:bg-[#05391B]'}`}
           >
             {confirmLabel}
           </button>

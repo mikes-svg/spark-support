@@ -21,6 +21,14 @@ module.exports = {
     // Empty no-op handlers (e.g. placeholder onCancel) are intentional here.
     '@typescript-eslint/no-empty-function': 'warn',
   },
+  overrides: [
+    {
+      // api/ holds Vercel serverless functions — Node (ESM), not browser code,
+      // so `process` and friends are Node globals here.
+      files: ['api/**/*.js'],
+      env: { node: true },
+    },
+  ],
   ignorePatterns: [
     'dist',
     'dev-dist',
