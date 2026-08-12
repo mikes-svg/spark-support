@@ -72,6 +72,7 @@ function EditableText({
   placeholder,
   className = '',
   textarea,
+  ariaLabel,
 }: {
   value: string;
   onCommit: (next: string) => void;
@@ -79,6 +80,7 @@ function EditableText({
   placeholder?: string;
   className?: string;
   textarea?: boolean;
+  ariaLabel?: string;
 }) {
   const [draft, setDraft] = useState(value);
   useEffect(() => setDraft(value), [value]);
@@ -98,6 +100,7 @@ function EditableText({
         rows={1}
         disabled={disabled}
         placeholder={placeholder}
+        aria-label={ariaLabel}
         onChange={(e) => setDraft(e.target.value)}
         onBlur={commit}
         className={`${base} resize-y min-h-[2rem] ${className}`}
@@ -110,6 +113,7 @@ function EditableText({
       value={draft}
       disabled={disabled}
       placeholder={placeholder}
+      aria-label={ariaLabel}
       onChange={(e) => setDraft(e.target.value)}
       onBlur={commit}
       onKeyDown={(e) => {
@@ -126,10 +130,12 @@ function EditableOffset({
   value,
   onCommit,
   disabled,
+  ariaLabel,
 }: {
   value: number | null;
   onCommit: (next: number | null) => void;
   disabled?: boolean;
+  ariaLabel?: string;
 }) {
   const [draft, setDraft] = useState(value == null ? '' : String(value));
   useEffect(() => setDraft(value == null ? '' : String(value)), [value]);
@@ -151,6 +157,7 @@ function EditableOffset({
       value={draft}
       disabled={disabled}
       placeholder="—"
+      aria-label={ariaLabel}
       title="Days from closing (negative = before closing)"
       onChange={(e) => setDraft(e.target.value)}
       onBlur={commit}
@@ -190,6 +197,7 @@ function SectionHeader({
           {canEdit ? (
             <EditableText
               value={section}
+              ariaLabel={`Section name: ${section}`}
               onCommit={(next) => next && next !== section && onRename(next)}
               className="!text-sm !font-semibold uppercase tracking-wider text-brand-dark max-w-xs"
             />
@@ -295,15 +303,22 @@ export function ChecklistTable({
                     const overdue = isProperty && isOverdue({ status: row.status ?? '', dueDate: row.dueDate }, today);
                     const globalIndex = sorted.findIndex((r) => r.id === row.id);
                     const delays = row.delays ?? [];
+                    // Every cell is a bare input in a grid, so each needs its own
+                    // accessible name — the column heading alone doesn't say
+                    // which row you're in, and the placeholder is just a dash.
+                    const rowName = row.title || row.code || 'new row';
                     return (
                       <tr key={row.id} className={`group ${overdue ? 'bg-red-50/40' : 'hover:bg-gray-50/60'}`}>
-                        <td className="px-4 py-1.5 align-top w-20">
+                        {/* min-w, not w-: the table layout will otherwise squeeze
+                            this column until a four-digit code (1008) is clipped. */}
+                        <td className="px-3 py-1.5 align-top min-w-[5rem]">
                           <EditableText
                             value={row.code}
                             disabled={!canEdit}
                             placeholder="—"
+                            ariaLabel={`Item number for ${rowName}`}
                             onCommit={(code) => onPatchRow(row, { code })}
-                            className="!text-xs tabular-nums text-gray-500"
+                            className="!text-xs !w-14 tabular-nums text-gray-500"
                           />
                         </td>
                         <td className="px-4 py-1.5 align-top min-w-[18rem]">
@@ -312,6 +327,7 @@ export function ChecklistTable({
                               value={row.title}
                               disabled={!canEdit}
                               placeholder="Task description"
+                              ariaLabel={`Task description${row.code ? ` for item ${row.code}` : ''}`}
                               onCommit={(title) => onPatchRow(row, { title })}
                               className={row.indent === 1 ? 'text-gray-700' : 'font-medium text-gray-900'}
                             />
@@ -322,6 +338,7 @@ export function ChecklistTable({
                             value={row.responsibleIds}
                             admins={people}
                             disabled={!canEdit}
+                            emptyLabel="Nobody has onboarding access yet"
                             onChange={(responsibleIds) => onPatchRow(row, { responsibleIds })}
                           />
                         </td>
@@ -329,6 +346,7 @@ export function ChecklistTable({
                           <EditableOffset
                             value={row.daysFromClosing}
                             disabled={!canEdit}
+                            ariaLabel={`Days from closing for ${rowName}`}
                             onCommit={(daysFromClosing) => onPatchRow(row, { daysFromClosing })}
                           />
                         </td>
@@ -340,6 +358,7 @@ export function ChecklistTable({
                                   type="date"
                                   value={row.dueDate ?? ''}
                                   disabled={!canEdit}
+                                  aria-label={`Due date for ${rowName}`}
                                   onChange={(e) => onDueDateChange?.(row, e.target.value || null)}
                                   className={`bg-transparent border border-transparent rounded px-2 py-1 text-sm hover:border-gray-300 focus:border-brand-dark focus:bg-white focus:outline-none focus:ring-1 focus:ring-brand-dark ${
                                     overdue ? 'text-red-700 font-medium' : 'text-gray-700'
@@ -365,6 +384,7 @@ export function ChecklistTable({
                               <select
                                 value={row.status ?? 'Not Started'}
                                 disabled={!canEdit}
+                                aria-label={`Status for ${rowName}`}
                                 onChange={(e) => onPatchRow(row, { status: e.target.value as OnboardingStatus })}
                                 className={`rounded-full border px-2.5 py-1 text-xs font-medium focus:outline-none focus:ring-2 focus:ring-brand-dark ${
                                   STATUS_STYLES[(row.status ?? 'Not Started') as OnboardingStatus]
@@ -380,6 +400,7 @@ export function ChecklistTable({
                                 value={row.notes ?? ''}
                                 disabled={!canEdit}
                                 placeholder="—"
+                                ariaLabel={`Notes for ${rowName}`}
                                 textarea
                                 onCommit={(notes) => onPatchRow(row, { notes })}
                                 className="text-gray-600"
