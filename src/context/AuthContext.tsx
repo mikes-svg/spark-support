@@ -42,6 +42,7 @@ export interface Profile {
   email: string;
   photoURL: string;
   role: Role;
+  onboardingAccess?: boolean;
 }
 
 interface AuthContextType {

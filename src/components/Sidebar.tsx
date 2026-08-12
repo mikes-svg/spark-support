@@ -8,31 +8,72 @@ import {
   BarChart3,
   LogOut,
   X,
+  ClipboardList,
+  Building2,
+  LayoutTemplate,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
-import { roleLabel, isAdminRole, isSuperadminRole } from '../types';
+import { roleLabel, isAdminRole, isSuperadminRole, hasOnboardingAccess } from '../types';
 
 interface SidebarProps {
   isOpen: boolean;
   onClose: () => void;
 }
 
+interface NavItem {
+  to: string;
+  icon: typeof LayoutDashboard;
+  label: string;
+  exact?: boolean;
+}
+
+function SidebarNavLink({ item, onClose }: { item: NavItem; onClose: () => void }) {
+  return (
+    <NavLink
+      to={item.to}
+      end={item.exact}
+      onClick={onClose}
+      className={({ isActive }) =>
+        `group flex items-center px-3 py-2.5 text-sm font-medium rounded-md relative transition-colors ${
+          isActive ? 'bg-white/10 text-white' : 'text-gray-300 hover:bg-white/5 hover:text-white'
+        }`
+      }>
+      {({ isActive }) => (
+        <>
+          {isActive && <div className="absolute left-0 top-0 bottom-0 w-1 bg-brand-gold rounded-r-md" />}
+          <item.icon className={`mr-3 flex-shrink-0 h-5 w-5 ${isActive ? 'text-brand-gold' : 'text-gray-400 group-hover:text-gray-300'}`} />
+          {item.label}
+        </>
+      )}
+    </NavLink>
+  );
+}
+
 function SidebarContent({ onClose }: { onClose: () => void }) {
   const { user, logout } = useAuth();
   const isAdmin = isAdminRole(user?.role);
   const isSuperadmin = isSuperadminRole(user?.role);
+  const canOnboard = hasOnboardingAccess(user);
 
-  const navItems = [
+  const navItems: NavItem[] = [
     { to: '/', icon: LayoutDashboard, label: 'My Tickets', exact: true },
     { to: '/submit', icon: PlusCircle, label: 'Submit Request' },
   ];
 
-  const adminItems = [
+  const adminItems: NavItem[] = [
     { to: '/admin', icon: TicketIcon, label: 'All Tickets', exact: true },
     ...(isSuperadmin ? [
       { to: '/admin/team', icon: Users, label: 'Team' },
       { to: '/admin/analytics', icon: BarChart3, label: 'Analytics' },
       { to: '/admin/settings', icon: Settings, label: 'Settings' },
+    ] : []),
+  ];
+
+  const onboardingItems: NavItem[] = [
+    { to: '/onboarding', icon: ClipboardList, label: 'My Tasks', exact: true },
+    { to: '/onboarding/properties', icon: Building2, label: 'Properties' },
+    ...(isSuperadmin ? [
+      { to: '/onboarding/template', icon: LayoutTemplate, label: 'Template' },
     ] : []),
   ];
 
@@ -56,24 +97,7 @@ function SidebarContent({ onClose }: { onClose: () => void }) {
           <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider">User</p>
         </div>
         {navItems.map((item) => (
-          <NavLink
-            key={item.to}
-            to={item.to}
-            end={item.exact}
-            onClick={onClose}
-            className={({ isActive }) =>
-              `group flex items-center px-3 py-2.5 text-sm font-medium rounded-md relative transition-colors ${
-                isActive ? 'bg-white/10 text-white' : 'text-gray-300 hover:bg-white/5 hover:text-white'
-              }`
-            }>
-            {({ isActive }) => (
-              <>
-                {isActive && <div className="absolute left-0 top-0 bottom-0 w-1 bg-brand-gold rounded-r-md" />}
-                <item.icon className={`mr-3 flex-shrink-0 h-5 w-5 ${isActive ? 'text-brand-gold' : 'text-gray-400 group-hover:text-gray-300'}`} />
-                {item.label}
-              </>
-            )}
-          </NavLink>
+          <SidebarNavLink key={item.to} item={item} onClose={onClose} />
         ))}
 
         {isAdmin && (
@@ -82,24 +106,18 @@ function SidebarContent({ onClose }: { onClose: () => void }) {
               <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Admin</p>
             </div>
             {adminItems.map((item) => (
-              <NavLink
-                key={item.to}
-                to={item.to}
-                end={item.exact}
-                onClick={onClose}
-                className={({ isActive }) =>
-                  `group flex items-center px-3 py-2.5 text-sm font-medium rounded-md relative transition-colors ${
-                    isActive ? 'bg-white/10 text-white' : 'text-gray-300 hover:bg-white/5 hover:text-white'
-                  }`
-                }>
-                {({ isActive }) => (
-                  <>
-                    {isActive && <div className="absolute left-0 top-0 bottom-0 w-1 bg-brand-gold rounded-r-md" />}
-                    <item.icon className={`mr-3 flex-shrink-0 h-5 w-5 ${isActive ? 'text-brand-gold' : 'text-gray-400 group-hover:text-gray-300'}`} />
-                    {item.label}
-                  </>
-                )}
-              </NavLink>
+              <SidebarNavLink key={item.to} item={item} onClose={onClose} />
+            ))}
+          </>
+        )}
+
+        {canOnboard && (
+          <>
+            <div className="mt-8 mb-4 px-3">
+              <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Onboarding</p>
+            </div>
+            {onboardingItems.map((item) => (
+              <SidebarNavLink key={item.to} item={item} onClose={onClose} />
             ))}
           </>
         )}

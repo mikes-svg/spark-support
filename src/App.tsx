@@ -6,7 +6,7 @@ import {
   Navigate,
 } from 'react-router-dom';
 import { AuthProvider, useAuth } from './context/AuthContext';
-import { isAdminRole, isSuperadminRole } from './types';
+import { isAdminRole, isSuperadminRole, hasOnboardingAccess } from './types';
 import { Layout } from './components/Layout';
 import { LoginPage } from './pages/LoginPage';
 import { DashboardPage } from './pages/DashboardPage';
@@ -20,15 +20,20 @@ const AdminDashboardPage = lazy(() => import('./pages/AdminDashboardPage').then(
 const AdminSettingsPage = lazy(() => import('./pages/AdminSettingsPage').then((m) => ({ default: m.AdminSettingsPage })));
 const TeamPage = lazy(() => import('./pages/TeamPage').then((m) => ({ default: m.TeamPage })));
 const AnalyticsPage = lazy(() => import('./pages/AnalyticsPage').then((m) => ({ default: m.AnalyticsPage })));
+const OnboardingMyTasksPage = lazy(() => import('./pages/OnboardingMyTasksPage').then((m) => ({ default: m.OnboardingMyTasksPage })));
+const OnboardingPropertiesPage = lazy(() => import('./pages/OnboardingPropertiesPage').then((m) => ({ default: m.OnboardingPropertiesPage })));
+const OnboardingTemplatePage = lazy(() => import('./pages/OnboardingTemplatePage').then((m) => ({ default: m.OnboardingTemplatePage })));
 
 function ProtectedRoute({
   children,
   requireAdmin = false,
   requireSuperadmin = false,
+  requireOnboarding = false,
 }: {
   children: React.ReactNode;
   requireAdmin?: boolean;
   requireSuperadmin?: boolean;
+  requireOnboarding?: boolean;
 }) {
   const { user, loading } = useAuth();
 
@@ -47,6 +52,9 @@ function ProtectedRoute({
     return <Navigate to="/" replace />;
   }
   if (requireAdmin && !isAdminRole(user.role)) {
+    return <Navigate to="/" replace />;
+  }
+  if (requireOnboarding && !hasOnboardingAccess(user)) {
     return <Navigate to="/" replace />;
   }
   return <>{children}</>;
@@ -100,6 +108,39 @@ export function App() {
               element={
                 <ProtectedRoute requireSuperadmin>
                   <AnalyticsPage />
+                </ProtectedRoute>
+              }
+            />
+
+            <Route
+              path="onboarding"
+              element={
+                <ProtectedRoute requireOnboarding>
+                  <OnboardingMyTasksPage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="onboarding/properties"
+              element={
+                <ProtectedRoute requireOnboarding>
+                  <OnboardingPropertiesPage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="onboarding/properties/:propertyId"
+              element={
+                <ProtectedRoute requireOnboarding>
+                  <OnboardingPropertiesPage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="onboarding/template"
+              element={
+                <ProtectedRoute requireSuperadmin>
+                  <OnboardingTemplatePage />
                 </ProtectedRoute>
               }
             />

@@ -10,7 +10,12 @@
  *   freshly submitted (reset createdAt, restore assignees to participants),
  *   log the 'created' audit event, and email the assignees.
  *
- * Both handlers commit all of a ticket's writes in a single atomic WriteBatch,
+ * - sendOnboardingReminders: runs every morning in the office timezone.
+ *   Collects every unfinished, past-due property-onboarding task and sends each
+ *   responsible person a single digest email grouped by property, so an aging
+ *   checklist nags once a day instead of once per row.
+ *
+ * Both ticket handlers commit all of a ticket's writes in a single atomic WriteBatch,
  * and isolate per-ticket failures, so a partial failure can't half-apply
  * (re-spamming reminders or dropping a scheduled ticket's notifications) and one
  * bad ticket can't abort the rest of the run.
@@ -143,6 +148,13 @@ exports.ensureProfile = onCall({ region: REGION }, async (request) => {
   const dupeRoles = dupes.map((d) => d.data().role);
   const role = highestRole([existing.role, allow, ...dupeRoles]);
 
+  // Carried through the same way role is: this write merges over the profile on
+  // every sign-in, and the client reads the section's visibility straight off
+  // the returned object — drop the flag here and a superadmin's grant (or one
+  // made on a pre-registration doc) silently disappears on the next sign-in.
+  const onboardingAccess = existing.onboardingAccess === true ||
+    dupes.some((d) => d.data().onboardingAccess === true);
+
   const dupeName = dupes.map((d) => d.data().name).find(Boolean);
   // Prefer the already-stored name over the Google token, so a superadmin's
   // Team-page rename sticks instead of being reset to the Google display name
@@ -151,7 +163,7 @@ exports.ensureProfile = onCall({ region: REGION }, async (request) => {
   const photoURL = token.picture || existing.photoURL ||
     `https://ui-avatars.com/api/?name=${encodeURIComponent(name)}&background=1B4332&color=D4A843`;
 
-  const data = { name, email, photoURL, role };
+  const data = { name, email, photoURL, role, onboardingAccess };
   if (firstTime) data.createdAt = admin.firestore.FieldValue.serverTimestamp();
   await profileRef.set(data, { merge: true });
 
@@ -162,7 +174,7 @@ exports.ensureProfile = onCall({ region: REGION }, async (request) => {
     await batch.commit();
   }
 
-  return { id: uid, name, email, photoURL, role };
+  return { id: uid, name, email, photoURL, role, onboardingAccess };
 });
 
 /**
@@ -355,6 +367,142 @@ exports.activateScheduledTickets = onSchedule(
     }
 
     logger.info(`Activated ${activated} scheduled tickets`);
+  }
+);
+
+// ─── Property onboarding reminders ───────────────────────────────────────────
+
+const ONBOARDING_TZ = 'America/Chicago';
+
+/**
+ * Today as 'YYYY-MM-DD' in the given timezone. Onboarding dates are calendar
+ * days stored as strings, so "today" has to be resolved in the office's zone —
+ * toISOString() would answer in UTC and roll the date over hours early.
+ */
+function todayInTimeZone(timeZone) {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(new Date());
+}
+
+/** Whole calendar days between two 'YYYY-MM-DD' strings (to - from). */
+function daysBetweenDateStrings(from, to) {
+  const [fy, fm, fd] = from.split('-').map(Number);
+  const [ty, tm, td] = to.split('-').map(Number);
+  return Math.round((Date.UTC(ty, tm - 1, td) - Date.UTC(fy, fm - 1, fd)) / 86400000);
+}
+
+/**
+ * Daily overdue digest for property onboarding. Sends ONE email per person
+ * listing every unfinished task of theirs whose due date has passed, grouped by
+ * property. A task with two responsible people appears in both digests; a
+ * person with nothing overdue gets no mail. Per-recipient failures are isolated
+ * so one bad address can't abort the run.
+ */
+exports.sendOnboardingReminders = onSchedule(
+  {
+    schedule: 'every day 07:00',
+    timeZone: ONBOARDING_TZ,
+    region: 'us-central1',
+  },
+  async () => {
+    const today = todayInTimeZone(ONBOARDING_TZ);
+
+    const tasksSnap = await db
+      .collection('onboardingTasks')
+      .where('status', 'in', ['Not Started', 'In Progress'])
+      .where('dueDate', '<', today)
+      .get();
+
+    // Strictly before today, matching isOverdue() in src/lib/onboarding.ts — a
+    // task due today is not yet late, and a digest that counted it would
+    // contradict the zero the app shows the recipient.
+    //
+    // Due dates are 'YYYY-MM-DD' STRINGS and Firestore orders null before every
+    // string, so the range above also returns every undated task. Filter them
+    // out here — without this, tasks that were never scheduled would be emailed
+    // as overdue every single morning, forever.
+    const dated = tasksSnap.docs.filter((d) => {
+      const dueDate = d.data().dueDate;
+      return typeof dueDate === 'string' && dueDate !== '';
+    });
+
+    // Resolve each referenced property once; archived and deleted properties
+    // drop out of the digest entirely.
+    const propertyIds = [...new Set(dated.map((d) => d.data().propertyId).filter(Boolean))];
+    const properties = new Map();
+    if (propertyIds.length) {
+      const refs = propertyIds.map((id) => db.collection('onboardingProperties').doc(id));
+      const snaps = await db.getAll(...refs);
+      for (const snap of snaps) {
+        if (snap.exists && snap.data().archived !== true) properties.set(snap.id, snap.data());
+      }
+    }
+
+    // person id -> overdue tasks
+    const byPerson = new Map();
+    let overdueCount = 0;
+    for (const doc of dated) {
+      const task = doc.data();
+      if (!properties.has(task.propertyId)) continue;
+      const responsibleIds = Array.isArray(task.responsibleIds) ? task.responsibleIds.filter(Boolean) : [];
+      if (responsibleIds.length === 0) continue;
+      overdueCount++;
+      for (const personId of responsibleIds) {
+        if (!byPerson.has(personId)) byPerson.set(personId, []);
+        byPerson.get(personId).push({ id: doc.id, ...task });
+      }
+    }
+
+    logger.info(`Onboarding digest: ${overdueCount} overdue tasks for ${byPerson.size} people`);
+
+    let sent = 0;
+
+    for (const [personId, tasks] of byPerson) {
+      try {
+        const [email] = await emailsForAssignees([personId]);
+        if (!email) continue;
+
+        const byProperty = new Map();
+        for (const task of tasks) {
+          if (!byProperty.has(task.propertyId)) byProperty.set(task.propertyId, []);
+          byProperty.get(task.propertyId).push(task);
+        }
+
+        const sections = [];
+        for (const [propertyId, propertyTasks] of byProperty) {
+          propertyTasks.sort((a, b) =>
+            a.dueDate === b.dueDate ? (a.order || 0) - (b.order || 0) : a.dueDate.localeCompare(b.dueDate)
+          );
+          const propertyName = escapeHtml(properties.get(propertyId).name);
+          const lines = propertyTasks.map((task) => {
+            const daysOverdue = daysBetweenDateStrings(task.dueDate, today);
+            const note = task.notes ? ` — ${escapeHtml(task.notes)}` : '';
+            return `<li>${escapeHtml(task.title)} — due ${escapeHtml(task.dueDate)}, ${daysOverdue} day${daysOverdue === 1 ? '' : 's'} overdue${note}</li>`;
+          });
+          sections.push(
+            `<p><strong>${propertyName}</strong></p><ul>${lines.join('')}</ul>` +
+            `<p><a href="${APP_URL}/onboarding/properties/${propertyId}">Open checklist →</a></p>`
+          );
+        }
+
+        await sendMail(
+          email,
+          `Onboarding: ${tasks.length} overdue task${tasks.length === 1 ? '' : 's'}`,
+          `<p>These onboarding tasks are past their due date:</p>${sections.join('')}` +
+          `<hr style="margin:16px 0;border:none;border-top:1px solid #e5e7eb"/>` +
+          `<p style="color:#9ca3af;font-size:12px">Please do not reply to this email.</p>`,
+        );
+        sent++;
+      } catch (err) {
+        logger.error(`Onboarding digest failed for ${personId}`, err);
+      }
+    }
+
+    logger.info(`Sent ${sent} onboarding digest emails`);
   }
 );
 

@@ -6,9 +6,9 @@ import { ConfirmModal } from '../components/ConfirmModal';
 import { Modal } from '../components/Modal';
 import { PageSpinner } from '../components/PageSpinner';
 import { Avatar } from '../components/Avatar';
-import { roleLabel } from '../types';
+import { roleLabel, isSuperadminRole } from '../types';
 
-interface Profile { id: string; name: string; email: string; photoURL: string; role: 'superadmin' | 'admin' | 'user'; }
+interface Profile { id: string; name: string; email: string; photoURL: string; role: 'superadmin' | 'admin' | 'user'; onboardingAccess?: boolean; }
 
 interface Permission {
   label: string;
@@ -55,6 +55,16 @@ const PERMISSIONS: PermissionSection[] = [
       { label: 'Set default assignees', super: true, admin: false, user: false },
       { label: 'Activate / deactivate categories', super: true, admin: false, user: false },
       { label: 'Delete categories', super: true, admin: false, user: false },
+    ],
+  },
+  {
+    title: 'Property Onboarding',
+    color: 'bg-purple-50 text-purple-800',
+    permissions: [
+      { label: 'View onboarding checklists', super: true, admin: false, user: false },
+      { label: 'Edit checklist rows & due dates', super: true, admin: false, user: false },
+      { label: 'Manage the checklist template', super: true, admin: false, user: false },
+      { label: 'Create & archive properties', super: true, admin: false, user: false },
     ],
   },
 ];
@@ -172,6 +182,20 @@ export function TeamPage() {
     }
   };
 
+  const toggleOnboardingAccess = async (profile: Profile) => {
+    if (isSuperadminRole(profile.role) || !db) return;
+    const next = !profile.onboardingAccess;
+    setActionError('');
+    setProfiles((prev) => prev.map((p) => p.id === profile.id ? { ...p, onboardingAccess: next } : p));
+    try {
+      await updateDoc(doc(db, 'profiles', profile.id), { onboardingAccess: next });
+    } catch (err) {
+      console.error('Failed to update onboarding access:', err);
+      setProfiles((prev) => prev.map((p) => p.id === profile.id ? { ...p, onboardingAccess: profile.onboardingAccess } : p));
+      setActionError('Could not update onboarding access. Please try again.');
+    }
+  };
+
   const handleInviteUser = async () => {
     if (!inviteForm.name.trim() || !inviteForm.email.trim()) return;
     setInviting(true);
@@ -278,7 +302,7 @@ export function TeamPage() {
         <div className="overflow-x-auto">
           <table className="min-w-full divide-y divide-gray-200">
             <thead className="bg-white">
-              <tr>{['Name', 'Email', 'Role', 'Actions'].map((h) => <th key={h} scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">{h}</th>)}</tr>
+              <tr>{['Name', 'Email', 'Role', 'Onboarding', 'Actions'].map((h) => <th key={h} scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">{h}</th>)}</tr>
             </thead>
             <tbody className="bg-white divide-y divide-gray-200">
               {profiles.map((profile) => (
@@ -304,6 +328,20 @@ export function TeamPage() {
                       <option value="admin">Manager</option>
                       <option value="superadmin">Administrator</option>
                     </select>
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap">
+                    <button
+                      onClick={() => toggleOnboardingAccess(profile)}
+                      disabled={isSuperadminRole(profile.role)}
+                      title={isSuperadminRole(profile.role) ? 'Administrators always have onboarding access' : undefined}
+                      className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium transition-colors ${
+                        isSuperadminRole(profile.role) || profile.onboardingAccess
+                          ? 'bg-green-100 text-green-800'
+                          : 'bg-gray-100 text-gray-800'
+                      } ${isSuperadminRole(profile.role) ? 'cursor-not-allowed opacity-70' : 'cursor-pointer hover:opacity-80'}`}
+                    >
+                      {isSuperadminRole(profile.role) || profile.onboardingAccess ? 'On' : 'Off'}
+                    </button>
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm font-medium space-x-3">
                     <button onClick={() => { setEditingUser(profile.id); setEditUserName(profile.name); }} className="text-gray-400 hover:text-brand-dark transition-colors inline-block">
@@ -344,6 +382,11 @@ export function TeamPage() {
                       <span className={`inline-block px-2.5 py-0.5 rounded-full text-xs font-semibold uppercase tracking-wider ${section.color}`}>
                         {section.title}
                       </span>
+                      {section.title === 'Property Onboarding' && (
+                        <p className="mt-2 text-xs text-gray-400">
+                          Managers and Users get the first two abilities only when granted Onboarding access above. Managing the template and creating or archiving properties stay Administrator-only.
+                        </p>
+                      )}
                     </td>
                   </tr>
                   {section.permissions.map((perm, idx) => (
