@@ -8,31 +8,75 @@ import {
   BarChart3,
   LogOut,
   X,
+  ClipboardList,
+  Building2,
+  LayoutTemplate,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
-import { roleLabel, isAdminRole, isSuperadminRole } from '../types';
+import { roleLabel, isAdminRole, isSuperadminRole, hasOnboardingAccess } from '../types';
 
 interface SidebarProps {
   isOpen: boolean;
   onClose: () => void;
 }
 
+interface NavItem {
+  to: string;
+  icon: typeof LayoutDashboard;
+  label: string;
+  exact?: boolean;
+  /** Overrides the accessible name when the visible label collides with another control. */
+  ariaLabel?: string;
+}
+
+function SidebarNavLink({ item, onClose }: { item: NavItem; onClose: () => void }) {
+  return (
+    <NavLink
+      to={item.to}
+      end={item.exact}
+      aria-label={item.ariaLabel}
+      onClick={onClose}
+      className={({ isActive }) =>
+        `group flex items-center px-3 py-2.5 text-sm font-medium rounded-md relative transition-colors ${
+          isActive ? 'bg-white/10 text-white' : 'text-gray-300 hover:bg-white/5 hover:text-white'
+        }`
+      }>
+      {({ isActive }) => (
+        <>
+          {isActive && <div className="absolute left-0 top-0 bottom-0 w-1 bg-brand-gold rounded-r-md" />}
+          <item.icon className={`mr-3 flex-shrink-0 h-5 w-5 ${isActive ? 'text-brand-gold' : 'text-gray-400 group-hover:text-gray-300'}`} />
+          {item.label}
+        </>
+      )}
+    </NavLink>
+  );
+}
+
 function SidebarContent({ onClose }: { onClose: () => void }) {
   const { user, logout } = useAuth();
   const isAdmin = isAdminRole(user?.role);
   const isSuperadmin = isSuperadminRole(user?.role);
+  const canOnboard = hasOnboardingAccess(user);
 
-  const navItems = [
+  const navItems: NavItem[] = [
     { to: '/', icon: LayoutDashboard, label: 'My Tickets', exact: true },
-    { to: '/submit', icon: PlusCircle, label: 'Submit Request' },
+    { to: '/submit', icon: PlusCircle, label: 'Submit Request', ariaLabel: 'Submit Request page' },
   ];
 
-  const adminItems = [
+  const adminItems: NavItem[] = [
     { to: '/admin', icon: TicketIcon, label: 'All Tickets', exact: true },
     ...(isSuperadmin ? [
       { to: '/admin/team', icon: Users, label: 'Team' },
       { to: '/admin/analytics', icon: BarChart3, label: 'Analytics' },
       { to: '/admin/settings', icon: Settings, label: 'Settings' },
+    ] : []),
+  ];
+
+  const onboardingItems: NavItem[] = [
+    { to: '/onboarding', icon: ClipboardList, label: 'My Tasks', exact: true },
+    { to: '/onboarding/properties', icon: Building2, label: 'Properties' },
+    ...(isSuperadmin ? [
+      { to: '/onboarding/template', icon: LayoutTemplate, label: 'Template' },
     ] : []),
   ];
 
@@ -42,64 +86,41 @@ function SidebarContent({ onClose }: { onClose: () => void }) {
         <div className="flex items-center gap-3">
           <img src="/spark-logo.png" alt="Spark Management" className="h-10 brightness-0 invert" />
           <div className="flex flex-col">
-            <span className="text-[10px] uppercase tracking-widest text-brand-gold font-semibold leading-none">Support</span>
-            <span className="text-[10px] uppercase tracking-widest text-gray-400 mt-1 leading-none">Portal</span>
+            <span className="text-[12px] uppercase tracking-widest text-brand-gold font-semibold leading-none">Support</span>
+            <span className="text-[12px] uppercase tracking-widest text-gray-300 mt-1 leading-none">Portal</span>
           </div>
         </div>
-        <button onClick={onClose} className="md:hidden p-1 text-gray-400 hover:text-white">
+        <button onClick={onClose} aria-label="Close sidebar" className="md:hidden flex items-center justify-center min-h-[44px] min-w-[44px] -mr-2 p-1 text-gray-400 hover:text-white">
           <X className="h-5 w-5" />
         </button>
       </div>
 
       <nav className="flex-1 px-3 py-4 space-y-1">
         <div className="mb-4 px-3">
-          <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider">User</p>
+          <p className="text-xs font-semibold text-gray-300 uppercase tracking-wider">User</p>
         </div>
         {navItems.map((item) => (
-          <NavLink
-            key={item.to}
-            to={item.to}
-            end={item.exact}
-            onClick={onClose}
-            className={({ isActive }) =>
-              `group flex items-center px-3 py-2.5 text-sm font-medium rounded-md relative transition-colors ${
-                isActive ? 'bg-white/10 text-white' : 'text-gray-300 hover:bg-white/5 hover:text-white'
-              }`
-            }>
-            {({ isActive }) => (
-              <>
-                {isActive && <div className="absolute left-0 top-0 bottom-0 w-1 bg-brand-gold rounded-r-md" />}
-                <item.icon className={`mr-3 flex-shrink-0 h-5 w-5 ${isActive ? 'text-brand-gold' : 'text-gray-400 group-hover:text-gray-300'}`} />
-                {item.label}
-              </>
-            )}
-          </NavLink>
+          <SidebarNavLink key={item.to} item={item} onClose={onClose} />
         ))}
 
         {isAdmin && (
           <>
             <div className="mt-8 mb-4 px-3">
-              <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Admin</p>
+              <p className="text-xs font-semibold text-gray-300 uppercase tracking-wider">Admin</p>
             </div>
             {adminItems.map((item) => (
-              <NavLink
-                key={item.to}
-                to={item.to}
-                end={item.exact}
-                onClick={onClose}
-                className={({ isActive }) =>
-                  `group flex items-center px-3 py-2.5 text-sm font-medium rounded-md relative transition-colors ${
-                    isActive ? 'bg-white/10 text-white' : 'text-gray-300 hover:bg-white/5 hover:text-white'
-                  }`
-                }>
-                {({ isActive }) => (
-                  <>
-                    {isActive && <div className="absolute left-0 top-0 bottom-0 w-1 bg-brand-gold rounded-r-md" />}
-                    <item.icon className={`mr-3 flex-shrink-0 h-5 w-5 ${isActive ? 'text-brand-gold' : 'text-gray-400 group-hover:text-gray-300'}`} />
-                    {item.label}
-                  </>
-                )}
-              </NavLink>
+              <SidebarNavLink key={item.to} item={item} onClose={onClose} />
+            ))}
+          </>
+        )}
+
+        {canOnboard && (
+          <>
+            <div className="mt-8 mb-4 px-3">
+              <p className="text-xs font-semibold text-gray-300 uppercase tracking-wider">Onboarding</p>
+            </div>
+            {onboardingItems.map((item) => (
+              <SidebarNavLink key={item.to} item={item} onClose={onClose} />
             ))}
           </>
         )}
@@ -115,10 +136,10 @@ function SidebarContent({ onClose }: { onClose: () => void }) {
             />
             <div className="ml-3 min-w-0">
               <p className="text-sm font-medium text-white truncate">{user?.name}</p>
-              <p className="text-xs font-medium text-gray-400">{roleLabel(user?.role)}</p>
+              <p className="text-xs font-medium text-gray-300">{roleLabel(user?.role)}</p>
             </div>
           </div>
-          <button onClick={logout} title="Sign out" className="ml-2 p-1.5 text-gray-400 hover:text-white transition-colors flex-shrink-0">
+          <button onClick={logout} title="Sign out" aria-label="Sign out" className="ml-2 flex items-center justify-center min-h-[44px] min-w-[44px] -mr-2 p-1.5 text-gray-400 hover:text-white transition-colors flex-shrink-0">
             <LogOut className="h-4 w-4" />
           </button>
         </div>

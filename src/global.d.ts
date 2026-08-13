@@ -13,4 +13,6 @@ interface ImportMetaEnv {
   readonly VITE_FIREBASE_MEASUREMENT_ID: string;
   readonly VITE_SUPERADMIN_EMAILS: string;
   readonly VITE_ADMIN_EMAILS: string;
+  /** QA-harness only; honoured solely by the dev server. See .env.e2e. */
+  readonly VITE_E2E_AUTH: string;
 }

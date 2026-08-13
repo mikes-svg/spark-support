@@ -80,6 +80,17 @@ export function TicketDetailPage() {
         if (!ticketDoc.exists()) { setLoading(false); return; }
         const ticketData = { id: ticketDoc.id, ...ticketDoc.data() } as Ticket;
         setTicket(ticketData);
+
+        // Attachments are listed via a participation-gated Cloud Function (storage
+        // rules deny direct client reads); it returns tokenized download URLs.
+        // Only requested once the ticket doc has actually loaded — calling it for a
+        // missing/inaccessible ticket just produces a 401.
+        if (functions) {
+          httpsCallable<{ ticketId: string }, Attachment[]>(functions, 'getTicketAttachments')({ ticketId: ticketDoc.id })
+            .then((res) => setAttachments(res.data))
+            .catch((err) => { console.warn('Failed to load attachments:', err); });
+        }
+
         const assigneeIds = getAssigneeIds(ticketData);
         const profileIds = [ticketData.submitterId, ...assigneeIds].filter(Boolean) as string[];
         const profileDocs = await Promise.all(profileIds.map((pid) => getDoc(doc(db!, 'profiles', pid))));
@@ -104,14 +115,6 @@ export function TicketDetailPage() {
       .then((snap) => setAllProfiles(snap.docs.map((d) => ({ id: d.id, ...d.data() } as Profile))))
       .catch(() => {});
 
-    // Attachments are listed via a participation-gated Cloud Function (storage
-    // rules deny direct client reads); it returns tokenized download URLs.
-    if (functions && id) {
-      httpsCallable<{ ticketId: string }, Attachment[]>(functions, 'getTicketAttachments')({ ticketId: id })
-        .then((res) => setAttachments(res.data))
-        .catch((err) => { console.warn('Failed to load attachments:', err); });
-    }
-
     let unsubscribe: (() => void) | undefined;
     try {
       const commentsQuery = query(collection(db!, 'comments'), where('ticketId', '==', id), orderBy('createdAt', 'asc'));
@@ -128,6 +131,11 @@ export function TicketDetailPage() {
             return updated;
           });
         }
+      }, (err) => {
+        // Stream-level failures (permission-denied, dropped Listen channel) are
+        // delivered here — without this handler Firestore rethrows them as an
+        // uncaught error on the page.
+        console.warn('Firestore comments listener failed:', err);
       });
     } catch (err) {
       console.warn('Firestore comments listener failed:', err);

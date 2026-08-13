@@ -4,9 +4,10 @@ import {
   Routes,
   Route,
   Navigate,
+  Link,
 } from 'react-router-dom';
 import { AuthProvider, useAuth } from './context/AuthContext';
-import { isAdminRole, isSuperadminRole } from './types';
+import { isAdminRole, isSuperadminRole, hasOnboardingAccess } from './types';
 import { Layout } from './components/Layout';
 import { LoginPage } from './pages/LoginPage';
 import { DashboardPage } from './pages/DashboardPage';
@@ -20,15 +21,20 @@ const AdminDashboardPage = lazy(() => import('./pages/AdminDashboardPage').then(
 const AdminSettingsPage = lazy(() => import('./pages/AdminSettingsPage').then((m) => ({ default: m.AdminSettingsPage })));
 const TeamPage = lazy(() => import('./pages/TeamPage').then((m) => ({ default: m.TeamPage })));
 const AnalyticsPage = lazy(() => import('./pages/AnalyticsPage').then((m) => ({ default: m.AnalyticsPage })));
+const OnboardingMyTasksPage = lazy(() => import('./pages/OnboardingMyTasksPage').then((m) => ({ default: m.OnboardingMyTasksPage })));
+const OnboardingPropertiesPage = lazy(() => import('./pages/OnboardingPropertiesPage').then((m) => ({ default: m.OnboardingPropertiesPage })));
+const OnboardingTemplatePage = lazy(() => import('./pages/OnboardingTemplatePage').then((m) => ({ default: m.OnboardingTemplatePage })));
 
 function ProtectedRoute({
   children,
   requireAdmin = false,
   requireSuperadmin = false,
+  requireOnboarding = false,
 }: {
   children: React.ReactNode;
   requireAdmin?: boolean;
   requireSuperadmin?: boolean;
+  requireOnboarding?: boolean;
 }) {
   const { user, loading } = useAuth();
 
@@ -49,7 +55,28 @@ function ProtectedRoute({
   if (requireAdmin && !isAdminRole(user.role)) {
     return <Navigate to="/" replace />;
   }
+  if (requireOnboarding && !hasOnboardingAccess(user)) {
+    return <Navigate to="/" replace />;
+  }
   return <>{children}</>;
+}
+
+function NotFoundPage() {
+  return (
+    <div className="text-center py-16">
+      <p className="text-sm font-medium text-gray-400">404</p>
+      <h2 className="mt-2 text-xl font-semibold text-brand-dark">Page not found</h2>
+      <p className="mt-2 text-sm text-gray-500">
+        The page you're looking for doesn't exist or may have moved.
+      </p>
+      <Link
+        to="/"
+        className="mt-5 inline-flex items-center px-5 py-2 text-sm font-medium rounded-lg bg-brand-dark text-white hover:bg-[#05391B] transition-colors"
+      >
+        Back to My Tickets
+      </Link>
+    </div>
+  );
 }
 
 export function App() {
@@ -103,6 +130,41 @@ export function App() {
                 </ProtectedRoute>
               }
             />
+
+            <Route
+              path="onboarding"
+              element={
+                <ProtectedRoute requireOnboarding>
+                  <OnboardingMyTasksPage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="onboarding/properties"
+              element={
+                <ProtectedRoute requireOnboarding>
+                  <OnboardingPropertiesPage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="onboarding/properties/:propertyId"
+              element={
+                <ProtectedRoute requireOnboarding>
+                  <OnboardingPropertiesPage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="onboarding/template"
+              element={
+                <ProtectedRoute requireSuperadmin>
+                  <OnboardingTemplatePage />
+                </ProtectedRoute>
+              }
+            />
+
+            <Route path="*" element={<NotFoundPage />} />
           </Route>
         </Routes>
       </Router>

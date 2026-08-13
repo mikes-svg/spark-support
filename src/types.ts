@@ -63,6 +63,78 @@ export interface Profile {
   photoURL: string;
   email?: string;
   role?: Role;
+  onboardingAccess?: boolean;
+}
+
+/**
+ * True if the user can see the Property Onboarding section. Superadmins always
+ * can; everyone else needs the flag granted on the Team page.
+ */
+export function hasOnboardingAccess(profile?: { role?: string | null; onboardingAccess?: boolean } | null): boolean {
+  if (!profile) return false;
+  return isSuperadminRole(profile.role) || profile.onboardingAccess === true;
+}
+
+// ─── Property onboarding ─────────────────────────────────────────────────────
+
+export type OnboardingStatus = 'Not Started' | 'In Progress' | 'Complete' | 'N/A';
+
+export const ONBOARDING_STATUSES: OnboardingStatus[] = ['Not Started', 'In Progress', 'Complete', 'N/A'];
+
+/** A row of the reusable checklist template that seeds every new property. */
+export interface OnboardingTemplateItem {
+  id: string;
+  section: string;
+  order: number;
+  code: string;
+  /** 1 renders as a sub-item of the row above (mirrors the sheet's indented rows). */
+  indent: 0 | 1;
+  title: string;
+  responsibleIds: string[];
+  /** Offset in days from the property's closing date; negative = before closing. */
+  daysFromClosing: number | null;
+}
+
+/** A property being onboarded — one "tab" in the UI. */
+export interface OnboardingProperty {
+  id: string;
+  name: string;
+  /** All property dates are 'YYYY-MM-DD' strings; see src/lib/dates.ts. */
+  closingDate: string | null;
+  psaExecutionDate: string | null;
+  titleCommitmentDate: string | null;
+  titleNoticeDate: string | null;
+  ddCompletionDate: string | null;
+  extension: string;
+  archived: boolean;
+  createdAt?: FsTimestamp;
+  createdBy?: string;
+}
+
+/** A record of a due date being pushed back, with the reason the owner gave. */
+export interface OnboardingDelay {
+  at: string;
+  byId: string;
+  fromDate: string | null;
+  toDate: string | null;
+  reason: string;
+}
+
+/** One checklist row on one property, instantiated from a template item. */
+export interface OnboardingTask {
+  id: string;
+  propertyId: string;
+  section: string;
+  order: number;
+  code: string;
+  indent: 0 | 1;
+  title: string;
+  responsibleIds: string[];
+  daysFromClosing: number | null;
+  dueDate: string | null;
+  status: OnboardingStatus;
+  notes: string;
+  delays?: OnboardingDelay[];
 }
 
 /** True if a ticket is scheduled for a future go-live and not yet live. */

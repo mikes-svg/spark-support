@@ -11,9 +11,11 @@ interface Props {
   /** compact: avatar stack only (for table rows); full: names as chips */
   variant?: 'compact' | 'full';
   placeholder?: string;
+  /** Shown when the list is empty. Onboarding picks from people with access, not admins. */
+  emptyLabel?: string;
 }
 
-export function AssigneeSelector({ value, onChange, admins, disabled, variant = 'full', placeholder = 'Unassigned' }: Props) {
+export function AssigneeSelector({ value, onChange, admins, disabled, variant = 'full', placeholder = 'Unassigned', emptyLabel = 'No admins available' }: Props) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
@@ -75,7 +77,7 @@ export function AssigneeSelector({ value, onChange, admins, disabled, variant = 
           {admins.length === 0 ? (
             <div className="flex items-center gap-2 px-3 py-3 text-sm text-gray-500">
               <Users className="h-4 w-4" />
-              No admins available
+              {emptyLabel}
             </div>
           ) : (
             admins.map((a) => {

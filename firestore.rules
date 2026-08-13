@@ -18,6 +18,13 @@ service cloud.firestore {
       return isSignedIn() && (role() == 'admin' || role() == 'superadmin');
     }
 
+    function hasOnboardingAccess() {
+      return isSignedIn() && (
+        role() == 'superadmin' ||
+        get(/databases/$(database)/documents/profiles/$(request.auth.uid)).data.onboardingAccess == true
+      );
+    }
+
     // True if the signed-in user is a participant of the given ticket. Used to
     // gate comments / audit events to the people who can see the ticket itself.
     function isTicketParticipant(ticketId) {
@@ -103,6 +110,24 @@ service cloud.firestore {
       allow update: if isSignedIn() && request.resource.data.count is int
         && request.resource.data.count > resource.data.count;
       allow delete: if false;
+    }
+
+    // Property onboarding. The split is deliberate: superadmins own the shape of
+    // the work — the master template and the property records themselves — while
+    // anyone granted onboarding access works the checklists day to day, so task
+    // status, notes, dates and responsibility are writable by the whole group.
+    match /onboardingTemplate/{itemId} {
+      allow read: if hasOnboardingAccess();
+      allow write: if isSuperAdmin();
+    }
+
+    match /onboardingProperties/{propertyId} {
+      allow read: if hasOnboardingAccess();
+      allow write: if isSuperAdmin();
+    }
+
+    match /onboardingTasks/{taskId} {
+      allow read, write: if hasOnboardingAccess();
     }
 
     // Email trigger queue (Firebase Trigger Email extension). All sends now come
