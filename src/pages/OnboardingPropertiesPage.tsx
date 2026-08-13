@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { doc, updateDoc, setDoc, serverTimestamp, collection } from 'firebase/firestore';
-import { Plus, Archive, ArchiveRestore, Trash2, Building2 } from 'lucide-react';
+import { Plus, Archive, ArchiveRestore, Trash2, Building2, LayoutTemplate } from 'lucide-react';
 import { db } from '../lib/firebase';
 import { useAuth } from '../context/AuthContext';
 import { isSuperadminRole, canEditOnboarding } from '../types';
@@ -22,6 +22,7 @@ import {
   createPropertyFromTemplate,
   applyClosingDate,
   deletePropertyWithTasks,
+  savePropertyChecklistAsTemplate,
   renameSection,
   deleteRows,
   computeDueDate,
@@ -66,6 +67,9 @@ export function OnboardingPropertiesPage() {
   const [deleteSectionTarget, setDeleteSectionTarget] = useState<string | null>(null);
   const [deletePropertyTarget, setDeletePropertyTarget] = useState<OnboardingProperty | null>(null);
   const [postponeTarget, setPostponeTarget] = useState<{ task: OnboardingTask; newDate: string | null } | null>(null);
+  const [saveTemplateTarget, setSaveTemplateTarget] = useState<OnboardingProperty | null>(null);
+  const [savingTemplate, setSavingTemplate] = useState(false);
+  const [successNotice, setSuccessNotice] = useState('');
 
   const visibleProperties = properties.filter((p) => showArchived || !p.archived);
   const property = properties.find((p) => p.id === propertyId) ?? null;
@@ -378,10 +382,31 @@ export function OnboardingPropertiesPage() {
     }
   };
 
+  const confirmSaveTemplate = async () => {
+    const target = saveTemplateTarget;
+    setSaveTemplateTarget(null);
+    if (!target) return;
+    setSavingTemplate(true);
+    setActionError('');
+    setSuccessNotice('');
+    try {
+      await savePropertyChecklistAsTemplate(tasks);
+      setSuccessNotice(`The checklist template was replaced with “${target.name}”. New properties will start from it; existing ones are unchanged.`);
+    } catch (err) {
+      console.error('Failed to save checklist as template:', err);
+      setActionError('Could not save this checklist as the template. Please try again.');
+    } finally {
+      setSavingTemplate(false);
+    }
+  };
+
   if (loading) return <PageSpinner />;
 
   return (
     <div className="space-y-6">
+      {successNotice && (
+        <p className="text-sm text-emerald-800 bg-emerald-50 border border-emerald-200 px-4 py-3 rounded-md" role="status">{successNotice}</p>
+      )}
       {[propertiesError, checklistError, actionError].filter(Boolean).map((message) => (
         <p key={message} className="text-sm text-red-700 bg-red-50 border border-red-200 px-4 py-3 rounded-md" role="alert">{message}</p>
       ))}
@@ -461,6 +486,15 @@ export function OnboardingPropertiesPage() {
               </div>
               {isSuperadmin && (
                 <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => { setSuccessNotice(''); setSaveTemplateTarget(property); }}
+                    disabled={savingTemplate || tasks.length === 0}
+                    title="Replace the master checklist template with this property's checklist"
+                    className="inline-flex items-center px-3 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 shadow-sm transition-colors disabled:opacity-50"
+                  >
+                    <LayoutTemplate className="h-4 w-4 mr-2" />
+                    {savingTemplate ? 'Saving…' : 'Save as Template'}
+                  </button>
                   <button
                     onClick={() => patchProperty(property, { archived: !property.archived })}
                     className="inline-flex items-center px-3 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 shadow-sm transition-colors"
@@ -599,6 +633,19 @@ export function OnboardingPropertiesPage() {
         initialDate={postponeTarget?.newDate ?? null}
         onCancel={() => setPostponeTarget(null)}
         onConfirm={confirmPostpone}
+      />
+
+      <ConfirmModal
+        open={!!saveTemplateTarget}
+        title="Save Checklist as Template"
+        message={
+          saveTemplateTarget
+            ? `Replace the master checklist template with “${saveTemplateTarget.name}”'s checklist (${tasks.length} rows)? The sections, items, responsibilities, and days-from-closing carry over — notes, statuses, and due dates are cleared. This overwrites the current template and can't be undone, but existing properties keep their checklists.`
+            : ''
+        }
+        confirmLabel="Replace Template"
+        onConfirm={confirmSaveTemplate}
+        onCancel={() => setSaveTemplateTarget(null)}
       />
 
       <ConfirmModal

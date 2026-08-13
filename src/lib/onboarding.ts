@@ -200,6 +200,56 @@ export async function deletePropertyWithTasks(propertyId: string, tasks: Onboard
   await batch.commit();
 }
 
+/**
+ * Replace the master template with a property's current checklist structure.
+ * Only the reusable shape carries over — section, order, code, indent, title,
+ * responsibility, and days-from-closing; the per-property notes, statuses, due
+ * dates, and delay history are dropped, since a template is a clean starting
+ * point. Existing properties are untouched; only ones created afterward inherit
+ * this. Returns the new template items for optimistic rendering.
+ */
+export async function savePropertyChecklistAsTemplate(tasks: OnboardingTask[]): Promise<OnboardingTemplateItem[]> {
+  if (!db) throw new Error('Firestore is not configured.');
+  const existing = await getDocs(collection(db, TEMPLATE));
+
+  const items: OnboardingTemplateItem[] = [...tasks]
+    .sort((a, b) => a.order - b.order)
+    .map((t) => ({
+      id: doc(collection(db!, TEMPLATE)).id,
+      section: t.section,
+      order: t.order,
+      code: t.code ?? '',
+      indent: t.indent,
+      title: t.title,
+      responsibleIds: t.responsibleIds ?? [],
+      daysFromClosing: t.daysFromClosing ?? null,
+    }));
+
+  // A checklist is well under 500 rows, so the swap — delete the old template
+  // and write the new one — fits a single atomic batch: no window where the
+  // collection is empty (which would let a concurrent open re-seed defaults)
+  // or holds duplicates. Fall back to create-then-delete only if it can't.
+  if (existing.size + items.length <= 450) {
+    const batch = writeBatch(db);
+    existing.docs.forEach((d) => batch.delete(d.ref));
+    items.forEach((item) => {
+      const { id, ...data } = item;
+      batch.set(doc(db!, TEMPLATE, id), { ...data, createdAt: serverTimestamp() });
+    });
+    await batch.commit();
+  } else {
+    // Create first so the template is never empty (an empty collection would
+    // re-seed the defaults if the Template page loaded mid-swap).
+    await commitChunks(items, (batch, item) => {
+      const { id, ...data } = item;
+      batch.set(doc(db!, TEMPLATE, id), { ...data, createdAt: serverTimestamp() });
+    });
+    await commitChunks(existing.docs, (batch, d) => batch.delete(d.ref));
+  }
+
+  return items;
+}
+
 /** Rename a section across every row that belongs to it. */
 export async function renameSection(
   collectionName: string,
