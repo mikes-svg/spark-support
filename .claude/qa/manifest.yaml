@@ -14,6 +14,15 @@
 # a real break. Re-enable it once the harness can authenticate for real.
 #
 # Flows whose URL carries ?e2eSignedOut audit the signed-out state instead.
+#
+# SELECTOR NOTE: the sidebar renders a desktop copy (`hidden md:flex`, i.e.
+# display:none below 768px) that stays in the DOM at narrow widths. Playwright's
+# text selectors take `.first()` in DOM order and do NOT skip display:none, so a
+# bare `text=<nav label>` assertion resolves to that invisible copy and an
+# assert-visible on it times out even though the page is fine. So at stress/mobile
+# these flows assert on page-BODY text that the sidebar does not also contain, and
+# nav-click coverage lives in `sidebar-navigation` at laptop, where the rail is
+# always visible.
 
 app:
   url: http://localhost:5177
@@ -31,6 +40,11 @@ app:
     - "Failed to load"
     - "Failed to fetch"
     - "installations/request-failed"
+    # The Firestore SDK's long-poll auto-detect probe fires a Listen channel on
+    # pages with no onSnapshot; under the credential-less harness user it 403s as
+    # an uncaught pageerror no app handler can catch. Expected in e2e mode only.
+    - "Firestore/Listen/channel"
+    - "due to access control checks"
 
 flows:
   # ── New feature: Property Onboarding ──────────────────────────────────────
@@ -39,9 +53,9 @@ flows:
     critical: true
     viewports: [stress, mobile, laptop]
     steps:
-      - assert-visible: "text=Property Onboarding"
-      - assert-visible: "text=New Property"
+      # Body-unique text (see SELECTOR NOTE); "Property Onboarding" is header-only.
       - assert-visible: "text=No property selected"
+      - assert-visible: "text=New Property"
     checks:
       - page-loads
       - no-console-errors
@@ -58,7 +72,8 @@ flows:
     critical: true
     viewports: [stress, mobile, laptop]
     steps:
-      - assert-visible: "text=Checklist Template"
+      # Body text (see SELECTOR NOTE); "Checklist Template" is header-only.
+      - assert-visible: "text=master checklist"
       - assert-visible: "text=Add Section"
     checks:
       - page-loads
@@ -76,7 +91,8 @@ flows:
     critical: true
     viewports: [stress, mobile, laptop]
     steps:
-      - assert-visible: "text=My Tasks"
+      # Subtitle text (see SELECTOR NOTE); "My Tasks" also lives in the sidebar.
+      - assert-visible: "text=sorted by urgency"
     checks:
       - page-loads
       - no-console-errors
@@ -109,21 +125,24 @@ flows:
   # ── Regression: surfaces this branch modified ─────────────────────────────
   # The Sidebar's repeated NavLink markup was extracted into one shared
   # component driving all three nav groups — the highest regression risk here.
+  # Laptop only: the persistent desktop rail is always visible there, so nav
+  # clicks resolve unambiguously. At narrow widths the nav is a drawer whose
+  # duplicated DOM breaks text selectors (see SELECTOR NOTE); that interaction
+  # is a known coverage gap pending a visible-only selector in the harness.
   - name: sidebar-navigation
     starting_url: /
     critical: true
-    viewports: [stress, mobile, laptop]
+    viewports: [laptop]
     steps:
       - assert-visible: "text=Submit Request"
-      - assert-visible: "text=Onboarding"
       - click: "text=Properties"
-      - assert-visible: "text=Property Onboarding"
+      - assert-visible: "text=No property selected"
       - click: "text=My Tasks"
-      - assert-visible: "text=My Tasks"
+      - assert-visible: "text=sorted by urgency"
       - click: "text=Template"
-      - assert-visible: "text=Checklist Template"
+      - assert-visible: "text=master checklist"
       - click: "text=All Tickets"
-      - assert-visible: "text=All Tickets"
+      - assert-visible: "text=Reset Filters"
       - click: "text=Team"
       - assert-visible: "text=Manage Users"
     checks:
@@ -139,12 +158,17 @@ flows:
     starting_url: /admin/team
     viewports: [stress, mobile, laptop]
     steps:
+      # "Property Onboarding" (permissions matrix) is body-unique; bare
+      # "Onboarding" also matches the sidebar group (see SELECTOR NOTE).
       - assert-visible: "text=Manage Users"
-      - assert-visible: "text=Onboarding"
       - assert-visible: "text=Role Permissions"
       - assert-visible: "text=Property Onboarding"
       - click: "text=Add User"
       - assert-visible: "text=Add New User"
+      # Close the modal so buttons-clickable doesn't flag the backdrop-covered
+      # nav behind it (a modal backdrop intercepting clicks is correct behaviour).
+      - press: "Escape"
+      - wait-for: 300
     checks:
       - page-loads
       - no-console-errors
@@ -158,11 +182,12 @@ flows:
     starting_url: /
     viewports: [stress, mobile, laptop]
     steps:
-      - assert-visible: "text=My Tickets"
+      # Body headings/CTAs, not sidebar labels (see SELECTOR NOTE).
+      - assert-visible: "text=Overview"
       - goto: /admin
-      - assert-visible: "text=All Tickets"
+      - assert-visible: "text=Reset Filters"
       - goto: /submit
-      - assert-visible: "text=Submit Request"
+      - assert-visible: "text=Submit New Request"
     checks:
       - page-loads
       - no-console-errors
