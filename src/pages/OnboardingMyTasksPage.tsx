@@ -4,7 +4,7 @@ import { collection, doc, query, where, orderBy, getDocs, updateDoc, serverTimes
 import { ClipboardList, Clock } from 'lucide-react';
 import { db } from '../lib/firebase';
 import { useAuth } from '../context/AuthContext';
-import { ONBOARDING_STATUSES } from '../types';
+import { ONBOARDING_STATUSES, canEditOnboarding } from '../types';
 import type { OnboardingProperty, OnboardingTask, OnboardingStatus } from '../types';
 import { PageSpinner } from '../components/PageSpinner';
 import { PostponeModal } from '../components/onboarding/PostponeModal';
@@ -32,9 +32,13 @@ function dueHint(dueDate: string | null, today: string): string {
  * commits on blur or Enter, so a slow Firestore write never fights the cursor.
  * (Local equivalent of ChecklistTable's EditableText, which isn't exported.)
  */
-function EditableNotes({ value, onCommit }: { value: string; onCommit: (next: string) => void }) {
+function EditableNotes({ value, onCommit, disabled }: { value: string; onCommit: (next: string) => void; disabled?: boolean }) {
   const [draft, setDraft] = useState(value);
   useEffect(() => setDraft(value), [value]);
+
+  if (disabled) {
+    return <span className="block px-2 py-1 text-sm text-gray-600">{value || '—'}</span>;
+  }
 
   const commit = () => {
     const next = draft.trim();
@@ -59,6 +63,9 @@ function EditableNotes({ value, onCommit }: { value: string; onCommit: (next: st
 
 export function OnboardingMyTasksPage() {
   const { user } = useAuth();
+  // Managers can see their assigned tasks but not change them; superadmins and
+  // granted users can update status, notes, and dates.
+  const canEdit = canEditOnboarding(user);
 
   const [tasks, setTasks] = useState<OnboardingTask[]>([]);
   const [properties, setProperties] = useState<Map<string, OnboardingProperty>>(new Map());
@@ -289,8 +296,9 @@ export function OnboardingMyTasksPage() {
                           <input
                             type="date"
                             value={task.dueDate ?? ''}
+                            disabled={!canEdit}
                             onChange={(e) => handleDueDateChange(task, e.target.value || null)}
-                            className={`bg-transparent border border-transparent rounded px-2 py-1 text-sm hover:border-gray-300 focus:border-brand-dark focus:bg-white focus:outline-none focus:ring-1 focus:ring-brand-dark ${
+                            className={`bg-transparent border border-transparent rounded px-2 py-1 text-sm hover:border-gray-300 focus:border-brand-dark focus:bg-white focus:outline-none focus:ring-1 focus:ring-brand-dark disabled:hover:border-transparent ${
                               overdue ? 'text-red-700 font-bold' : 'text-gray-700'
                             }`}
                           />
@@ -313,8 +321,9 @@ export function OnboardingMyTasksPage() {
                       <td className="px-4 py-2 align-top">
                         <select
                           value={task.status}
+                          disabled={!canEdit}
                           onChange={(e) => patchTask(task, { status: e.target.value as OnboardingStatus })}
-                          className={`rounded-full border px-2.5 py-1 text-xs font-medium focus:outline-none focus:ring-2 focus:ring-brand-dark ${STATUS_STYLES[task.status]}`}
+                          className={`rounded-full border px-2.5 py-1 text-xs font-medium focus:outline-none focus:ring-2 focus:ring-brand-dark disabled:cursor-default ${STATUS_STYLES[task.status]}`}
                         >
                           {ONBOARDING_STATUSES.map((s) => (
                             <option key={s} value={s}>{s}</option>
@@ -322,7 +331,7 @@ export function OnboardingMyTasksPage() {
                         </select>
                       </td>
                       <td className="px-4 py-2 align-top min-w-[12rem]">
-                        <EditableNotes value={task.notes ?? ''} onCommit={(notes) => patchTask(task, { notes })} />
+                        <EditableNotes value={task.notes ?? ''} disabled={!canEdit} onCommit={(notes) => patchTask(task, { notes })} />
                       </td>
                     </tr>
                   );

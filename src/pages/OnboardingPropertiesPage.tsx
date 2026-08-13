@@ -4,7 +4,7 @@ import { doc, updateDoc, setDoc, serverTimestamp, collection } from 'firebase/fi
 import { Plus, Archive, ArchiveRestore, Trash2, Building2 } from 'lucide-react';
 import { db } from '../lib/firebase';
 import { useAuth } from '../context/AuthContext';
-import { isSuperadminRole } from '../types';
+import { isSuperadminRole, canEditOnboarding } from '../types';
 import type { OnboardingProperty, OnboardingTask, Profile } from '../types';
 import { PageSpinner } from '../components/PageSpinner';
 import { Modal } from '../components/Modal';
@@ -44,6 +44,8 @@ export function OnboardingPropertiesPage() {
   const navigate = useNavigate();
   const { user } = useAuth();
   const isSuperadmin = isSuperadminRole(user?.role);
+  // Managers see the checklist read-only; superadmins and granted users can edit.
+  const canEdit = canEditOnboarding(user);
 
   const [properties, setProperties] = useState<OnboardingProperty[]>([]);
   const [people, setPeople] = useState<Profile[]>([]);
@@ -535,7 +537,7 @@ export function OnboardingPropertiesPage() {
               people={people}
               mode="property"
               closingDate={property.closingDate}
-              canEdit
+              canEdit={canEdit}
               onPatchRow={handlePatchRow}
               onDueDateChange={handleDueDateChange}
               onAddRow={addRow}

@@ -67,10 +67,22 @@ export interface Profile {
 }
 
 /**
- * True if the user can see the Property Onboarding section. Superadmins always
- * can; everyone else needs the flag granted on the Team page.
+ * True if the user can SEE the Property Onboarding section (read-only is enough).
+ * Administrators and Managers get view access from their role; Users need the
+ * onboardingAccess flag granted on the Team page.
  */
 export function hasOnboardingAccess(profile?: { role?: string | null; onboardingAccess?: boolean } | null): boolean {
+  if (!profile) return false;
+  return isAdminRole(profile.role) || profile.onboardingAccess === true;
+}
+
+/**
+ * True if the user can EDIT onboarding checklists (statuses, notes, dates, rows).
+ * Administrators can (superadmin), as can anyone explicitly granted the flag.
+ * Managers get view access via [[hasOnboardingAccess]] but NOT edit unless the
+ * flag is also granted to them.
+ */
+export function canEditOnboarding(profile?: { role?: string | null; onboardingAccess?: boolean } | null): boolean {
   if (!profile) return false;
   return isSuperadminRole(profile.role) || profile.onboardingAccess === true;
 }
