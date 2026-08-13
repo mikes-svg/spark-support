@@ -82,6 +82,7 @@ function Cell({ allowed }: { allowed: boolean }) {
 export function TeamPage() {
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
   const [actionError, setActionError] = useState('');
   const [showInviteModal, setShowInviteModal] = useState(false);
   const [inviteForm, setInviteForm] = useState({ name: '', email: '', role: 'user' as Profile['role'] });
@@ -105,6 +106,7 @@ export function TeamPage() {
         setProfiles(snap.docs.map((d) => ({ id: d.id, ...d.data() } as Profile)));
       } catch (err) {
         console.error('Failed to fetch team:', err);
+        setLoadError(true);
       } finally {
         setLoading(false);
       }
@@ -278,6 +280,59 @@ export function TeamPage() {
 
   if (loading) return <PageSpinner />;
 
+  const emptyMessage = loadError
+    ? "Couldn't load team members. Check your connection and refresh."
+    : 'No users yet. Click “Add User” to invite someone.';
+
+  const renderNameCell = (profile: Profile) => (
+    <div className="flex items-center">
+      <Avatar className="h-8 w-8 rounded-full mr-3" src={profile.photoURL} name={profile.name} />
+      {editingUser === profile.id ? (
+        <div className="flex items-center gap-1">
+          <input type="text" value={editUserName} onChange={(e) => setEditUserName(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') saveUserName(profile); if (e.key === 'Escape') setEditingUser(null); }} className="border border-gray-300 rounded px-2 py-1 text-sm w-40 focus:outline-none focus:ring-2 focus:ring-brand-dark" autoFocus />
+          <button onClick={() => saveUserName(profile)} className="text-green-600 hover:text-green-700"><Check className="h-4 w-4" /></button>
+          <button onClick={() => setEditingUser(null)} className="text-gray-400 hover:text-gray-600"><X className="h-4 w-4" /></button>
+        </div>
+      ) : (
+        <div className="text-sm font-medium text-gray-900">{profile.name}</div>
+      )}
+    </div>
+  );
+
+  const renderRoleSelect = (profile: Profile) => (
+    <select value={profile.role} onChange={(e) => requestRoleChange(profile, e.target.value as Profile['role'])} className="border border-gray-300 rounded-md px-2 py-1 text-xs font-medium focus:outline-none focus:ring-2 focus:ring-brand-dark bg-white">
+      <option value="user">User</option>
+      <option value="admin">Manager</option>
+      <option value="superadmin">Administrator</option>
+    </select>
+  );
+
+  const renderOnboardingToggle = (profile: Profile) => (
+    <button
+      onClick={() => toggleOnboardingAccess(profile)}
+      disabled={isSuperadminRole(profile.role)}
+      title={isSuperadminRole(profile.role) ? 'Administrators always have onboarding access' : undefined}
+      className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium transition-colors ${
+        isSuperadminRole(profile.role) || profile.onboardingAccess
+          ? 'bg-green-100 text-green-800'
+          : 'bg-gray-100 text-gray-800'
+      } ${isSuperadminRole(profile.role) ? 'cursor-not-allowed opacity-70' : 'cursor-pointer hover:opacity-80'}`}
+    >
+      {isSuperadminRole(profile.role) || profile.onboardingAccess ? 'On' : 'Off'}
+    </button>
+  );
+
+  const renderRowActions = (profile: Profile) => (
+    <>
+      <button onClick={() => { setEditingUser(profile.id); setEditUserName(profile.name); }} className="text-gray-400 hover:text-brand-dark transition-colors inline-block">
+        <Edit2 className="h-4 w-4" />
+      </button>
+      <button onClick={() => setDeleteTarget(profile)} className="text-red-400 hover:text-red-600 transition-colors inline-block">
+        <Trash2 className="h-4 w-4" />
+      </button>
+    </>
+  );
+
   return (
     <div className="space-y-8 max-w-5xl mx-auto">
       {actionError && (
@@ -299,58 +354,46 @@ export function TeamPage() {
             </button>
           </div>
         </div>
-        <div className="overflow-x-auto">
+        {/* Stacked cards on narrow screens so Onboarding & Actions stay discoverable */}
+        <ul className="divide-y divide-gray-200 sm:hidden">
+          {profiles.length === 0 && (
+            <li className={`px-4 py-12 text-center text-sm ${loadError ? 'text-red-600' : 'text-gray-500'}`}>{emptyMessage}</li>
+          )}
+          {profiles.map((profile) => (
+            <li key={profile.id} className="px-4 py-4 space-y-3">
+              {renderNameCell(profile)}
+              <p className="text-sm text-gray-500 break-all">{profile.email}</p>
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-xs font-medium text-gray-500 uppercase tracking-wider">Role</span>
+                {renderRoleSelect(profile)}
+              </div>
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-xs font-medium text-gray-500 uppercase tracking-wider">Onboarding</span>
+                {renderOnboardingToggle(profile)}
+              </div>
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</span>
+                <span className="space-x-3 text-sm font-medium">{renderRowActions(profile)}</span>
+              </div>
+            </li>
+          ))}
+        </ul>
+        <div className="hidden sm:block overflow-x-auto">
           <table className="min-w-full divide-y divide-gray-200">
             <thead className="bg-white">
               <tr>{['Name', 'Email', 'Role', 'Onboarding', 'Actions'].map((h) => <th key={h} scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">{h}</th>)}</tr>
             </thead>
             <tbody className="bg-white divide-y divide-gray-200">
+              {profiles.length === 0 && (
+                <tr><td colSpan={5} className={`px-6 py-12 text-center text-sm ${loadError ? 'text-red-600' : 'text-gray-500'}`}>{emptyMessage}</td></tr>
+              )}
               {profiles.map((profile) => (
                 <tr key={profile.id}>
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    <div className="flex items-center">
-                      <Avatar className="h-8 w-8 rounded-full mr-3" src={profile.photoURL} name={profile.name} />
-                      {editingUser === profile.id ? (
-                        <div className="flex items-center gap-1">
-                          <input type="text" value={editUserName} onChange={(e) => setEditUserName(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') saveUserName(profile); if (e.key === 'Escape') setEditingUser(null); }} className="border border-gray-300 rounded px-2 py-1 text-sm w-40 focus:outline-none focus:ring-2 focus:ring-brand-dark" autoFocus />
-                          <button onClick={() => saveUserName(profile)} className="text-green-600 hover:text-green-700"><Check className="h-4 w-4" /></button>
-                          <button onClick={() => setEditingUser(null)} className="text-gray-400 hover:text-gray-600"><X className="h-4 w-4" /></button>
-                        </div>
-                      ) : (
-                        <div className="text-sm font-medium text-gray-900">{profile.name}</div>
-                      )}
-                    </div>
-                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap">{renderNameCell(profile)}</td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{profile.email}</td>
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    <select value={profile.role} onChange={(e) => requestRoleChange(profile, e.target.value as Profile['role'])} className="border border-gray-300 rounded-md px-2 py-1 text-xs font-medium focus:outline-none focus:ring-2 focus:ring-brand-dark bg-white">
-                      <option value="user">User</option>
-                      <option value="admin">Manager</option>
-                      <option value="superadmin">Administrator</option>
-                    </select>
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    <button
-                      onClick={() => toggleOnboardingAccess(profile)}
-                      disabled={isSuperadminRole(profile.role)}
-                      title={isSuperadminRole(profile.role) ? 'Administrators always have onboarding access' : undefined}
-                      className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium transition-colors ${
-                        isSuperadminRole(profile.role) || profile.onboardingAccess
-                          ? 'bg-green-100 text-green-800'
-                          : 'bg-gray-100 text-gray-800'
-                      } ${isSuperadminRole(profile.role) ? 'cursor-not-allowed opacity-70' : 'cursor-pointer hover:opacity-80'}`}
-                    >
-                      {isSuperadminRole(profile.role) || profile.onboardingAccess ? 'On' : 'Off'}
-                    </button>
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm font-medium space-x-3">
-                    <button onClick={() => { setEditingUser(profile.id); setEditUserName(profile.name); }} className="text-gray-400 hover:text-brand-dark transition-colors inline-block">
-                      <Edit2 className="h-4 w-4" />
-                    </button>
-                    <button onClick={() => setDeleteTarget(profile)} className="text-red-400 hover:text-red-600 transition-colors inline-block">
-                      <Trash2 className="h-4 w-4" />
-                    </button>
-                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap">{renderRoleSelect(profile)}</td>
+                  <td className="px-6 py-4 whitespace-nowrap">{renderOnboardingToggle(profile)}</td>
+                  <td className="px-6 py-4 whitespace-nowrap text-sm font-medium space-x-3">{renderRowActions(profile)}</td>
                 </tr>
               ))}
             </tbody>
@@ -428,7 +471,7 @@ export function TeamPage() {
                   <option value="superadmin">Administrator</option>
                 </select>
               </div>
-              <p className="text-xs text-gray-400">Pre-register a user and set their role. They'll sign in with Google when ready.</p>
+              <p className="text-xs text-gray-500">Pre-register a user and set their role. They'll sign in with Google when ready.</p>
             </div>
             <div className="px-6 py-4 border-t border-gray-200 flex justify-end gap-3">
               <button onClick={() => { setShowInviteModal(false); setInviteError(''); }} className="px-4 py-2 text-sm font-medium text-gray-700 hover:text-gray-900">Cancel</button>

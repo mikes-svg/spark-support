@@ -64,6 +64,9 @@ export function OnboardingMyTasksPage() {
   const [properties, setProperties] = useState<Map<string, OnboardingProperty>>(new Map());
   const [loading, setLoading] = useState(true);
   const [actionError, setActionError] = useState('');
+  const [loadError, setLoadError] = useState('');
+  // Bumping this re-runs the load effect, which is what the error banner's Retry does.
+  const [reloadKey, setReloadKey] = useState(0);
   const [showCompleted, setShowCompleted] = useState(false);
   const [postponeTarget, setPostponeTarget] = useState<{ task: OnboardingTask; newDate: string | null } | null>(null);
 
@@ -73,6 +76,7 @@ export function OnboardingMyTasksPage() {
     if (!user) return;
     let cancelled = false;
     setLoading(true);
+    setLoadError('');
     (async () => {
       try {
         const props = await fetchProperties();
@@ -97,10 +101,10 @@ export function OnboardingMyTasksPage() {
         console.error('Failed to load My Tasks:', err);
         const code = String((err as { code?: string }).code || '');
         if (!cancelled) {
-          setActionError(
+          setLoadError(
             code === 'failed-precondition'
               ? 'This view needs a database index that has not finished deploying yet. Please try again shortly.'
-              : 'Could not load your tasks. Please refresh.'
+              : 'Could not load your tasks.'
           );
         }
       } finally {
@@ -108,7 +112,7 @@ export function OnboardingMyTasksPage() {
       }
     })();
     return () => { cancelled = true; };
-  }, [user]);
+  }, [user, reloadKey]);
 
   /** Optimistically apply a task patch, rolling back if the write fails. */
   const patchTask = async (task: OnboardingTask, patch: Partial<OnboardingTask>) => {
@@ -178,14 +182,28 @@ export function OnboardingMyTasksPage() {
 
   return (
     <div className="space-y-6">
+      {loadError && (
+        <div
+          className="flex flex-wrap items-center justify-between gap-3 text-sm text-red-700 bg-red-50 border border-red-200 px-4 py-3 rounded-md"
+          role="alert"
+        >
+          <span>{loadError}</span>
+          <button
+            type="button"
+            onClick={() => setReloadKey((k) => k + 1)}
+            className="inline-flex items-center px-3 py-1.5 text-sm font-medium rounded-md border border-red-300 bg-white text-red-700 hover:bg-red-100 transition-colors"
+          >
+            Retry
+          </button>
+        </div>
+      )}
       {actionError && (
         <p className="text-sm text-red-700 bg-red-50 border border-red-200 px-4 py-3 rounded-md" role="alert">{actionError}</p>
       )}
 
-      <div>
-        <h1 className="text-2xl font-serif font-semibold text-gray-900">My Tasks</h1>
-        <p className="mt-1 text-sm text-gray-500">Your onboarding tasks across every property, sorted by urgency.</p>
-      </div>
+      {/* The page title itself lives in the app header — this is only its subtitle,
+          so the screen keeps a single primary heading. */}
+      <p className="text-sm text-gray-600">Your onboarding tasks across every property, sorted by urgency.</p>
 
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <div className="bg-white shadow-sm rounded-xl border border-gray-200 p-4">
@@ -193,8 +211,8 @@ export function OnboardingMyTasksPage() {
           <p className="mt-1 text-2xl font-serif font-semibold text-red-600">{overdueCount}</p>
         </div>
         <div className="bg-white shadow-sm rounded-xl border border-gray-200 p-4">
-          <p className="text-xs font-medium text-amber-600 uppercase tracking-wider">Due soon</p>
-          <p className="mt-1 text-2xl font-serif font-semibold text-amber-600">{dueSoonCount}</p>
+          <p className="text-xs font-medium text-amber-700 uppercase tracking-wider">Due soon</p>
+          <p className="mt-1 text-2xl font-serif font-semibold text-amber-700">{dueSoonCount}</p>
         </div>
         <div className="bg-white shadow-sm rounded-xl border border-gray-200 p-4">
           <p className="text-xs font-medium text-gray-500 uppercase tracking-wider">Open total</p>

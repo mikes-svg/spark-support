@@ -657,14 +657,14 @@ function TrendChart({ data }: { data: { date: Date; opened: number; resolved: nu
         ))}
         {/* y-axis labels */}
         {[0, 0.5, 1].map((f) => (
-          <text key={f} x={pad.l - 6} y={pad.t + innerH * (1 - f) + 3} fontSize="10" textAnchor="end" fill="#9ca3af">
+          <text key={f} x={pad.l - 6} y={pad.t + innerH * (1 - f) + 4} fontSize="12" textAnchor="end" fill="#9ca3af">
             {Math.round(max * f)}
           </text>
         ))}
         {/* x-axis labels */}
         {data.map((d, i) =>
           i % tickStep === 0 || i === data.length - 1 ? (
-            <text key={i} x={x(i)} y={h - 8} fontSize="10" textAnchor="middle" fill="#9ca3af">
+            <text key={i} x={x(i)} y={h - 8} fontSize="12" textAnchor="middle" fill="#9ca3af">
               {d.date.toLocaleDateString([], { month: 'short', day: 'numeric' })}
             </text>
           ) : null,

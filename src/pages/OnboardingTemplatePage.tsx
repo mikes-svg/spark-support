@@ -19,11 +19,16 @@ export function OnboardingTemplatePage() {
   const [items, setItems] = useState<OnboardingTemplateItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [actionError, setActionError] = useState('');
+  const [loadError, setLoadError] = useState('');
+  // Bumping this re-runs the load effect, which is what the error banner's Retry does.
+  const [reloadKey, setReloadKey] = useState(0);
 
   const [deleteRowTarget, setDeleteRowTarget] = useState<OnboardingTemplateItem | null>(null);
   const [deleteSectionTarget, setDeleteSectionTarget] = useState<string | null>(null);
 
   useEffect(() => {
+    setLoading(true);
+    setLoadError('');
     (async () => {
       try {
         const peeps = await fetchOnboardingPeople();
@@ -32,12 +37,12 @@ export function OnboardingTemplatePage() {
         setItems(template);
       } catch (err) {
         console.error('Failed to load the template:', err);
-        setActionError('Could not load the template. Please refresh.');
+        setLoadError('Could not load the template.');
       } finally {
         setLoading(false);
       }
     })();
-  }, []);
+  }, [reloadKey]);
 
   const sectionCount = new Set(items.map((i) => i.section)).size;
 
@@ -187,12 +192,28 @@ export function OnboardingTemplatePage() {
 
   return (
     <div className="space-y-6">
+      {loadError && (
+        <div
+          className="flex flex-wrap items-center justify-between gap-3 text-sm text-red-700 bg-red-50 border border-red-200 px-4 py-3 rounded-md"
+          role="alert"
+        >
+          <span>{loadError}</span>
+          <button
+            type="button"
+            onClick={() => setReloadKey((k) => k + 1)}
+            className="inline-flex items-center px-3 py-1.5 text-sm font-medium rounded-md border border-red-300 bg-white text-red-700 hover:bg-red-100 transition-colors"
+          >
+            Retry
+          </button>
+        </div>
+      )}
       {actionError && (
         <p className="text-sm text-red-700 bg-red-50 border border-red-200 px-4 py-3 rounded-md" role="alert">{actionError}</p>
       )}
 
+      {/* The page title itself lives in the app header, so this card leads with the
+          explanation rather than repeating "Checklist Template" as a second headline. */}
       <div className="bg-white shadow-sm rounded-xl border border-gray-200 p-6 space-y-2">
-        <h1 className="text-2xl font-serif font-semibold text-gray-900">Checklist Template</h1>
         <p className="text-sm text-gray-500">
           This is the master checklist copied into every new property when it's created.
         </p>
@@ -200,7 +221,7 @@ export function OnboardingTemplatePage() {
           Edits here only apply to properties created after the change — existing properties keep
           the checklist they were created with.
         </p>
-        <p className="text-xs text-gray-400 pt-1">
+        <p className="text-xs text-gray-600 pt-1">
           {items.length} {items.length === 1 ? 'row' : 'rows'} across {sectionCount} {sectionCount === 1 ? 'section' : 'sections'}
         </p>
       </div>

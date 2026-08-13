@@ -25,6 +25,8 @@ interface NavItem {
   icon: typeof LayoutDashboard;
   label: string;
   exact?: boolean;
+  /** Overrides the accessible name when the visible label collides with another control. */
+  ariaLabel?: string;
 }
 
 function SidebarNavLink({ item, onClose }: { item: NavItem; onClose: () => void }) {
@@ -32,6 +34,7 @@ function SidebarNavLink({ item, onClose }: { item: NavItem; onClose: () => void 
     <NavLink
       to={item.to}
       end={item.exact}
+      aria-label={item.ariaLabel}
       onClick={onClose}
       className={({ isActive }) =>
         `group flex items-center px-3 py-2.5 text-sm font-medium rounded-md relative transition-colors ${
@@ -57,7 +60,7 @@ function SidebarContent({ onClose }: { onClose: () => void }) {
 
   const navItems: NavItem[] = [
     { to: '/', icon: LayoutDashboard, label: 'My Tickets', exact: true },
-    { to: '/submit', icon: PlusCircle, label: 'Submit Request' },
+    { to: '/submit', icon: PlusCircle, label: 'Submit Request', ariaLabel: 'Submit Request page' },
   ];
 
   const adminItems: NavItem[] = [
@@ -83,18 +86,18 @@ function SidebarContent({ onClose }: { onClose: () => void }) {
         <div className="flex items-center gap-3">
           <img src="/spark-logo.png" alt="Spark Management" className="h-10 brightness-0 invert" />
           <div className="flex flex-col">
-            <span className="text-[10px] uppercase tracking-widest text-brand-gold font-semibold leading-none">Support</span>
-            <span className="text-[10px] uppercase tracking-widest text-gray-400 mt-1 leading-none">Portal</span>
+            <span className="text-[12px] uppercase tracking-widest text-brand-gold font-semibold leading-none">Support</span>
+            <span className="text-[12px] uppercase tracking-widest text-gray-300 mt-1 leading-none">Portal</span>
           </div>
         </div>
-        <button onClick={onClose} className="md:hidden p-1 text-gray-400 hover:text-white">
+        <button onClick={onClose} aria-label="Close sidebar" className="md:hidden flex items-center justify-center min-h-[44px] min-w-[44px] -mr-2 p-1 text-gray-400 hover:text-white">
           <X className="h-5 w-5" />
         </button>
       </div>
 
       <nav className="flex-1 px-3 py-4 space-y-1">
         <div className="mb-4 px-3">
-          <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider">User</p>
+          <p className="text-xs font-semibold text-gray-300 uppercase tracking-wider">User</p>
         </div>
         {navItems.map((item) => (
           <SidebarNavLink key={item.to} item={item} onClose={onClose} />
@@ -103,7 +106,7 @@ function SidebarContent({ onClose }: { onClose: () => void }) {
         {isAdmin && (
           <>
             <div className="mt-8 mb-4 px-3">
-              <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Admin</p>
+              <p className="text-xs font-semibold text-gray-300 uppercase tracking-wider">Admin</p>
             </div>
             {adminItems.map((item) => (
               <SidebarNavLink key={item.to} item={item} onClose={onClose} />
@@ -114,7 +117,7 @@ function SidebarContent({ onClose }: { onClose: () => void }) {
         {canOnboard && (
           <>
             <div className="mt-8 mb-4 px-3">
-              <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Onboarding</p>
+              <p className="text-xs font-semibold text-gray-300 uppercase tracking-wider">Onboarding</p>
             </div>
             {onboardingItems.map((item) => (
               <SidebarNavLink key={item.to} item={item} onClose={onClose} />
@@ -133,10 +136,10 @@ function SidebarContent({ onClose }: { onClose: () => void }) {
             />
             <div className="ml-3 min-w-0">
               <p className="text-sm font-medium text-white truncate">{user?.name}</p>
-              <p className="text-xs font-medium text-gray-400">{roleLabel(user?.role)}</p>
+              <p className="text-xs font-medium text-gray-300">{roleLabel(user?.role)}</p>
             </div>
           </div>
-          <button onClick={logout} title="Sign out" className="ml-2 p-1.5 text-gray-400 hover:text-white transition-colors flex-shrink-0">
+          <button onClick={logout} title="Sign out" aria-label="Sign out" className="ml-2 flex items-center justify-center min-h-[44px] min-w-[44px] -mr-2 p-1.5 text-gray-400 hover:text-white transition-colors flex-shrink-0">
             <LogOut className="h-4 w-4" />
           </button>
         </div>

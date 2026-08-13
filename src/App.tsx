@@ -4,6 +4,7 @@ import {
   Routes,
   Route,
   Navigate,
+  Link,
 } from 'react-router-dom';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { isAdminRole, isSuperadminRole, hasOnboardingAccess } from './types';
@@ -58,6 +59,24 @@ function ProtectedRoute({
     return <Navigate to="/" replace />;
   }
   return <>{children}</>;
+}
+
+function NotFoundPage() {
+  return (
+    <div className="text-center py-16">
+      <p className="text-sm font-medium text-gray-400">404</p>
+      <h2 className="mt-2 text-xl font-semibold text-brand-dark">Page not found</h2>
+      <p className="mt-2 text-sm text-gray-500">
+        The page you're looking for doesn't exist or may have moved.
+      </p>
+      <Link
+        to="/"
+        className="mt-5 inline-flex items-center px-5 py-2 text-sm font-medium rounded-lg bg-brand-dark text-white hover:bg-[#05391B] transition-colors"
+      >
+        Back to My Tickets
+      </Link>
+    </div>
+  );
 }
 
 export function App() {
@@ -144,6 +163,8 @@ export function App() {
                 </ProtectedRoute>
               }
             />
+
+            <Route path="*" element={<NotFoundPage />} />
           </Route>
         </Routes>
       </Router>

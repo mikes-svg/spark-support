@@ -51,6 +51,8 @@ export function OnboardingPropertiesPage() {
   const [loading, setLoading] = useState(true);
   const [tasksLoading, setTasksLoading] = useState(false);
   const [actionError, setActionError] = useState('');
+  const [propertiesError, setPropertiesError] = useState('');
+  const [checklistError, setChecklistError] = useState('');
   const [showArchived, setShowArchived] = useState(false);
 
   const [showNewModal, setShowNewModal] = useState(false);
@@ -74,7 +76,7 @@ export function OnboardingPropertiesPage() {
         setPeople(peeps);
       } catch (err) {
         console.error('Failed to load onboarding properties:', err);
-        setActionError('Could not load properties. Please refresh.');
+        setPropertiesError('Could not load properties. Please refresh.');
       } finally {
         setLoading(false);
       }
@@ -89,6 +91,7 @@ export function OnboardingPropertiesPage() {
   }, [loading, propertyId, properties, navigate]);
 
   useEffect(() => {
+    setChecklistError('');
     if (!propertyId) { setTasks([]); return; }
     let cancelled = false;
     setTasksLoading(true);
@@ -98,7 +101,7 @@ export function OnboardingPropertiesPage() {
         if (!cancelled) setTasks(rows);
       } catch (err) {
         console.error('Failed to load checklist:', err);
-        if (!cancelled) setActionError('Could not load this checklist. Please refresh.');
+        if (!cancelled) setChecklistError('Could not load this checklist. Please refresh.');
       } finally {
         if (!cancelled) setTasksLoading(false);
       }
@@ -377,9 +380,9 @@ export function OnboardingPropertiesPage() {
 
   return (
     <div className="space-y-6">
-      {actionError && (
-        <p className="text-sm text-red-700 bg-red-50 border border-red-200 px-4 py-3 rounded-md" role="alert">{actionError}</p>
-      )}
+      {[propertiesError, checklistError, actionError].filter(Boolean).map((message) => (
+        <p key={message} className="text-sm text-red-700 bg-red-50 border border-red-200 px-4 py-3 rounded-md" role="alert">{message}</p>
+      ))}
 
       {/* Property tabs */}
       <div className="flex items-end gap-2 border-b border-gray-200 overflow-x-auto pb-px">
@@ -421,15 +424,19 @@ export function OnboardingPropertiesPage() {
       {!property ? (
         <div className="bg-white shadow-sm rounded-xl border border-gray-200 px-6 py-16 text-center">
           <Building2 className="h-10 w-10 mx-auto text-gray-300" />
-          <h2 className="mt-4 text-lg font-serif font-semibold text-gray-900">No property selected</h2>
+          <h2 className="mt-4 text-lg font-serif font-semibold text-gray-900">
+            {propertyId ? 'Property not found' : 'No property selected'}
+          </h2>
           <p className="mt-1 text-sm text-gray-500">
-            {visibleProperties.length === 0
-              ? isSuperadmin
-                ? 'Create your first property to start its onboarding checklist.'
-                : 'No properties have been set up yet.'
-              : 'Pick a property tab above.'}
+            {propertyId
+              ? 'This property no longer exists, or your access to it was removed.'
+              : visibleProperties.length === 0
+                ? isSuperadmin
+                  ? 'Create your first property to start its onboarding checklist.'
+                  : 'No properties have been set up yet.'
+                : 'Pick a property tab above.'}
           </p>
-          {isSuperadmin && visibleProperties.length === 0 && (
+          {isSuperadmin && !propertyId && visibleProperties.length === 0 && (
             <button
               onClick={() => setShowNewModal(true)}
               className="mt-5 inline-flex items-center px-5 py-2 text-sm font-medium rounded-lg bg-brand-dark text-white hover:bg-[#05391B] transition-colors"

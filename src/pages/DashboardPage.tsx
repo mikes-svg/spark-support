@@ -60,9 +60,11 @@ export function DashboardPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex justify-between items-center">
-        <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-widest">Overview</h2>
-        <Link to="/submit" className="inline-flex items-center justify-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-brand-gold hover:bg-yellow-600 shadow-sm transition-colors">
+      {/* Below ~sm the label and the CTA stack: side by side there isn't room for
+          both at 320px and the button's label wraps mid-word. */}
+      <div className="flex flex-col items-stretch gap-3 sm:flex-row sm:justify-between sm:items-center">
+        <h2 className="text-sm font-semibold text-gray-600 uppercase tracking-widest">Overview</h2>
+        <Link to="/submit" className="inline-flex items-center justify-center whitespace-nowrap px-4 py-2 border border-transparent text-sm font-medium rounded-md text-brand-dark bg-brand-gold hover:bg-brand-gold/80 shadow-sm transition-colors">
           <Plus className="h-4 w-4 mr-2" />Submit New Request
         </Link>
       </div>
@@ -87,7 +89,7 @@ export function DashboardPage() {
             >
               <div className={`absolute left-0 top-0 bottom-0 w-1 ${color}`} />
               <div className="p-5 pl-6">
-                <dt className="text-sm font-medium text-gray-500 truncate">{label}</dt>
+                <dt className="text-sm font-medium text-gray-500 break-words">{label}</dt>
                 <dd className="mt-1 text-3xl font-semibold text-gray-900">{loading ? '—' : count}</dd>
               </div>
             </div>
@@ -112,7 +114,9 @@ export function DashboardPage() {
         </div>
         <div className="overflow-x-auto">
           <table className="min-w-full divide-y divide-gray-200">
-            <thead className="bg-gray-50">
+            {/* The column headers set the table's minimum width, so in the error state
+                hide them and let the message wrap to the card instead of scrolling sideways. */}
+            <thead className={`bg-gray-50 ${error ? 'hidden' : ''}`}>
               <tr>
                 {['Ticket #', 'Type', 'Title', 'Status', 'Assignee', 'Date'].map((h) => (
                   <th key={h} scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">{h}</th>
