@@ -85,6 +85,39 @@ function EditableText({
   const [draft, setDraft] = useState(value);
   useEffect(() => setDraft(value), [value]);
 
+  const taRef = useRef<HTMLTextAreaElement>(null);
+  // Grow the textarea to fit its content so long text wraps and stays fully
+  // visible instead of being clipped. A plain effect fires before the table
+  // has settled its column width, so re-measure whenever the width changes
+  // (initial layout, column resize) via a ResizeObserver — the width guard
+  // stops the height change from re-triggering it in a loop.
+  useEffect(() => {
+    const el = taRef.current;
+    if (!el) return;
+    // scrollHeight is the content+padding height, which excludes the border;
+    // with border-box sizing the style height DOES include it, so add the
+    // border back (offsetHeight - clientHeight) or the last line is clipped.
+    const grow = () => {
+      el.style.height = 'auto';
+      el.style.height = `${el.scrollHeight + el.offsetHeight - el.clientHeight}px`;
+    };
+    let lastW = -1;
+    const ro = new ResizeObserver((entries) => {
+      const w = entries[0].contentRect.width;
+      if (w !== lastW) { lastW = w; grow(); }
+    });
+    ro.observe(el);
+    grow();
+    return () => ro.disconnect();
+  }, [textarea]);
+  // Re-grow on content change (width is unchanged, so the observer won't fire).
+  useEffect(() => {
+    const el = taRef.current;
+    if (!el) return;
+    el.style.height = 'auto';
+    el.style.height = `${el.scrollHeight + el.offsetHeight - el.clientHeight}px`;
+  }, [draft]);
+
   const commit = () => {
     const next = draft.trim();
     if (next !== value) onCommit(next);
@@ -96,6 +129,7 @@ function EditableText({
   if (textarea) {
     return (
       <textarea
+        ref={taRef}
         value={draft}
         rows={1}
         disabled={disabled}
@@ -103,7 +137,12 @@ function EditableText({
         aria-label={ariaLabel}
         onChange={(e) => setDraft(e.target.value)}
         onBlur={commit}
-        className={`${base} resize-y min-h-[2rem] ${className}`}
+        onKeyDown={(e) => {
+          // Enter commits (Shift+Enter inserts a newline); Escape reverts.
+          if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); (e.target as HTMLTextAreaElement).blur(); }
+          if (e.key === 'Escape') setDraft(value);
+        }}
+        className={`${base} resize-none overflow-hidden min-h-[2rem] ${className}`}
       />
     );
   }
@@ -333,6 +372,7 @@ export function ChecklistTable({
                             <EditableText
                               value={row.title}
                               disabled={!canEdit}
+                              textarea
                               placeholder={isSubHeader ? 'Section header' : 'Task description'}
                               ariaLabel={code ? `Task description for item ${code}` : `Sub-header: ${row.title || 'untitled'}`}
                               onCommit={(title) => onPatchRow(row, { title })}

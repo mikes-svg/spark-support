@@ -18,19 +18,21 @@ service cloud.firestore {
       return isSignedIn() && (role() == 'admin' || role() == 'superadmin');
     }
 
-    // View access to onboarding: Administrators and Managers (both covered by
-    // isAdmin) plus any User explicitly granted the flag.
+    // View access to onboarding: superadmins always, plus anyone (Manager or
+    // User) whose onboardingAccess flag is toggled on. Toggling it off removes
+    // access for everyone below superadmin.
     function canReadOnboarding() {
-      return isAdmin() ||
+      return isSuperAdmin() ||
         (isSignedIn() &&
          get(/databases/$(database)/documents/profiles/$(request.auth.uid)).data.onboardingAccess == true);
     }
 
-    // Edit access to checklist tasks: superadmins and granted users only —
-    // Managers are view-only, so plain 'admin' is intentionally excluded here.
+    // Edit access to checklist tasks: superadmins always, plus a granted User —
+    // but NOT a Manager (admin), who stays view-only even when granted, so the
+    // isAdmin() branch is excluded here.
     function canEditOnboardingTasks() {
       return isSuperAdmin() ||
-        (isSignedIn() &&
+        (isSignedIn() && !isAdmin() &&
          get(/databases/$(database)/documents/profiles/$(request.auth.uid)).data.onboardingAccess == true);
     }
 
