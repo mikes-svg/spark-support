@@ -291,6 +291,15 @@ export function ChecklistTable({
               // N00 block and rows count up from there, so adding, deleting, or
               // moving a row renumbers everything automatically and can't drift.
               const sectionBase = (groupIndex + 1) * 100;
+              // A row with an indented child directly beneath it is a sub-header:
+              // it acts as a label for its group, so it takes no number and no
+              // responsibility, and it doesn't consume a number — the real items
+              // around it stay sequential.
+              let numbered = 0;
+              const rowMeta = group.rows.map((r, i) => {
+                const isSubHeader = r.indent === 0 && group.rows[i + 1]?.indent === 1;
+                return { isSubHeader, code: isSubHeader ? null : String(sectionBase + numbered++) };
+              });
               return (
                 <React.Fragment key={`${group.section}-${group.rows[0]?.id}`}>
                   <SectionHeader
@@ -307,37 +316,42 @@ export function ChecklistTable({
                     const overdue = isProperty && isOverdue({ status: row.status ?? '', dueDate: row.dueDate }, today);
                     const globalIndex = sorted.findIndex((r) => r.id === row.id);
                     const delays = row.delays ?? [];
-                    const code = String(sectionBase + rowIdx);
+                    const { isSubHeader, code } = rowMeta[rowIdx];
                     // Bare inputs in a grid each need their own accessible name —
                     // the column heading alone doesn't say which row you're in.
-                    const rowName = row.title || `item ${code}`;
+                    const rowName = row.title || (code ? `item ${code}` : 'sub-header');
                     return (
                       <tr key={row.id} className={`group ${overdue ? 'bg-red-50/40' : 'hover:bg-gray-50/60'}`}>
                         {/* Read-only: the number is derived from position, not
-                            typed. min-w keeps a four-digit code (1008) unclipped. */}
+                            typed. min-w keeps a four-digit code (1008) unclipped.
+                            Sub-headers carry no number. */}
                         <td className="px-3 py-1.5 align-top min-w-[5rem]">
-                          <span className="inline-block px-2 py-1 text-xs tabular-nums text-gray-500">{code}</span>
+                          {code && <span className="inline-block px-2 py-1 text-xs tabular-nums text-gray-500">{code}</span>}
                         </td>
                         <td className="px-4 py-1.5 align-top min-w-[18rem]">
                           <div className={row.indent === 1 ? 'pl-6' : ''}>
                             <EditableText
                               value={row.title}
                               disabled={!canEdit}
-                              placeholder="Task description"
-                              ariaLabel={`Task description for item ${code}`}
+                              placeholder={isSubHeader ? 'Section header' : 'Task description'}
+                              ariaLabel={code ? `Task description for item ${code}` : `Sub-header: ${row.title || 'untitled'}`}
                               onCommit={(title) => onPatchRow(row, { title })}
-                              className={row.indent === 1 ? 'text-gray-700' : 'font-medium text-gray-900'}
+                              className={row.indent === 1 ? 'text-gray-700' : isSubHeader ? 'font-semibold text-brand-dark' : 'font-medium text-gray-900'}
                             />
                           </div>
                         </td>
                         <td className="px-4 py-1.5 align-top min-w-[11rem]">
-                          <AssigneeSelector
-                            value={row.responsibleIds}
-                            admins={people}
-                            disabled={!canEdit}
-                            emptyLabel="Nobody has onboarding access yet"
-                            onChange={(responsibleIds) => onPatchRow(row, { responsibleIds })}
-                          />
+                          {/* Sub-headers are labels for their child rows, so they
+                              take no responsibility of their own. */}
+                          {!isSubHeader && (
+                            <AssigneeSelector
+                              value={row.responsibleIds}
+                              admins={people}
+                              disabled={!canEdit}
+                              emptyLabel="Nobody has onboarding access yet"
+                              onChange={(responsibleIds) => onPatchRow(row, { responsibleIds })}
+                            />
+                          )}
                         </td>
                         <td className="px-4 py-1.5 align-top">
                           <EditableOffset
