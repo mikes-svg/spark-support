@@ -15,7 +15,6 @@ import type { OnboardingTemplateItem, Profile } from '../types';
  */
 type SeedRow = [string, string, 0 | 1, string, string | null, number | null];
 
-const DD = 'Due Diligence';
 const LEGAL = 'Legal';
 const CM = 'Construction Management';
 const BANK = 'Banking';
@@ -27,37 +26,6 @@ const HR = 'HR & Corporate Operations';
 const CLOSING = 'Closing Day';
 
 const SEED_ROWS: SeedRow[] = [
-  [DD, '100', 0, 'Inspections', null, null],
-  [DD, '101', 1, 'Sewer Lines', null, null],
-  [DD, '102', 1, 'Roof', null, null],
-  [DD, '103', 1, 'Electrical', null, null],
-  [DD, '104', 1, 'Plumbing', null, null],
-  [DD, '105', 1, 'Pool (Equipment and Leak Detection Pressure Test)', null, null],
-  [DD, '106', 1, 'Termites', null, null],
-  [DD, '107', 1, 'Foundation', null, null],
-  [DD, '108', 1, 'Sprinkler Inspection', null, null],
-  [DD, '109', 0, 'Title', null, null],
-  [DD, '110', 0, 'Third Party Reports', null, null],
-  [DD, '111', 1, 'ALTA Survey', null, null],
-  [DD, '112', 1, 'Flood Determination Report', null, null],
-  [DD, '113', 1, 'Property Tax Opinion', null, null],
-  [DD, '114', 1, 'ESA w/ Radon', null, null],
-  [DD, '115', 1, 'PCA', null, null],
-  [DD, '116', 1, 'Zoning Report', null, null],
-  [DD, '117', 0, 'Insurance Quote', null, null],
-  [DD, '118', 0, 'Check Property YOC on Property Tax Records', null, null],
-  [DD, '119', 0, 'Service Contracts', null, null],
-  [DD, '120', 1, 'Landscaping', null, null],
-  [DD, '121', 1, 'Pest', null, null],
-  [DD, '122', 1, 'Trash', null, null],
-  [DD, '123', 1, 'Laundry', null, null],
-  [DD, '124', 1, 'Fire Monitoring', null, null],
-  [DD, '125', 0, 'Lease Audit', 'Jason', null],
-  [DD, '126', 0, 'Utility Audit', 'Jason', null],
-  [DD, '127', 0, 'Unit Walks', null, null],
-  [DD, '128', 0, 'Debt Term Sheets', null, null],
-  [DD, '129', 0, 'QC Estimate and Doc Review', null, null],
-
   [LEGAL, '200', 0, 'Execute PSA', null, null],
   [LEGAL, '201', 0, 'Assign PSA to Property Owner', null, -5],
   [LEGAL, '202', 0, 'Form Entities', null, null],
