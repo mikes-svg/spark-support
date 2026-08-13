@@ -16,6 +16,14 @@ interface ModalProps {
  */
 export function Modal({ open, onClose, labelledBy, widthClass = 'max-w-md', children }: ModalProps) {
   const ref = useRef<HTMLDivElement>(null);
+  // Keep the latest onClose in a ref so it can stay OUT of the effect's deps.
+  // Callers pass an inline `onClose={() => …}`, so its identity changes on every
+  // parent render — including each keystroke in a field. If the focus effect
+  // depended on it, it would re-run per keystroke and yank focus back to the
+  // first focusable element (the ✕ button), making the field impossible to type
+  // in. The effect now runs only when `open` flips.
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
 
   useEffect(() => {
     if (!open) return;
@@ -25,22 +33,25 @@ export function Modal({ open, onClose, labelledBy, widthClass = 'max-w-md', chil
           'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
         ) ?? [],
       );
-    focusable()[0]?.focus();
+    // Focus the first form field on open (fall back to the first focusable, e.g.
+    // the close button, when the dialog is just a confirmation).
+    const items = focusable();
+    (items.find((el) => ['INPUT', 'TEXTAREA', 'SELECT'].includes(el.tagName)) ?? items[0])?.focus();
 
     const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') { onClose(); return; }
+      if (e.key === 'Escape') { onCloseRef.current(); return; }
       if (e.key === 'Tab') {
-        const items = focusable();
-        if (items.length === 0) return;
-        const first = items[0];
-        const last = items[items.length - 1];
+        const list = focusable();
+        if (list.length === 0) return;
+        const first = list[0];
+        const last = list[list.length - 1];
         if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
         else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
       }
     };
     document.addEventListener('keydown', onKeyDown);
     return () => document.removeEventListener('keydown', onKeyDown);
-  }, [open, onClose]);
+  }, [open]);
 
   if (!open) return null;
 
