@@ -1,0 +1,6 @@
+{
+  "commit": "e6575df683738f68e3cdb8cb9215fb503bd4e67c",
+  "ts": "2026-08-12T17:05:00Z",
+  "recommendation": "Pass",
+  "note": "8/8 flows pass after fix pass + manifest correction; data-rendering states still unaudited (harness has no Firebase credential)"
+}
