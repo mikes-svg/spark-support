@@ -285,8 +285,12 @@ export function ChecklistTable({
                 </td>
               </tr>
             )}
-            {groups.map((group) => {
+            {groups.map((group, groupIndex) => {
               const done = group.rows.filter((r) => isTaskDone({ status: r.status ?? '' })).length;
+              // Item numbers are derived, not stored: the Nth section is the
+              // N00 block and rows count up from there, so adding, deleting, or
+              // moving a row renumbers everything automatically and can't drift.
+              const sectionBase = (groupIndex + 1) * 100;
               return (
                 <React.Fragment key={`${group.section}-${group.rows[0]?.id}`}>
                   <SectionHeader
@@ -299,27 +303,20 @@ export function ChecklistTable({
                     onDelete={() => onDeleteSection(group.section)}
                     onAddRow={() => onAddRow(group.section, group.rows[group.rows.length - 1] ?? null)}
                   />
-                  {group.rows.map((row) => {
+                  {group.rows.map((row, rowIdx) => {
                     const overdue = isProperty && isOverdue({ status: row.status ?? '', dueDate: row.dueDate }, today);
                     const globalIndex = sorted.findIndex((r) => r.id === row.id);
                     const delays = row.delays ?? [];
-                    // Every cell is a bare input in a grid, so each needs its own
-                    // accessible name — the column heading alone doesn't say
-                    // which row you're in, and the placeholder is just a dash.
-                    const rowName = row.title || row.code || 'new row';
+                    const code = String(sectionBase + rowIdx);
+                    // Bare inputs in a grid each need their own accessible name —
+                    // the column heading alone doesn't say which row you're in.
+                    const rowName = row.title || `item ${code}`;
                     return (
                       <tr key={row.id} className={`group ${overdue ? 'bg-red-50/40' : 'hover:bg-gray-50/60'}`}>
-                        {/* min-w, not w-: the table layout will otherwise squeeze
-                            this column until a four-digit code (1008) is clipped. */}
+                        {/* Read-only: the number is derived from position, not
+                            typed. min-w keeps a four-digit code (1008) unclipped. */}
                         <td className="px-3 py-1.5 align-top min-w-[5rem]">
-                          <EditableText
-                            value={row.code}
-                            disabled={!canEdit}
-                            placeholder="—"
-                            ariaLabel={`Item number for ${rowName}`}
-                            onCommit={(code) => onPatchRow(row, { code })}
-                            className="!text-xs !w-14 tabular-nums text-gray-500"
-                          />
+                          <span className="inline-block px-2 py-1 text-xs tabular-nums text-gray-500">{code}</span>
                         </td>
                         <td className="px-4 py-1.5 align-top min-w-[18rem]">
                           <div className={row.indent === 1 ? 'pl-6' : ''}>
@@ -327,7 +324,7 @@ export function ChecklistTable({
                               value={row.title}
                               disabled={!canEdit}
                               placeholder="Task description"
-                              ariaLabel={`Task description${row.code ? ` for item ${row.code}` : ''}`}
+                              ariaLabel={`Task description for item ${code}`}
                               onCommit={(title) => onPatchRow(row, { title })}
                               className={row.indent === 1 ? 'text-gray-700' : 'font-medium text-gray-900'}
                             />
