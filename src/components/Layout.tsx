@@ -16,6 +16,9 @@ export function Layout() {
     if (pathname === '/admin/team') return 'Team';
     if (pathname === '/admin/analytics') return 'Analytics';
     if (pathname === '/admin/settings') return 'Settings';
+    if (pathname === '/onboarding') return 'My Onboarding Tasks';
+    if (pathname.startsWith('/onboarding/properties')) return 'Property Onboarding';
+    if (pathname === '/onboarding/template') return 'Checklist Template';
     return 'Portal';
   };
 

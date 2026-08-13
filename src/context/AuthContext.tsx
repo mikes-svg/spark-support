@@ -53,6 +53,46 @@ interface AuthContextType {
   clearAuthError: () => void;
 }
 
+/**
+ * Stand-in signed-in user for the automated QA harness, which cannot reach the
+ * real pages: Firebase keeps its session in IndexedDB, and Playwright can only
+ * carry cookies and localStorage into a fresh browser.
+ *
+ * Gated on `import.meta.env.DEV`, which Vite statically replaces with `false`
+ * in any production build — so this branch is eliminated from the shipped
+ * bundle entirely and NO environment variable can switch it on in production.
+ * It reaches the dev server only via `npx vite --mode e2e` (see .env.e2e).
+ *
+ * This grants no data access: there is no Firebase credential behind it, so
+ * every Firestore read still fails the rules. It exists to exercise routing,
+ * navigation, and empty/error states, not to impersonate a real account.
+ */
+const E2E_ENABLED = import.meta.env.DEV && import.meta.env.VITE_E2E_AUTH === 'true';
+
+/**
+ * The harness also has to audit the signed-OUT state — the login screen and the
+ * route guards — so `?e2eSignedOut` on a navigation suppresses the stand-in
+ * user. Read once at module load, which is per real page load, so each audited
+ * navigation carries the flag itself.
+ */
+const E2E_SIGNED_OUT =
+  E2E_ENABLED && new URLSearchParams(window.location.search).has('e2eSignedOut');
+
+const E2E_USER: Profile | null =
+  E2E_ENABLED && !E2E_SIGNED_OUT
+    ? {
+        id: 'e2e-harness-user',
+        name: 'QA Harness',
+        email: 'qa-harness@example.invalid',
+        // Inline so the harness makes no network request for it and can't
+        // report a broken avatar that no real user would see.
+        photoURL:
+          "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%23064923'/%3E%3Ctext x='16' y='21' font-family='sans-serif' font-size='12' fill='%23D4A843' text-anchor='middle'%3EQA%3C/text%3E%3C/svg%3E",
+        role: 'superadmin',
+        onboardingAccess: true,
+      }
+    : null;
+
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
@@ -62,6 +102,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const ssoTried = useRef(false);
 
   useEffect(() => {
+    if (E2E_USER) { setUser(E2E_USER); setLoading(false); return; }
+
     const authInstance = auth;
     if (!authInstance || !functions) { setLoading(false); return; }
 

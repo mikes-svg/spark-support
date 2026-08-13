@@ -1,0 +1,190 @@
+# Spark Support — /gauntlet QA manifest
+#
+# Run the app in e2e mode so the harness can reach the routed pages at all:
+#   npx vite --mode e2e --port 5177
+# See .env.e2e and the E2E_USER block in src/context/AuthContext.tsx for why
+# (Firebase keeps its session in IndexedDB; Playwright cannot carry it in).
+#
+# KNOWN LIMIT of every authenticated flow below: the stand-in harness user has
+# no Firebase credential, so Firestore denies every read and pages render their
+# chrome with EMPTY data. These flows therefore cover routing, navigation,
+# layout, and empty/error states — not data rendering. `no-failed-requests` is
+# deliberately omitted from them, because under a credential-less user every
+# Firestore call is *expected* to 403 and the check cannot tell that apart from
+# a real break. Re-enable it once the harness can authenticate for real.
+#
+# Flows whose URL carries ?e2eSignedOut audit the signed-out state instead.
+
+app:
+  url: http://localhost:5177
+  start: "npx vite --mode e2e --port 5177"
+  ready: /
+  ignore-console:
+    # Firebase's popup-session probing under cross-origin-isolation headers.
+    - "Cross-Origin-Opener-Policy"
+    # Expected: onboarding rules are not deployed, and the harness user holds no
+    # credential, so every Firestore read is denied by design in this mode.
+    - "Missing or insufficient permissions"
+    - "permission-denied"
+    - "FirebaseError"
+    # The pages' own handled-failure logging for the denials above.
+    - "Failed to load"
+    - "Failed to fetch"
+    - "installations/request-failed"
+
+flows:
+  # ── New feature: Property Onboarding ──────────────────────────────────────
+  - name: onboarding-properties
+    starting_url: /onboarding/properties
+    critical: true
+    viewports: [stress, mobile, laptop]
+    steps:
+      - assert-visible: "text=Property Onboarding"
+      - assert-visible: "text=New Property"
+      - assert-visible: "text=No property selected"
+    checks:
+      - page-loads
+      - no-console-errors
+      - no-horizontal-overflow
+      - buttons-clickable
+      - no-clipped-text
+      - images-load
+      - min-font-size
+      - contrast-minimum
+      - "cta-reachable:text=New Property"
+
+  - name: onboarding-template
+    starting_url: /onboarding/template
+    critical: true
+    viewports: [stress, mobile, laptop]
+    steps:
+      - assert-visible: "text=Checklist Template"
+      - assert-visible: "text=Add Section"
+    checks:
+      - page-loads
+      - no-console-errors
+      - no-horizontal-overflow
+      - buttons-clickable
+      - no-clipped-text
+      - images-load
+      - min-font-size
+      - contrast-minimum
+      - "cta-reachable:text=Add Section"
+
+  - name: onboarding-my-tasks
+    starting_url: /onboarding
+    critical: true
+    viewports: [stress, mobile, laptop]
+    steps:
+      - assert-visible: "text=My Tasks"
+    checks:
+      - page-loads
+      - no-console-errors
+      - no-horizontal-overflow
+      - buttons-clickable
+      - no-clipped-text
+      - images-load
+      - min-font-size
+      - contrast-minimum
+
+  # Security: the guards must hold for a signed-out visitor. ?e2eSignedOut
+  # suppresses the stand-in user, so these are genuine unauthenticated hits.
+  - name: onboarding-access-guards
+    starting_url: /onboarding?e2eSignedOut
+    critical: true
+    viewports: [mobile, laptop]
+    steps:
+      - assert-visible: "text=Sign in with Google"
+      - goto: /onboarding/properties?e2eSignedOut
+      - assert-visible: "text=Sign in with Google"
+      - goto: /onboarding/template?e2eSignedOut
+      - assert-visible: "text=Sign in with Google"
+      - goto: /admin/team?e2eSignedOut
+      - assert-visible: "text=Sign in with Google"
+    checks:
+      - page-loads
+      - no-console-errors
+      - no-failed-requests
+
+  # ── Regression: surfaces this branch modified ─────────────────────────────
+  # The Sidebar's repeated NavLink markup was extracted into one shared
+  # component driving all three nav groups — the highest regression risk here.
+  - name: sidebar-navigation
+    starting_url: /
+    critical: true
+    viewports: [stress, mobile, laptop]
+    steps:
+      - assert-visible: "text=Submit Request"
+      - assert-visible: "text=Onboarding"
+      - click: "text=Properties"
+      - assert-visible: "text=Property Onboarding"
+      - click: "text=My Tasks"
+      - assert-visible: "text=My Tasks"
+      - click: "text=Template"
+      - assert-visible: "text=Checklist Template"
+      - click: "text=All Tickets"
+      - assert-visible: "text=All Tickets"
+      - click: "text=Team"
+      - assert-visible: "text=Manage Users"
+    checks:
+      - page-loads
+      - no-console-errors
+      - buttons-clickable
+      - no-clipped-text
+      - images-load
+      - min-font-size
+      - contrast-minimum
+
+  - name: team-page
+    starting_url: /admin/team
+    viewports: [stress, mobile, laptop]
+    steps:
+      - assert-visible: "text=Manage Users"
+      - assert-visible: "text=Onboarding"
+      - assert-visible: "text=Role Permissions"
+      - assert-visible: "text=Property Onboarding"
+      - click: "text=Add User"
+      - assert-visible: "text=Add New User"
+    checks:
+      - page-loads
+      - no-console-errors
+      - no-horizontal-overflow
+      - buttons-clickable
+      - no-clipped-text
+      - min-font-size
+      - contrast-minimum
+
+  - name: ticket-dashboard
+    starting_url: /
+    viewports: [stress, mobile, laptop]
+    steps:
+      - assert-visible: "text=My Tickets"
+      - goto: /admin
+      - assert-visible: "text=All Tickets"
+      - goto: /submit
+      - assert-visible: "text=Submit Request"
+    checks:
+      - page-loads
+      - no-console-errors
+      - no-horizontal-overflow
+      - buttons-clickable
+      - no-clipped-text
+      - min-font-size
+      - contrast-minimum
+
+  - name: login-page
+    starting_url: /login?e2eSignedOut
+    viewports: [stress, mobile, tablet, laptop]
+    steps:
+      - assert-visible: "text=Sign in with Google"
+    checks:
+      - page-loads
+      - no-console-errors
+      - no-failed-requests
+      - no-horizontal-overflow
+      - buttons-clickable
+      - no-clipped-text
+      - images-load
+      - min-font-size
+      - contrast-minimum
+      - "cta-reachable:text=Sign in with Google"
