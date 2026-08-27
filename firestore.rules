@@ -141,6 +141,73 @@ service cloud.firestore {
       allow write: if canEditOnboardingTasks();
     }
 
+    // Property notebooks. One notebook per property, keyed by the property id,
+    // owned by its creator and PRIVATE until shared — not even a superadmin sees
+    // it unless they own it or it was shared with them. Every accessor must
+    // still be an onboarding user. Sharing is owner-only; being a notebook
+    // editor lets you add/edit pages but not re-share or change the owner.
+    match /onboardingNotebooks/{propertyId} {
+      function nbOwner() { return isSignedIn() && resource.data.ownerId == request.auth.uid; }
+      function nbShared() {
+        return request.auth.uid in resource.data.sharedWithUserIds ||
+               request.auth.uid in resource.data.editorIds;
+      }
+      function nbEditor() { return request.auth.uid in resource.data.editorIds; }
+
+      // resource == null lets a non-existent notebook be read (returns "no such
+      // doc") so a would-be owner can tell it apart from a private one they
+      // can't see. An existing private notebook still denies the read.
+      allow read: if canReadOnboarding() && (resource == null || nbOwner() || nbShared());
+      allow create: if canReadOnboarding()
+        && request.resource.data.ownerId == request.auth.uid
+        && request.resource.data.propertyId == propertyId;
+      // Owner may change anything (including the share lists and owner); a
+      // notebook editor may update other fields but NOT the owner or the shares.
+      allow update: if canReadOnboarding() && (
+        nbOwner() || (
+          nbEditor()
+          && request.resource.data.ownerId == resource.data.ownerId
+          && request.resource.data.sharedWithUserIds == resource.data.sharedWithUserIds
+          && request.resource.data.editorIds == resource.data.editorIds
+        )
+      );
+      allow delete: if canReadOnboarding() && nbOwner();
+
+      match /pages/{pageId} {
+        function nb() { return get(/databases/$(database)/documents/onboardingNotebooks/$(propertyId)).data; }
+        function nbCanView() {
+          return nb().ownerId == request.auth.uid ||
+                 request.auth.uid in nb().sharedWithUserIds ||
+                 request.auth.uid in nb().editorIds;
+        }
+        function nbCanEdit() {
+          return nb().ownerId == request.auth.uid || request.auth.uid in nb().editorIds;
+        }
+        function pageOwner() { return nb().ownerId == request.auth.uid; }
+        function pageShared() {
+          return request.auth.uid in resource.data.sharedWithUserIds ||
+                 request.auth.uid in resource.data.editorIds;
+        }
+        function pageEditor() { return request.auth.uid in resource.data.editorIds; }
+
+        allow read: if canReadOnboarding() && (nbCanView() || pageShared());
+        // Adding/removing pages requires notebook edit rights; a page-level
+        // share can only edit the page it was granted, never create or delete.
+        allow create: if canReadOnboarding() && nbCanEdit();
+        allow delete: if canReadOnboarding() && nbCanEdit();
+        // The notebook owner may change page shares; everyone else with edit
+        // rights (notebook editor or page editor) may edit content only — the
+        // page's own share lists must stay unchanged.
+        allow update: if canReadOnboarding() && (
+          pageOwner() || (
+            (nbCanEdit() || pageEditor())
+            && request.resource.data.sharedWithUserIds == resource.data.sharedWithUserIds
+            && request.resource.data.editorIds == resource.data.editorIds
+          )
+        );
+      }
+    }
+
     // Email trigger queue (Firebase Trigger Email extension). All sends now come
     // from Firestore-triggered Cloud Functions (onTicketCreated/Updated,
     // onCommentCreated, reminders, activation) using the Admin SDK, so clients
