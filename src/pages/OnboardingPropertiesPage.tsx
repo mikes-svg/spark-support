@@ -11,6 +11,7 @@ import { Modal } from '../components/Modal';
 import { ConfirmModal } from '../components/ConfirmModal';
 import { ChecklistTable, type ChecklistRow } from '../components/onboarding/ChecklistTable';
 import { PostponeModal } from '../components/onboarding/PostponeModal';
+import { NotebookPanel } from '../components/notebook/NotebookPanel';
 import { getOrSeedOnboardingTemplate } from '../lib/seedOnboardingTemplate';
 import { todayStr } from '../lib/dates';
 import {
@@ -57,6 +58,7 @@ export function OnboardingPropertiesPage() {
   const [propertiesError, setPropertiesError] = useState('');
   const [checklistError, setChecklistError] = useState('');
   const [showArchived, setShowArchived] = useState(false);
+  const [subTab, setSubTab] = useState<'checklist' | 'notebook'>('checklist');
 
   const [showNewModal, setShowNewModal] = useState(false);
   const [newName, setNewName] = useState('');
@@ -474,6 +476,25 @@ export function OnboardingPropertiesPage() {
         </div>
       ) : (
         <>
+          {/* Checklist / Notebook sub-tabs */}
+          <div className="inline-flex rounded-lg border border-gray-200 bg-gray-50 p-1">
+            {(['checklist', 'notebook'] as const).map((tab) => (
+              <button
+                key={tab}
+                onClick={() => setSubTab(tab)}
+                className={`px-4 py-1.5 text-sm font-medium rounded-md transition-colors ${
+                  subTab === tab ? 'bg-brand-dark text-white shadow-sm' : 'text-gray-600 hover:text-gray-900'
+                }`}
+              >
+                {tab === 'checklist' ? 'Checklist' : 'Notebook'}
+              </button>
+            ))}
+          </div>
+
+          {subTab === 'notebook' ? (
+            <NotebookPanel propertyId={property.id} />
+          ) : (
+          <>
           {/* Property header */}
           <div className="bg-white shadow-sm rounded-xl border border-gray-200 p-6 space-y-5">
             <div className="flex flex-wrap items-start justify-between gap-4">
@@ -581,6 +602,8 @@ export function OnboardingPropertiesPage() {
               onDeleteSection={(section) => setDeleteSectionTarget(section)}
               onAddSection={handleAddSection}
             />
+          )}
+          </>
           )}
         </>
       )}
