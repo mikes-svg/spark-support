@@ -149,6 +149,37 @@ export interface OnboardingTask {
   delays?: OnboardingDelay[];
 }
 
+// ─── Property notebooks ──────────────────────────────────────────────────────
+// One notebook per property, owned by its creator and private until shared.
+// `body` on a page is JSON.stringify(<TipTap doc>) — a string, so Firestore's
+// 20-level nesting cap can't reject a deeply-nested rich-text document.
+
+export interface OnboardingNotebook {
+  id: string;                 // == the property id (one notebook per property)
+  propertyId: string;
+  ownerId: string;            // creator uid
+  pageOrder: string[];        // page ids in display order
+  sharedWithUserIds: string[]; // notebook-level view access
+  editorIds: string[];        // notebook-level edit access
+  createdAt?: FsTimestamp;
+  updatedAt?: FsTimestamp;
+}
+
+export interface OnboardingNotebookPage {
+  id: string;
+  title: string;
+  body: string;               // JSON.stringify(<TipTap doc>)
+  sharedWithUserIds: string[]; // page-level view access (for users without notebook access)
+  editorIds: string[];        // page-level edit access
+  createdBy?: string;
+  order?: number;             // fallback ordering; pageOrder on the notebook is authoritative
+  createdAt?: FsTimestamp;
+  updatedAt?: FsTimestamp;
+}
+
+/** How a notebook or page is shared with one person. */
+export type NotebookShareLevel = 'none' | 'view' | 'edit';
+
 /** True if a ticket is scheduled for a future go-live and not yet live. */
 export function isScheduled(ticket: { status?: string | null }): boolean {
   return ticket.status === 'Scheduled';

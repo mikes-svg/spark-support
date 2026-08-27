@@ -1,182 +1,114 @@
-# Property Onboarding — pinned contract
+# Property Notebooks — pinned contract
 
-Coordination file for the onboarding swarm. **Do not edit files you don't own.**
-If you need a change to anything on this page, append a request under
-"Change requests" at the bottom and return `BLOCKED` — do not edit the shared
-file yourself.
+Coordination file for the notebook swarm. **Do not edit files you don't own.**
+Need a change to anything here? Append a request under "Change requests" and
+return `BLOCKED` — don't edit the shared file yourself.
 
-The foundation is already landed and typechecks clean (`npx tsc --noEmit` exits 0).
+The foundation is landed and typechecks clean (`npx tsc --noEmit` exits 0).
+TipTap 2.27 is installed. `firestore.rules` has the notebook rules.
 
-## Firestore collections
+## The feature
 
-| Collection | Docs | Who writes |
-|---|---|---|
-| `onboardingTemplate` | one per template row | superadmin only |
-| `onboardingProperties` | one per property | superadmin only |
-| `onboardingTasks` | one per checklist row per property (flat, not a subcollection) | anyone with onboarding access |
-| `profiles` | gains `onboardingAccess?: boolean` | superadmin only (existing rule) |
+One **notebook per property**, owned by its creator and **private until shared**.
+A notebook holds a flat list of **pages** (rich text). The owner can share the
+whole notebook or a single page with **onboarding users** as **view** or **edit**.
+Lives as a **Checklist / Notebook** sub-tab on the property page.
 
-Collection-name constants are exported from `src/lib/onboarding.ts` as
-`TEMPLATE`, `PROPERTIES`, `TASKS`.
-
-## Document shapes — `src/types.ts` (LANDED, do not redefine)
+## Data model — `src/types.ts` (LANDED)
 
 ```ts
-export type OnboardingStatus = 'Not Started' | 'In Progress' | 'Complete' | 'N/A';
-export const ONBOARDING_STATUSES: OnboardingStatus[];
-
-export interface OnboardingTemplateItem {
-  id: string; section: string; order: number; code: string;
-  indent: 0 | 1; title: string; responsibleIds: string[];
-  daysFromClosing: number | null;
+interface OnboardingNotebook {
+  id: string;                  // == propertyId (one per property)
+  propertyId: string;
+  ownerId: string;
+  pageOrder: string[];         // page ids in display order
+  sharedWithUserIds: string[]; // notebook-level view
+  editorIds: string[];         // notebook-level edit
+  createdAt?; updatedAt?;
 }
-
-export interface OnboardingProperty {
-  id: string; name: string;
-  closingDate: string | null;        // 'YYYY-MM-DD'
-  psaExecutionDate: string | null;
-  titleCommitmentDate: string | null;
-  titleNoticeDate: string | null;
-  ddCompletionDate: string | null;
-  extension: string; archived: boolean;
-  createdAt?: FsTimestamp; createdBy?: string;
+interface OnboardingNotebookPage {
+  id: string; title: string;
+  body: string;                // JSON.stringify(<TipTap doc>) — a STRING
+  sharedWithUserIds: string[]; // page-level view
+  editorIds: string[];         // page-level edit
+  createdBy?; order?; createdAt?; updatedAt?;
 }
+type NotebookShareLevel = 'none' | 'view' | 'edit';
+```
 
-export interface OnboardingDelay {
-  at: string; byId: string;
-  fromDate: string | null; toDate: string | null; reason: string;
+Firestore layout: `onboardingNotebooks/{propertyId}` with a `pages/{pageId}`
+subcollection. `body` is stored as a **string** (TipTap JSON stringified) — the
+20-level Firestore nesting cap rejects nested rich text otherwise.
+
+## `src/lib/notebooks.ts` (LANDED — consume, do not redefine)
+
+```ts
+NOTEBOOKS: string
+EMPTY_BODY: TipTapDoc                  // { type:'doc', content:[{type:'paragraph'}] }
+type TipTapDoc = Record<string, unknown>
+serializeBody(doc): string             parseBody(raw): TipTapDoc
+getNotebook(propertyId): Promise<OnboardingNotebook | null>   // throws permission-denied if private to someone else
+createNotebook(propertyId, ownerId): Promise<OnboardingNotebook>
+fetchPages(notebook): Promise<OnboardingNotebookPage[]>       // ordered by notebook.pageOrder
+createPage(notebook, title, createdBy): Promise<OnboardingNotebookPage>
+updatePage(propertyId, pageId, { title?, body? /* TipTapDoc */ }): Promise<void>  // serializes body for you
+deletePage(notebook, pageId): Promise<void>
+reorderPages(propertyId, pageOrder: string[]): Promise<void>
+shareNotebook(propertyId, userId, level): Promise<void>
+sharePage(propertyId, pageId, userId, level): Promise<void>
+fetchShareableUsers(): Promise<Profile[]>            // onboarding users only
+shareLevelOf(target, userId): NotebookShareLevel
+canViewNotebook(uid, nb) / canEditNotebook(uid, nb) / canManageShares(uid, nb): boolean
+canViewPage(uid, nb, page) / canEditPage(uid, nb, page): boolean
+```
+
+Access is strict: privacy holds even for superadmins — a user sees a notebook
+only if they own it or it's shared with them. Editing a notebook = add/edit/
+reorder/delete pages; **managing shares is owner-only**.
+
+## Component interfaces (pinned)
+
+**`src/components/notebook/NoteEditor.tsx`** (Editor lane — stub landed):
+```ts
+interface NoteEditorProps { initialBody: TipTapDoc; editable: boolean; onChange: (body: TipTapDoc) => void }
+```
+A controlled TipTap editor. Seed from `initialBody`; the panel remounts it per
+page via `key={page.id}`. Debounce edits (~800ms) and call `onChange(tiptapDoc)`;
+the panel persists via `updatePage`. Hide the toolbar / disable when `!editable`.
+Extensions available (installed): StarterKit, Link, Underline, Placeholder,
+TaskList, TaskItem, Image.
+
+**`src/components/notebook/ShareNotebookDialog.tsx`** (Sharing lane — stub landed):
+```ts
+type ShareTarget =
+  | { kind: 'notebook'; notebook: OnboardingNotebook }
+  | { kind: 'page'; notebook: OnboardingNotebook; page: OnboardingNotebookPage }
+interface ShareNotebookDialogProps {
+  open: boolean; target: ShareTarget | null; people: Profile[];
+  onShare: (userId, level) => Promise<void>; onClose: () => void;
 }
-
-export interface OnboardingTask {
-  id: string; propertyId: string; section: string; order: number;
-  code: string; indent: 0 | 1; title: string; responsibleIds: string[];
-  daysFromClosing: number | null;
-  dueDate: string | null;            // 'YYYY-MM-DD'
-  status: OnboardingStatus; notes: string;
-  delays?: OnboardingDelay[];
-}
-
-export interface Profile { /* … */ onboardingAccess?: boolean }
-
-/** Superadmin OR the granted flag. */
-export function hasOnboardingAccess(
-  profile?: { role?: string | null; onboardingAccess?: boolean } | null
-): boolean;
 ```
+KEEP the `ShareTarget` export and this shape — the panel imports both. Read the
+current level per user with `shareLevelOf(target.notebook|page, userId)`.
 
-**All dates are `'YYYY-MM-DD'` strings, never Firestore Timestamps.** They sort
-and range-query correctly as strings and avoid timezone drift.
+## Lane ownership
 
-## Helpers already available
+| Lane | Owns (create/edit only these) |
+|---|---|
+| Editor | `src/components/notebook/NoteEditor.tsx` |
+| Notebook panel | `src/components/notebook/NotebookPanel.tsx` (new), `src/pages/OnboardingPropertiesPage.tsx` (add a Checklist/Notebook sub-tab) |
+| Sharing | `src/components/notebook/ShareNotebookDialog.tsx` |
 
-`src/lib/dates.ts`
-```ts
-parseDateOnly(s): Date | null      toDateOnly(d: Date): string
-todayStr(): string                 addDaysStr(s, n): string | null
-diffDaysStr(from, to): number|null formatDateOnly(s): string
-```
+Shared/contract files (foundation-owned, everyone else read-only): `src/types.ts`,
+`src/lib/notebooks.ts`, `src/lib/onboarding.ts`, `firestore.rules`,
+`firestore.indexes.json`, `package.json`, this file.
 
-`src/lib/onboarding.ts`
-```ts
-export const PROPERTIES, TASKS, TEMPLATE: string          // collection names
-computeDueDate(closingDate, daysFromClosing): string | null
-deriveDaysFromClosing(closingDate, dueDate): number | null
-orderBetween(before: number|null, after: number|null): number
-groupBySection<T extends {section,order}>(rows): {section, rows}[]
-isTaskDone(task: {status}): boolean
-isOverdue(task: {status, dueDate?}, today: string): boolean
-fetchOnboardingPeople(): Promise<Profile[]>               // people w/ access, name-sorted
-fetchProperties(): Promise<OnboardingProperty[]>
-fetchTasksForProperty(id): Promise<OnboardingTask[]>
-createPropertyFromTemplate(input, template, createdBy)
-applyClosingDate(propertyId, closingDate, tasks): Promise<OnboardingTask[]>
-deletePropertyWithTasks(propertyId, tasks): Promise<void>
-renameSection(collectionName, rows, from, to): Promise<void>
-deleteRows(collectionName, rows: {id}[]): Promise<void>
-```
-
-`src/lib/seedOnboardingTemplate.ts`
-```ts
-getOrSeedOnboardingTemplate(profiles: Profile[]): Promise<OnboardingTemplateItem[]>
-```
-Reads `onboardingTemplate` ordered by `order`; seeds ~140 rows from the sheet on
-first use (needs superadmin write; fails silently → `[]` for everyone else).
-
-## The due-date rule (the sheet's formula)
-
-`dueDate = closingDate + daysFromClosing`, kept in sync **bidirectionally**:
-- edit the offset → recompute the due date (`computeDueDate`)
-- type a due date → re-derive the offset (`deriveDaysFromClosing`)
-- change the property's closing date → `applyClosingDate` rewrites every task
-  that carries an offset, in one batch
-
-## Component API — `src/components/onboarding/ChecklistTable.tsx` (LANDED)
-
-```ts
-export interface ChecklistRow {
-  id: string; section: string; order: number; code: string;
-  indent: 0 | 1; title: string; responsibleIds: string[];
-  daysFromClosing: number | null;
-  dueDate?: string | null; status?: OnboardingStatus;
-  notes?: string; delays?: OnboardingDelay[];
-}
-
-<ChecklistTable
-  rows={ChecklistRow[]}
-  people={Profile[]}
-  mode={'template' | 'property'}   // 'template' hides Due Date/Status/Notes
-  closingDate={string | null}      // property mode only
-  canEdit={boolean}
-  onPatchRow={(row, patch: Partial<ChecklistRow>) => void}
-  onDueDateChange={(row, dueDate: string | null) => void}   // property mode
-  onAddRow={(section: string, afterRow: ChecklistRow | null) => void}
-  onDeleteRow={(row) => void}
-  onMoveRow={(row, direction: -1 | 1) => void}
-  onRenameSection={(from: string, to: string) => void}
-  onDeleteSection={(section: string) => void}
-  onAddSection={() => void}
-/>
-```
-
-`src/components/onboarding/PostponeModal.tsx`
-```ts
-<PostponeModal
-  open={boolean} taskTitle={string}
-  fromDate={string | null} initialDate={string | null}
-  onCancel={() => void}
-  onConfirm={(toDate: string | null, reason: string) => void}
-/>
-```
-
-## Routes (pinned — lanes must agree)
-
-| Path | Page component (named export) | Guard |
-|---|---|---|
-| `/onboarding` | `OnboardingMyTasksPage` | onboarding access |
-| `/onboarding/properties` | `OnboardingPropertiesPage` | onboarding access |
-| `/onboarding/properties/:propertyId` | `OnboardingPropertiesPage` | onboarding access |
-| `/onboarding/template` | `OnboardingTemplatePage` | superadmin |
-
-All three pages live in `src/pages/`, are **named** exports (not default), and
-are lazy-loaded in `App.tsx` following the existing pattern.
-
-## Permission model
-
-- **Superadmin**: everything — template editing, property create/archive/delete,
-  property header fields, and every checklist row.
-- **Onboarding access** (`profiles.onboardingAccess === true`): read the template,
-  read properties, and fully edit `onboardingTasks` rows (status, notes,
-  responsibility, dates, add/delete rows, rename sections).
-- **Nobody else**: no read access to any onboarding collection.
-
-## Existing patterns to follow
-
-- Optimistic update + rollback on error, with an `actionError` banner —
-  see `src/pages/TeamPage.tsx` and `src/pages/AdminSettingsPage.tsx`.
-- `PageSpinner` while loading; `Modal` / `ConfirmModal` for dialogs.
-- Cloud Functions: `escapeHtml`, `sendMail`, `emailsForAssignees`, `APP_URL`,
-  `REGION` already exist in `functions/index.js` — reuse them.
+## Existing patterns to reuse
+- `useAuth()` → `{ user }`; `user.id` is the uid.
+- `Modal` / `ConfirmModal` in `src/components/`, `PageSpinner`.
+- Optimistic update + rollback + an `actionError` banner — see
+  `src/pages/OnboardingPropertiesPage.tsx` and `TeamPage.tsx`.
+- Brand tokens: `brand-dark` (#064923), `brand-gold`, `font-serif`.
 
 ## Change requests
-
-_(append here if you need a contract change, then return BLOCKED)_
+_(append here, then return BLOCKED)_
