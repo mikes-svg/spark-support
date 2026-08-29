@@ -9,11 +9,14 @@ import Placeholder from '@tiptap/extension-placeholder';
 import TaskList from '@tiptap/extension-task-list';
 import TaskItem from '@tiptap/extension-task-item';
 import Image from '@tiptap/extension-image';
-import { useEffect, useRef } from 'react';
+import TextStyle from '@tiptap/extension-text-style';
+import Color from '@tiptap/extension-color';
+import { useEffect, useRef, useState } from 'react';
 import {
   Bold,
   Italic,
   Underline as UnderlineIcon,
+  Strikethrough,
   Heading1,
   Heading2,
   List,
@@ -21,6 +24,8 @@ import {
   ListChecks,
   Link2,
   RemoveFormatting,
+  Baseline,
+  ImagePlus,
 } from 'lucide-react';
 import type { TipTapDoc } from '../../lib/notebooks';
 
@@ -31,16 +36,42 @@ export interface NoteEditorProps {
   editable: boolean;
   /** Called (debounced ~800ms) with the current TipTap doc as the user types. */
   onChange: (body: TipTapDoc) => void;
+  /**
+   * Upload an image (pasted, dropped, or picked) and resolve its URL for
+   * embedding. When omitted, image insertion is disabled. Should throw on
+   * failure; the editor reports the message inline.
+   */
+  onImageUpload?: (file: File) => Promise<string>;
 }
 
 const DEBOUNCE_MS = 800;
 
-export function NoteEditor({ initialBody, editable, onChange }: NoteEditorProps) {
+/** Text-color swatches offered in the toolbar. */
+const TEXT_COLORS: { name: string; value: string }[] = [
+  { name: 'Green', value: '#064923' },
+  { name: 'Red', value: '#DC2626' },
+  { name: 'Orange', value: '#EA580C' },
+  { name: 'Amber', value: '#B45309' },
+  { name: 'Emerald', value: '#16A34A' },
+  { name: 'Blue', value: '#2563EB' },
+  { name: 'Purple', value: '#7C3AED' },
+  { name: 'Gray', value: '#6B7280' },
+];
+
+export function NoteEditor({ initialBody, editable, onChange, onImageUpload }: NoteEditorProps) {
   const onChangeRef = useRef(onChange);
   onChangeRef.current = onChange;
+  const onImageUploadRef = useRef(onImageUpload);
+  onImageUploadRef.current = onImageUpload;
 
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pendingRef = useRef<TipTapDoc | null>(null);
+  const editorRef = useRef<ReturnType<typeof useEditor> | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const insertImagesRef = useRef<(files: File[]) => void>(() => {});
+  const [colorOpen, setColorOpen] = useState(false);
+  const [imageError, setImageError] = useState('');
+  const [uploading, setUploading] = useState(false);
 
   const editor = useEditor({
     extensions: [
@@ -51,10 +82,28 @@ export function NoteEditor({ initialBody, editable, onChange }: NoteEditorProps)
       TaskList,
       TaskItem.configure({ nested: true }),
       Image,
+      TextStyle,
+      Color,
     ],
     content: initialBody,
     editable,
     immediatelyRender: true,
+    editorProps: {
+      handlePaste: (_view, event) => {
+        const files = imageFilesFrom(event.clipboardData?.files);
+        if (!files.length || !onImageUploadRef.current) return false;
+        event.preventDefault();
+        insertImagesRef.current(files);
+        return true;
+      },
+      handleDrop: (_view, event) => {
+        const files = imageFilesFrom(event.dataTransfer?.files);
+        if (!files.length || !onImageUploadRef.current) return false;
+        event.preventDefault();
+        insertImagesRef.current(files);
+        return true;
+      },
+    },
     onUpdate: ({ editor }) => {
       if (timeoutRef.current) clearTimeout(timeoutRef.current);
       timeoutRef.current = setTimeout(() => {
@@ -65,6 +114,30 @@ export function NoteEditor({ initialBody, editable, onChange }: NoteEditorProps)
       pendingRef.current = editor.getJSON();
     },
   });
+
+  editorRef.current = editor;
+
+  // Upload each image and insert it at the cursor once its URL resolves. Held in
+  // a ref so the editor's paste/drop handlers (bound once at init) always call
+  // the current implementation.
+  insertImagesRef.current = (files: File[]) => {
+    const upload = onImageUploadRef.current;
+    if (!upload) return;
+    setImageError('');
+    setUploading(true);
+    (async () => {
+      for (const file of files) {
+        try {
+          const url = await upload(file);
+          editorRef.current?.chain().focus().setImage({ src: url }).run();
+        } catch (err) {
+          console.error('Failed to add image:', err);
+          setImageError(err instanceof Error ? err.message : 'Could not add the image.');
+        }
+      }
+      setUploading(false);
+    })();
+  };
 
   useEffect(() => {
     if (!editor) return;
@@ -122,6 +195,13 @@ export function NoteEditor({ initialBody, editable, onChange }: NoteEditorProps)
           >
             <UnderlineIcon className="h-4 w-4" />
           </ToolbarButton>
+          <ToolbarButton
+            active={editor.isActive('strike')}
+            label="Strikethrough"
+            onClick={() => editor.chain().focus().toggleStrike().run()}
+          >
+            <Strikethrough className="h-4 w-4" />
+          </ToolbarButton>
           <Divider />
           <ToolbarButton
             active={editor.isActive('heading', { level: 1 })}
@@ -163,6 +243,83 @@ export function NoteEditor({ initialBody, editable, onChange }: NoteEditorProps)
           <ToolbarButton active={editor.isActive('link')} label="Link" onClick={setLink}>
             <Link2 className="h-4 w-4" />
           </ToolbarButton>
+          <Divider />
+          <div className="relative">
+            <ToolbarButton
+              active={colorOpen || !!(editor.getAttributes('textStyle').color)}
+              label="Text color"
+              onClick={() => setColorOpen((v) => !v)}
+            >
+              <Baseline
+                className="h-4 w-4"
+                style={{ color: (editor.getAttributes('textStyle').color as string) || undefined }}
+              />
+            </ToolbarButton>
+            {colorOpen && (
+              <>
+                {/* click-away backdrop */}
+                <div className="fixed inset-0 z-10" onClick={() => setColorOpen(false)} />
+                <div className="absolute left-0 top-full z-20 mt-1 w-44 rounded-md border border-gray-200 bg-white p-2 shadow-lg">
+                  <div className="grid grid-cols-4 gap-1.5">
+                    {TEXT_COLORS.map((c) => {
+                      const isActive = editor.getAttributes('textStyle').color === c.value;
+                      return (
+                        <button
+                          key={c.value}
+                          type="button"
+                          aria-label={c.name}
+                          title={c.name}
+                          onClick={() => {
+                            editor.chain().focus().setColor(c.value).run();
+                            setColorOpen(false);
+                          }}
+                          className={`h-6 w-6 rounded-full border transition-transform hover:scale-110 ${
+                            isActive ? 'ring-2 ring-offset-1 ring-gray-400' : 'border-gray-200'
+                          }`}
+                          style={{ backgroundColor: c.value }}
+                        />
+                      );
+                    })}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      editor.chain().focus().unsetColor().run();
+                      setColorOpen(false);
+                    }}
+                    className="mt-2 w-full rounded px-2 py-1 text-left text-xs font-medium text-gray-600 hover:bg-gray-100"
+                  >
+                    Default color
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+          {onImageUpload && (
+            <>
+              <Divider />
+              <ToolbarButton
+                active={false}
+                disabled={uploading}
+                label={uploading ? 'Adding image…' : 'Insert image'}
+                onClick={() => fileInputRef.current?.click()}
+              >
+                <ImagePlus className="h-4 w-4" />
+              </ToolbarButton>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/*"
+                multiple
+                className="hidden"
+                onChange={(e) => {
+                  insertImagesRef.current(imageFilesFrom(e.target.files));
+                  e.target.value = '';
+                }}
+              />
+            </>
+          )}
+          <Divider />
           <ToolbarButton
             active={false}
             label="Clear formatting"
@@ -171,6 +328,9 @@ export function NoteEditor({ initialBody, editable, onChange }: NoteEditorProps)
             <RemoveFormatting className="h-4 w-4" />
           </ToolbarButton>
         </div>
+      )}
+      {imageError && (
+        <p className="text-xs text-red-700" role="alert">{imageError}</p>
       )}
       <EditorContent
         editor={editor}
@@ -181,6 +341,8 @@ export function NoteEditor({ initialBody, editable, onChange }: NoteEditorProps)
           [&_ul]:list-disc [&_ul]:pl-5 [&_ul]:my-2
           [&_ol]:list-decimal [&_ol]:pl-5 [&_ol]:my-2
           [&_a]:text-brand-dark [&_a]:underline
+          [&_img]:max-w-full [&_img]:h-auto [&_img]:rounded-md [&_img]:my-2
+          [&_img.ProseMirror-selectednode]:outline [&_img.ProseMirror-selectednode]:outline-2 [&_img.ProseMirror-selectednode]:outline-brand-dark
           [&_strong]:font-semibold
           [&_.is-editor-empty:first-child]:before:text-gray-400
           [&_.is-editor-empty:first-child]:before:float-left
@@ -190,7 +352,9 @@ export function NoteEditor({ initialBody, editable, onChange }: NoteEditorProps)
           [&_ul[data-type=taskList]_li]:flex [&_ul[data-type=taskList]_li]:items-start
           [&_ul[data-type=taskList]_li]:gap-2 [&_ul[data-type=taskList]_li]:my-1
           [&_ul[data-type=taskList]_li_>_label]:mt-1
-          [&_ul[data-type=taskList]_li_>_div]:flex-1"
+          [&_ul[data-type=taskList]_li_>_div]:flex-1
+          [&_ul[data-type=taskList]_li[data-checked=true]_>_div]:line-through
+          [&_ul[data-type=taskList]_li[data-checked=true]_>_div]:text-gray-400"
       />
     </div>
   );
@@ -201,11 +365,13 @@ function ToolbarButton({
   label,
   onClick,
   children,
+  disabled = false,
 }: {
   active: boolean;
   label: string;
   onClick: () => void;
   children: React.ReactNode;
+  disabled?: boolean;
 }) {
   return (
     <button
@@ -213,7 +379,8 @@ function ToolbarButton({
       aria-label={label}
       title={label}
       onClick={onClick}
-      className={`rounded p-1.5 transition-colors ${
+      disabled={disabled}
+      className={`rounded p-1.5 transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
         active ? 'bg-brand-dark text-white' : 'text-gray-600 hover:bg-gray-200'
       }`}
     >
@@ -224,4 +391,10 @@ function ToolbarButton({
 
 function Divider() {
   return <span className="mx-1 h-5 w-px bg-gray-300" />;
+}
+
+/** Pull image files out of a paste/drop FileList (ignores non-images). */
+function imageFilesFrom(list: FileList | null | undefined): File[] {
+  if (!list) return [];
+  return Array.from(list).filter((f) => f.type.startsWith('image/'));
 }

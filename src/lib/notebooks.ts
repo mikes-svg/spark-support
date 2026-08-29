@@ -10,7 +10,8 @@ import {
   arrayUnion,
   arrayRemove,
 } from 'firebase/firestore';
-import { db } from './firebase';
+import { ref as storageRef, uploadBytes, getDownloadURL } from 'firebase/storage';
+import { db, storage } from './firebase';
 import { fetchOnboardingPeople } from './onboarding';
 import type {
   OnboardingNotebook,
@@ -55,6 +56,41 @@ export function parseBody(raw: unknown): TipTapDoc {
     }
   }
   return EMPTY_BODY;
+}
+
+/**
+ * Flatten a page body (stored string or TipTap doc) to plain text for search.
+ * Walks the ProseMirror node tree, concatenating `text` nodes and inserting a
+ * space at block boundaries so words across paragraphs don't run together.
+ */
+export function bodyPlainText(raw: unknown): string {
+  const doc = parseBody(raw);
+  const parts: string[] = [];
+  const walk = (node: unknown): void => {
+    if (!node || typeof node !== 'object') return;
+    const n = node as { type?: string; text?: string; content?: unknown[] };
+    if (typeof n.text === 'string') parts.push(n.text);
+    if (Array.isArray(n.content)) {
+      n.content.forEach(walk);
+      parts.push(' '); // block boundary
+    }
+  };
+  walk(doc);
+  return parts.join('').replace(/\s+/g, ' ').trim();
+}
+
+/**
+ * If `text` contains `query` (case-insensitive), return a short excerpt centered
+ * on the first match, else null. Used to preview which pages a search matched.
+ */
+export function matchSnippet(text: string, query: string, pad = 32): string | null {
+  const q = query.trim().toLowerCase();
+  if (!q) return null;
+  const idx = text.toLowerCase().indexOf(q);
+  if (idx < 0) return null;
+  const start = Math.max(0, idx - pad);
+  const end = Math.min(text.length, idx + q.length + pad);
+  return (start > 0 ? '…' : '') + text.slice(start, end).trim() + (end < text.length ? '…' : '');
 }
 
 // ─── Notebook + page reads ───────────────────────────────────────────────────
@@ -154,6 +190,28 @@ export async function deletePage(notebook: OnboardingNotebook, pageId: string): 
 export async function reorderPages(propertyId: string, pageOrder: string[]): Promise<void> {
   if (!db) return;
   await updateDoc(notebookRef(propertyId), { pageOrder, updatedAt: serverTimestamp() });
+}
+
+// ─── Images ──────────────────────────────────────────────────────────────────
+
+const MAX_IMAGE_BYTES = 10 * 1024 * 1024; // mirrors storage.rules
+
+/**
+ * Upload an image pasted/dropped into a notebook to Storage and return its
+ * download URL for embedding in the page body. A random filename avoids
+ * collisions; the tokenized URL is what gets stored (not base64), keeping the
+ * page doc well under Firestore's 1 MiB limit.
+ */
+export async function uploadNotebookImage(propertyId: string, file: File): Promise<string> {
+  if (!storage) throw new Error('Storage is not configured.');
+  if (!file.type.startsWith('image/')) throw new Error('Only image files can be added.');
+  if (file.size > MAX_IMAGE_BYTES) throw new Error('Image is too large (max 10 MB).');
+  const ext = (file.name.match(/\.[a-z0-9]+$/i)?.[0] || '').toLowerCase();
+  const rand = Math.random().toString(36).slice(2);
+  const name = `${Date.now()}-${rand}${ext}`;
+  const objectRef = storageRef(storage, `notebookImages/${propertyId}/${name}`);
+  await uploadBytes(objectRef, file, { contentType: file.type });
+  return getDownloadURL(objectRef);
 }
 
 // ─── Sharing ─────────────────────────────────────────────────────────────────

@@ -1,5 +1,5 @@
-import { useState, useEffect, useCallback } from 'react';
-import { Plus, Trash2, ChevronUp, ChevronDown, Share2, Pencil, BookOpen } from 'lucide-react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
+import { Plus, Trash2, ChevronUp, ChevronDown, Share2, Pencil, BookOpen, Search, X } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { PageSpinner } from '../PageSpinner';
 import { ConfirmModal } from '../ConfirmModal';
@@ -22,6 +22,9 @@ import {
   canManageShares,
   canViewPage,
   canEditPage,
+  bodyPlainText,
+  matchSnippet,
+  uploadNotebookImage,
   type TipTapDoc,
 } from '../../lib/notebooks';
 import type {
@@ -57,6 +60,7 @@ export function NotebookPanel({ propertyId }: NotebookPanelProps) {
   const [renameValue, setRenameValue] = useState('');
   const [deleteTarget, setDeleteTarget] = useState<OnboardingNotebookPage | null>(null);
   const [shareTarget, setShareTarget] = useState<ShareTarget | null>(null);
+  const [query, setQuery] = useState('');
 
   const loadNotebook = useCallback(async () => {
     setLoading(true);
@@ -104,6 +108,23 @@ export function NotebookPanel({ propertyId }: NotebookPanelProps) {
   const canShare = !!notebook && canManageShares(uid, notebook);
   const visiblePages = notebook ? pages.filter((p) => canViewPage(uid, notebook, p)) : [];
   const selectedPage = visiblePages.find((p) => p.id === selectedPageId) ?? null;
+
+  // Search across the property's notebook — page titles and body text. Null
+  // when the box is empty (the full page rail shows instead of results).
+  const searchResults = useMemo(() => {
+    const q = query.trim();
+    if (!q || !notebook) return null;
+    const ql = q.toLowerCase();
+    return pages
+      .filter((p) => canViewPage(uid, notebook, p))
+      .map((p) => {
+        const inTitle = p.title.toLowerCase().includes(ql);
+        const snippet = matchSnippet(bodyPlainText(p.body), q);
+        if (!inTitle && !snippet) return null;
+        return { page: p, snippet: snippet ?? 'Title match' };
+      })
+      .filter((r): r is { page: OnboardingNotebookPage; snippet: string } => r !== null);
+  }, [query, pages, notebook, uid]);
 
   const handleStartNotebook = async () => {
     if (!uid) return;
@@ -302,6 +323,57 @@ export function NotebookPanel({ propertyId }: NotebookPanelProps) {
             )}
           </div>
 
+          <div className="px-3 py-2 border-b border-gray-200">
+            <div className="relative">
+              <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-gray-400" />
+              <input
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="Search notes…"
+                className="w-full rounded-md border border-gray-300 bg-white py-1.5 pl-8 pr-7 text-sm focus:outline-none focus:ring-2 focus:ring-brand-dark"
+              />
+              {query && (
+                <button
+                  onClick={() => setQuery('')}
+                  aria-label="Clear search"
+                  className="absolute right-1.5 top-1/2 -translate-y-1/2 p-0.5 text-gray-400 hover:text-gray-700"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              )}
+            </div>
+          </div>
+
+          {searchResults !== null ? (
+            <div className="flex-1 overflow-y-auto py-2">
+              {searchResults.length === 0 ? (
+                <p className="px-4 py-6 text-sm text-gray-500 text-center">
+                  No pages match “{query.trim()}”.
+                </p>
+              ) : (
+                <ul className="space-y-0.5 px-2">
+                  {searchResults.map(({ page, snippet }) => {
+                    const active = page.id === selectedPageId;
+                    return (
+                      <li key={page.id}>
+                        <button
+                          onClick={() => setSelectedPageId(page.id)}
+                          className={`w-full rounded-md px-2 py-1.5 text-left transition-colors ${
+                            active ? 'bg-brand-dark text-white' : 'text-gray-700 hover:bg-gray-100'
+                          }`}
+                        >
+                          <span className="block truncate text-sm font-medium">{page.title}</span>
+                          <span className={`block truncate text-xs ${active ? 'text-white/70' : 'text-gray-500'}`}>
+                            {snippet}
+                          </span>
+                        </button>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+            </div>
+          ) : (
           <div className="flex-1 overflow-y-auto py-2">
             {visiblePages.length === 0 ? (
               <p className="px-4 py-6 text-sm text-gray-500 text-center">No pages yet.</p>
@@ -378,6 +450,7 @@ export function NotebookPanel({ propertyId }: NotebookPanelProps) {
               </ul>
             )}
           </div>
+          )}
 
           {canEdit && (
             <div className="border-t border-gray-200 p-3">
@@ -470,6 +543,7 @@ export function NotebookPanel({ propertyId }: NotebookPanelProps) {
                     initialBody={parseBody(selectedPage.body)}
                     editable={editablePage}
                     onChange={(body) => handleBodyChange(selectedPage, body)}
+                    onImageUpload={editablePage ? (file) => uploadNotebookImage(propertyId, file) : undefined}
                   />
                 </div>
               );
