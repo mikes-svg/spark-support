@@ -1,9 +1,10 @@
 /**
  * Cloud Functions for Spark Support
  *
- * - sendTicketReminders: scheduled every 24 hours. For each ticket with status
- *   'Open' or 'In Progress' that is at least 24 hours old, email all assignees
- *   a reminder. Tracks `lastReminderAt` on each ticket to avoid duplicate emails.
+ * - sendTicketReminders: scheduled every 24 hours. Sends each assignee a single
+ *   daily digest listing all of their 'Open'/'In Progress' tickets (most urgent,
+ *   then longest-open, first), so someone with many tickets gets one email a day
+ *   instead of one per ticket. People with no open tickets get no mail.
  *
  * - activateScheduledTickets: runs every 5 minutes. For each ticket with status
  *   'Scheduled' whose `scheduledFor` date has passed, flip it to 'Open' as if
@@ -15,10 +16,11 @@
  *   responsible person a single digest email grouped by property, so an aging
  *   checklist nags once a day instead of once per row.
  *
- * Both ticket handlers commit all of a ticket's writes in a single atomic WriteBatch,
- * and isolate per-ticket failures, so a partial failure can't half-apply
- * (re-spamming reminders or dropping a scheduled ticket's notifications) and one
- * bad ticket can't abort the rest of the run.
+ * activateScheduledTickets commits each ticket's writes in a single atomic
+ * WriteBatch and isolates per-ticket failures, so a partial failure can't
+ * half-apply (dropping a scheduled ticket's notifications) and one bad ticket
+ * can't abort the rest of the run. The digests isolate per-recipient failures
+ * so one bad address can't abort a run.
  */
 
 const { onSchedule } = require('firebase-functions/v2/scheduler');
@@ -231,68 +233,75 @@ exports.sendTicketReminders = onSchedule(
   },
   async () => {
     const now = Date.now();
-    const dayAgo = new Date(now - 24 * 60 * 60 * 1000);
 
-    // Query open/in-progress tickets
+    // Every open/in-progress ticket. Grouped by assignee below into one digest
+    // per person, rather than one email per ticket.
     const ticketsSnap = await db
       .collection('tickets')
       .where('status', 'in', ['Open', 'In Progress'])
       .get();
 
-    logger.info(`Checking ${ticketsSnap.size} open/in-progress tickets`);
-
-    let remindersSent = 0;
-
+    // assignee id -> the tickets assigned to them. A ticket with two assignees
+    // lands in both digests; an unassigned ticket has no recipient and is skipped.
+    const byPerson = new Map();
     for (const ticketDoc of ticketsSnap.docs) {
-      try {
-        const ticket = ticketDoc.data();
-        const createdAt = ticket.createdAt?.toDate?.() || new Date(ticket.createdAt);
-        const lastReminderAt = ticket.lastReminderAt?.toDate?.();
-
-        // Skip tickets younger than 24h
-        if (createdAt > dayAgo) continue;
-
-        // Skip if reminded in the last 24h
-        if (lastReminderAt && lastReminderAt > dayAgo) continue;
-
-        const emails = await emailsForAssignees(getAssigneeIds(ticket));
-        if (emails.length === 0) continue;
-
-        // Calculate days open
-        const daysOpen = Math.floor((now - createdAt.getTime()) / (1000 * 60 * 60 * 24));
-        const title = escapeHtml(ticket.title);
-        const status = escapeHtml(ticket.status);
-        const priority = escapeHtml(ticket.priority);
-
-        // All mail docs + the dedup timestamp commit atomically: a partial
-        // failure can't leave lastReminderAt stale and re-spam on the next run.
-        const batch = db.batch();
-        for (const email of emails) {
-          batch.set(db.collection('mail').doc(), {
-            to: email,
-            message: {
-              subject: `Reminder: ${ticketDoc.id} is still ${ticket.status}`,
-              html: `
-                <p>This is a reminder that ticket <strong>${ticketDoc.id}</strong> — ${title} — is still <strong>${status}</strong> after ${daysOpen} day${daysOpen === 1 ? '' : 's'}.</p>
-                <p>Priority: <strong>${priority}</strong></p>
-                <p><a href="${APP_URL}/tickets/${ticketDoc.id}">View ticket →</a></p>
-                <hr style="margin:16px 0;border:none;border-top:1px solid #e5e7eb"/>
-                <p style="color:#9ca3af;font-size:12px">Please do not reply to this email. To respond, <a href="${APP_URL}/tickets/${ticketDoc.id}">click here to view the ticket</a>.</p>
-              `,
-            },
-          });
-        }
-        batch.update(ticketDoc.ref, {
-          lastReminderAt: admin.firestore.FieldValue.serverTimestamp(),
-        });
-        await batch.commit();
-        remindersSent += emails.length;
-      } catch (err) {
-        logger.error(`Reminder failed for ticket ${ticketDoc.id}`, err);
+      const ticket = ticketDoc.data();
+      const assigneeIds = getAssigneeIds(ticket);
+      if (assigneeIds.length === 0) continue;
+      const entry = {
+        id: ticketDoc.id,
+        title: ticket.title,
+        status: ticket.status,
+        priority: ticket.priority,
+        createdAt: ticket.createdAt?.toDate?.() || new Date(ticket.createdAt),
+      };
+      for (const personId of assigneeIds) {
+        if (!byPerson.has(personId)) byPerson.set(personId, []);
+        byPerson.get(personId).push(entry);
       }
     }
 
-    logger.info(`Sent ${remindersSent} reminder emails`);
+    logger.info(`Ticket digest: ${ticketsSnap.size} open/in-progress tickets for ${byPerson.size} assignees`);
+
+    // Sort each digest most-urgent first, then longest-open first.
+    const PRIORITY_RANK = { Urgent: 0, High: 1, Medium: 2, Low: 3 };
+    let sent = 0;
+
+    for (const [personId, tickets] of byPerson) {
+      try {
+        const [email] = await emailsForAssignees([personId]);
+        if (!email) continue;
+
+        tickets.sort((a, b) => {
+          const byPriority = (PRIORITY_RANK[a.priority] ?? 9) - (PRIORITY_RANK[b.priority] ?? 9);
+          return byPriority !== 0 ? byPriority : a.createdAt - b.createdAt;
+        });
+
+        const rows = tickets.map((t) => {
+          const daysOpen = Math.floor((now - t.createdAt.getTime()) / (1000 * 60 * 60 * 24));
+          return (
+            `<li><a href="${APP_URL}/tickets/${t.id}">${escapeHtml(t.id)}</a> — ${escapeHtml(t.title)} ` +
+            `(<strong>${escapeHtml(t.status)}</strong>, ${escapeHtml(t.priority)} priority, ` +
+            `open ${daysOpen} day${daysOpen === 1 ? '' : 's'})</li>`
+          );
+        });
+
+        await sendMail(
+          email,
+          `Your open tickets: ${tickets.length} still need attention`,
+          `<p>You have <strong>${tickets.length}</strong> open ticket${tickets.length === 1 ? '' : 's'} assigned to you:</p>` +
+          `<ul>${rows.join('')}</ul>` +
+          `<p><a href="${APP_URL}/">Open My Tickets →</a></p>` +
+          `<hr style="margin:16px 0;border:none;border-top:1px solid #e5e7eb"/>` +
+          `<p style="color:#9ca3af;font-size:12px">This is your daily summary. Please do not reply to this email.</p>`,
+        );
+        sent++;
+      } catch (err) {
+        logger.error(`Ticket digest failed for ${personId}`, err);
+      }
+    }
+
+    logger.info(`Sent ${sent} ticket digest emails`);
   }
 );
 
