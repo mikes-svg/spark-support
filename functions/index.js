@@ -227,7 +227,9 @@ exports.getTicketAttachments = onCall({ region: REGION }, async (request) => {
 
 exports.sendTicketReminders = onSchedule(
   {
-    schedule: 'every 24 hours',
+    // Fixed 7am send (like sendOnboardingReminders) rather than 'every 24 hours',
+    // which anchors to deploy time and drifted the digest to ~9pm.
+    schedule: 'every day 07:00',
     timeZone: 'America/Los_Angeles',
     region: 'us-central1',
   },
