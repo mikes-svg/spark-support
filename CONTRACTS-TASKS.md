@@ -495,3 +495,76 @@ above: `getPageTitle()` in `src/components/Layout.tsx` has no entry for
 
 Once this lands, phase 5's DONE-CHECK is green end to end; nothing else is
 outstanding from this lane.
+### Lane 6 (Google Calendar) — 2026-09-23
+
+Lane 6 is built, green and committed, but **cannot deploy** until one shared file
+changes. Nothing below was edited by lane 6.
+
+**1. `functions/index.js` — seven re-exports (required; the lane is inert without them).**
+
+Two new modules. `gcalWebhook.js` requires `gcal.js`, so require order does not
+matter, but each function must be re-exported from exactly ONE module or it will
+register twice:
+
+```js
+const gcal = require('./gcal');
+const gcalWebhook = require('./gcalWebhook');
+
+// ─── gcal.js ─────────────────────────────────────────────────────────────────
+exports.gcalAuthUrl = gcal.gcalAuthUrl;                     // callable
+exports.gcalConnect = gcal.gcalConnect;                     // callable
+exports.gcalDisconnect = gcal.gcalDisconnect;               // callable
+exports.gcalStatus = gcal.gcalStatus;                       // callable
+exports.onTaskWrittenGcalSync = gcal.onTaskWrittenGcalSync; // onDocumentWritten tasks/{taskId}
+exports.renewGcalChannels = gcal.renewGcalChannels;         // scheduled 03:00 America/Chicago
+
+// ─── gcalWebhook.js ──────────────────────────────────────────────────────────
+exports.gcalWebhook = gcalWebhook.gcalWebhook;              // onRequest (public HTTPS)
+```
+
+Notes for whoever lands this:
+
+- `onTaskWrittenGcalSync` is deliberately a SEPARATE trigger from lane 5's
+  `onTaskCreated` / `onTaskUpdated` on the same path. Two v2 triggers may watch
+  one document, and coupling calendar sync to the notification function would let
+  a Google outage swallow someone's assignment email. Please don't merge them.
+- The callable table above lists `gcalConnect` / `gcalDisconnect` / `gcalWebhook`.
+  `gcalAuthUrl` and `gcalStatus` are additions: the consent URL is built
+  server-side so the client id never enters the bundle, and status is a callable
+  because `gcalConnections` is (correctly) unreadable by any client.
+- All seven no-op when `GCAL_CLIENT_ID` / `GCAL_CLIENT_SECRET` /
+  `GCAL_REDIRECT_URI` are unset, so they are safe to deploy before the customer's
+  OAuth client exists.
+
+**2. `vitest.config.ts` (or `package.json`) — the lane's tests are not in `npm test`.**
+
+`functions/__tests__/gcal.test.js` holds 40 tests covering loop suppression,
+token refresh and the 401 retry, webhook token rejection, all-day vs timed
+mapping, and channel renewal. They are `node:test` + `node:assert` and run green
+today with `node --test functions/__tests__/gcal.test.js`.
+
+`vitest.config.ts` includes only `src/**/*.test.ts(x)`, so `npm test` does not see
+them and a regression in the sync rules would pass CI. Either fix works:
+
+- add `"test:functions": "node --test functions/__tests__/"` to `package.json` and
+  run it in CI alongside `npm test`; or
+- widen the vitest `include` to
+  `['src/**/*.test.ts', 'src/**/*.test.tsx', 'functions/**/*.test.js']`.
+
+**3. No rules or index changes needed — please keep it that way.**
+
+`gcalConnections` (refresh tokens) and `gcalChannels` (per-channel webhook
+secrets) are intentionally ABSENT from `firestore.rules`. There is no catch-all
+`match /{document=**}`, so the default deny already makes them unreachable from
+every client at every role. Adding a rule for either — even a read-only one for a
+status widget — would put a refresh token one typo away from the browser. The
+settings page reads status through the `gcalStatus` callable for that reason.
+
+The webhook's `tasks` lookup by `gcalEventId` is a single-field filter with no
+ordering, which the automatic single-field index covers. No composite index.
+
+**4. Nav gap (low priority, not a blocker).** `/settings/calendar` has a route but
+no sidebar entry, so it is reachable only by typing the URL. It also falls under
+the already-logged `getPageTitle()` gap in `Layout.tsx` and shows "Portal" in the
+top bar.
+
