@@ -11,6 +11,12 @@ import {
   ClipboardList,
   Building2,
   LayoutTemplate,
+  ListChecks,
+  ListTodo,
+  CalendarDays,
+  Gauge,
+  SlidersHorizontal,
+  UserMinus,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { roleLabel, isAdminRole, isSuperadminRole, hasOnboardingAccess } from '../types';
@@ -61,19 +67,31 @@ function SidebarContent({ onClose }: { onClose: () => void }) {
   const navItems: NavItem[] = [
     { to: '/', icon: LayoutDashboard, label: 'My Tickets', exact: true },
     { to: '/submit', icon: PlusCircle, label: 'Submit Request', ariaLabel: 'Submit Request page' },
+    // Tasks are open to everyone (plan §2), so these sit in the User section
+    // for all roles. 'My Tasks' is exact so /tasks/all and /tasks/calendar
+    // don't leave it highlighted alongside their own entry.
+    { to: '/tasks', icon: ListChecks, label: 'My Tasks', exact: true },
+    { to: '/tasks/all', icon: ListTodo, label: 'Team Tasks' },
+    { to: '/tasks/calendar', icon: CalendarDays, label: 'Calendar' },
   ];
 
   const adminItems: NavItem[] = [
     { to: '/admin', icon: TicketIcon, label: 'All Tickets', exact: true },
+    { to: '/admin/workload', icon: Gauge, label: 'Workload' },
     ...(isSuperadmin ? [
       { to: '/admin/team', icon: Users, label: 'Team' },
       { to: '/admin/analytics', icon: BarChart3, label: 'Analytics' },
       { to: '/admin/settings', icon: Settings, label: 'Settings' },
+      { to: '/admin/tasks', icon: SlidersHorizontal, label: 'Task Settings' },
+      { to: '/admin/reassign', icon: UserMinus, label: 'Reassign Work' },
     ] : []),
   ];
 
   const onboardingItems: NavItem[] = [
-    { to: '/onboarding', icon: ClipboardList, label: 'My Tasks', exact: true },
+    // Renamed from 'My Tasks' when the task tabs landed — the plain name now
+    // belongs to /tasks. Label only: the route, page, and permissions are
+    // unchanged, so existing links and bookmarks still work.
+    { to: '/onboarding', icon: ClipboardList, label: 'Onboarding Tasks', exact: true },
     { to: '/onboarding/properties', icon: Building2, label: 'Properties' },
     ...(isSuperadmin ? [
       { to: '/onboarding/template', icon: LayoutTemplate, label: 'Template' },

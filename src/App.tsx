@@ -25,6 +25,19 @@ const OnboardingMyTasksPage = lazy(() => import('./pages/OnboardingMyTasksPage')
 const OnboardingPropertiesPage = lazy(() => import('./pages/OnboardingPropertiesPage').then((m) => ({ default: m.OnboardingPropertiesPage })));
 const OnboardingTemplatePage = lazy(() => import('./pages/OnboardingTemplatePage').then((m) => ({ default: m.OnboardingTemplatePage })));
 
+// Tasks (the ClickUp replacement — docs/CLICKUP_MIGRATION_PLAN.md). EVERY task
+// route is registered here up front against a typed stub, so the feature lanes
+// filling those stubs never have to touch this file and can't collide in it.
+const TasksPage = lazy(() => import('./pages/TasksPage').then((m) => ({ default: m.TasksPage })));
+const TeamTasksPage = lazy(() => import('./pages/TeamTasksPage').then((m) => ({ default: m.TeamTasksPage })));
+const TaskCalendarPage = lazy(() => import('./pages/TaskCalendarPage').then((m) => ({ default: m.TaskCalendarPage })));
+const TaskTemplatesPage = lazy(() => import('./pages/TaskTemplatesPage').then((m) => ({ default: m.TaskTemplatesPage })));
+const TaskDetailPage = lazy(() => import('./pages/TaskDetailPage').then((m) => ({ default: m.TaskDetailPage })));
+const WorkloadPage = lazy(() => import('./pages/WorkloadPage').then((m) => ({ default: m.WorkloadPage })));
+const TaskSettingsPage = lazy(() => import('./pages/admin/TaskSettingsPage').then((m) => ({ default: m.TaskSettingsPage })));
+const ReassignPage = lazy(() => import('./pages/admin/ReassignPage').then((m) => ({ default: m.ReassignPage })));
+const CalendarSyncSettingsPage = lazy(() => import('./pages/CalendarSyncSettingsPage').then((m) => ({ default: m.CalendarSyncSettingsPage })));
+
 function ProtectedRoute({
   children,
   requireAdmin = false,
@@ -98,6 +111,21 @@ export function App() {
             <Route path="submit" element={<SubmitRequestPage />} />
             <Route path="tickets/:id" element={<TicketDetailPage />} />
 
+            {/* Tasks are open to every signed-in user by design (plan §2):
+                anyone reads, writes are gated by participation in the rules.
+                Static paths are listed before ':id' for readability — React
+                Router ranks static segments above dynamic ones regardless. */}
+            <Route path="tasks" element={<TasksPage />} />
+            <Route path="tasks/all" element={<TeamTasksPage />} />
+            <Route path="tasks/calendar" element={<TaskCalendarPage />} />
+            <Route path="tasks/templates" element={<TaskTemplatesPage />} />
+            <Route path="tasks/:id" element={<TaskDetailPage />} />
+
+            <Route
+              path="settings/calendar"
+              element={<CalendarSyncSettingsPage />}
+            />
+
             <Route
               path="admin"
               element={
@@ -127,6 +155,30 @@ export function App() {
               element={
                 <ProtectedRoute requireSuperadmin>
                   <AnalyticsPage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="admin/workload"
+              element={
+                <ProtectedRoute requireAdmin>
+                  <WorkloadPage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="admin/tasks"
+              element={
+                <ProtectedRoute requireSuperadmin>
+                  <TaskSettingsPage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="admin/reassign"
+              element={
+                <ProtectedRoute requireSuperadmin>
+                  <ReassignPage />
                 </ProtectedRoute>
               }
             />
