@@ -23,9 +23,18 @@ service firebase.storage {
     // a callable: everyone who can read the task can read its files.
     match /taskAttachments/{taskId}/{filename} {
       allow read: if request.auth != null;
-      allow write: if request.auth != null
+      // create/update carry a payload, so size and type are checkable here.
+      allow create, update: if request.auth != null
         && request.resource.size < 200 * 1024 * 1024
         && request.resource.contentType.matches('image/.*|video/.*|application/pdf|application/vnd.*|text/.*');
+      // Delete MUST be its own rule. A delete has no `request.resource`, so
+      // folding it into `write` next to the size/type checks evaluates
+      // `null.size` and denies every delete. That failure is invisible in the
+      // UI — the metadata doc under tasks/{id}/attachments is the only listing
+      // path, so the row disappears while the object stays behind, permanently
+      // orphaned and unreachable. Found by actually deleting one; the ticket
+      // and notebook rules below have the same latent shape but no delete UI.
+      allow delete: if request.auth != null;
     }
 
     // Images pasted/dropped into property notebooks. Uploaded client-side and

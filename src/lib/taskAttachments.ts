@@ -111,16 +111,25 @@ export async function uploadTaskAttachment(
 }
 
 /**
- * Delete both the metadata doc and the Storage object. The Storage delete runs
- * first: if it fails (e.g. already gone), the metadata delete still proceeds
- * so a broken row doesn't linger in the list forever.
+ * Delete both the metadata doc and the Storage object, Storage first.
+ *
+ * Only `object-not-found` is swallowed — that one is genuinely benign (the file
+ * is already gone, and dropping the row clears a listing that points nowhere).
+ * Every other failure RETHROWS, leaving the metadata doc in place.
+ *
+ * That matters more here than it looks: this metadata doc is the only listing
+ * path for the object. Swallowing a permission error would delete the row, show
+ * the user a successful delete, and leave the file orphaned in Storage with
+ * nothing left pointing at it — an invisible, unbounded storage leak. Better a
+ * visible error the user can retry than a quota that creeps up for months.
  */
 export async function deleteTaskAttachment(taskId: string, attachment: TaskAttachment): Promise<void> {
   if (storage) {
     try {
       await deleteObject(ref(storage, attachment.storagePath));
     } catch (err) {
-      console.warn('Failed to delete attachment file (removing metadata anyway):', err);
+      if ((err as { code?: string }).code !== 'storage/object-not-found') throw err;
+      console.warn('Attachment file was already gone; clearing its metadata row.', err);
     }
   }
   await deleteDoc(doc(getDb(), 'tasks', taskId, 'attachments', attachment.id));
