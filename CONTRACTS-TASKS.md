@@ -364,3 +364,90 @@ batch it with everything else your lane needs from `index.js`.
 ## Change requests
 _(append here, then return BLOCKED)_
 
+### Lane 3 (Recurrence) — 2026-09-23
+
+Phase 3 is written and its DONE-CHECK is green (`tsc`, `lint`, `build`, `test`,
+`node --check` all exit 0). Four shared files need a change before it is wired up
+and before its tests actually run in CI. Lane 3 has edited none of them.
+
+**CR-3.1 — `functions/index.js`: the re-exports are missing.** The lane brief said
+foundation had already added them; `index.js` currently requires only `profile`,
+`tickets`, and `onboarding`. Nothing Phase 3 wrote is deployed until these land.
+Module names differ from the `functions/tasks.js` placeholder in the table above —
+the work split into a recurrence module and a pre-live module, which is why there
+are two. Please add verbatim (names are load-bearing: Firebase deploys by export
+name, and renaming one deletes the deployed function):
+
+```js
+const tasksRecurring = require('./tasksRecurring');
+const scheduledTasks = require('./scheduledTasks');
+
+// ─── tasksRecurring.js ───────────────────────────────────────────────────────
+exports.generateRecurringTasks = tasksRecurring.generateRecurringTasks;
+exports.onTaskCompletedRecurrence = tasksRecurring.onTaskCompletedRecurrence;
+exports.previewRecurrence = tasksRecurring.previewRecurrence;
+
+// ─── scheduledTasks.js ───────────────────────────────────────────────────────
+exports.activateScheduledTasks = scheduledTasks.activateScheduledTasks;
+```
+
+`onTaskCompletedRecurrence` is a second `onDocumentUpdated` trigger on
+`tasks/{taskId}`, alongside lane 5's `onTaskUpdated`. If lane 5 would rather have
+one trigger on that path, drop this export and have `onTaskUpdated` call
+`tasksRecurring.advanceSeriesOnCompletion(taskId, before, after)` instead — it is
+exported for exactly that, and it is a no-op for any task without a `seriesId`.
+
+**CR-3.2 — `vitest.config.ts`: `npm test` does not run the recurrence suite.**
+`include` is `['src/**/*.test.ts', 'src/**/*.test.tsx']`, so
+`functions/__tests__/recurrence.test.js` is never collected. The 46 fixture tests
+in it are the only thing in this repo that can catch a date-maths bug — a
+recurrence that fires a day early looks completely normal everywhere else. They
+pass today (verified against a scratch config; `46 passed`), but CI is not running
+them. Please add one glob:
+
+```ts
+include: ['src/**/*.test.ts', 'src/**/*.test.tsx', 'functions/__tests__/**/*.test.js'],
+```
+
+The suite is already `environment: 'node'`-safe and imports nothing but
+`functions/recurrence.js`, which is pure — no `firebase-admin`, no `db`.
+
+**CR-3.3 — `src/types.ts`: four server-written fields have no home in the types.**
+The generator writes them; the UI and the morning digest need to read them typed.
+
+```ts
+// on Task
+carryStreak?: number;      // consecutive cycles that carried unfinished subtasks
+carryFlagged?: boolean;    // carryStreak > 3 — render the "carrying since…" marker
+
+// on TaskSeries
+lastOccurrenceKey?: string | null;  // authoritative pointer; advances even on a
+                                    // missed cycle, which mints no task
+occurrencesCreated?: number;        // counts against occurrenceLimit
+missedStreak?: number;              // the "3 missed in a row" warning in §4
+anchorDate?: string | null;         // optional explicit sequence anchor; falls
+                                    // back to payload.dueDate
+```
+
+Nothing is blocked on this today (Firestore is schemaless and the server writes
+them regardless), but lanes 1, 4, and 5 cannot read them without a cast until
+they exist.
+
+**CR-3.4 — `functions/tickets.js`: put `activateScheduledTickets` on the shared
+engine.** Plan §4 says to generalize the existing activator rather than write a
+second copy. Lane 3 factored the batch-per-record runner out as
+`scheduledTasks.activateScheduled({ label, loadDue, buildBatch })` and built
+`activateScheduledTasks` on it, but could not touch `tickets.js` to finish the
+job — so there are currently two loops, not one. Ticket behaviour is unchanged
+either way; this is the second half of "one implementation only".
+
+Note for whoever picks this up: the Lane table assigns `activateScheduledTasks` to
+lane 1 and `functions/tasks.js` to lane 3. Lane 3's brief assigned the pre-live
+activator to lane 3 under `functions/scheduledTasks.js`, and that is what was
+built. Lane 1 should **not** write a second one.
+
+**Not blocking, for the record:** the deployed index list has no
+`statusType + goLiveDate` composite, so `loadDueScheduledTasks` filters the
+go-live date in memory over the `statusType == 'scheduled'` equality. Pre-live
+tasks are a small, self-draining set, so no index is requested.
+
