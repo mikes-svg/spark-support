@@ -4,7 +4,23 @@
     {
       "name": "dev",
       "runtimeExecutable": "/usr/local/bin/node",
-      "runtimeArgs": ["node_modules/.bin/vite", "--port", "5176"],
+      "runtimeArgs": [
+        "node_modules/.bin/vite",
+        "--port",
+        "5176"
+      ],
+      "port": 5176
+    },
+    {
+      "name": "emulator",
+      "runtimeExecutable": "/usr/local/bin/node",
+      "runtimeArgs": [
+        "node_modules/.bin/vite",
+        "--mode",
+        "emulator",
+        "--port",
+        "5176"
+      ],
       "port": 5176
     }
   ]

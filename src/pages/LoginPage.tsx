@@ -1,8 +1,9 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { signInWithPopup } from 'firebase/auth';
+import { signInWithPopup, signInWithRedirect } from 'firebase/auth';
 import { auth, googleProvider } from '../lib/firebase';
 import { useAuth } from '../context/AuthContext';
+import { EmulatorSignIn } from '../components/EmulatorSignIn';
 
 export function LoginPage() {
   const navigate = useNavigate();
@@ -20,12 +21,27 @@ export function LoginPage() {
     if (authError) setSsoLoading(false);
   }, [authError]);
 
+  /**
+   * The Auth emulator's sign-in widget runs in the popup itself and calls back
+   * through the opener frame; a browser that reuses the tab (or blocks the
+   * popup) leaves it with "Internal Error: No matching frame" and no way to
+   * finish. Redirect has no opener to lose, so emulator runs use it.
+   *
+   * Gated on `import.meta.env.DEV`, which Vite replaces with a literal false in
+   * any production build — real sign-in is always the popup.
+   */
+  const useRedirect = import.meta.env.DEV && import.meta.env.VITE_USE_EMULATORS === 'true';
+
   const handleGoogleSSO = async () => {
     if (!auth || !googleProvider) return;
     setSsoLoading(true);
     setError('');
     clearAuthError();
     try {
+      if (useRedirect) {
+        await signInWithRedirect(auth, googleProvider);
+        return;
+      }
       await signInWithPopup(auth, googleProvider);
       // Keep the loading state: AuthContext is now resolving the profile
       // (ensureProfile). The redirect fires once `user` resolves; the effect
@@ -80,6 +96,7 @@ export function LoginPage() {
             )}
             {ssoLoading ? 'Signing in…' : 'Sign in with Google'}
           </button>
+          {useRedirect && <EmulatorSignIn />}
         </div>
       </div>
     </div>
