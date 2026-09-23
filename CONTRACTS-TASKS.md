@@ -567,4 +567,36 @@ ordering, which the automatic single-field index covers. No composite index.
 no sidebar entry, so it is reachable only by typing the URL. It also falls under
 the already-logged `getPageTitle()` gap in `Layout.tsx` and shows "Portal" in the
 top bar.
+### Lane 7 (Admin) — `functions/index.js` needs the `reassign.js` re-export
+
+Not blocking (lane 7's own files are done and green), but flagging so it isn't
+missed: `functions/reassign.js` (new, lane-7-owned, exports `reassignWork`) is
+not wired up yet. `functions/index.js` currently requires `profile.js`,
+`tickets.js`, and `onboarding.js` only. It needs:
+
+```js
+const reassign = require('./reassign');
+// …
+exports.reassignWork = reassign.reassignWork;
+```
+
+`node --check functions/reassign.js` passes (valid, self-contained module), but
+the callable won't actually deploy/exist until this two-line addition lands in
+the shared file. `functions/reassign.js` is otherwise unmodified from any
+other lane's perspective — this is a pure addition, no existing export changes.
+
+### Lane 7 (Admin) — `onTicketUpdated` has no notification-suppression hook
+
+Also not blocking, a smaller follow-up: `reassignWork`'s `'tickets'` scope
+(optional — see its module doc) writes ticket assigneeIds directly, which
+`onTicketUpdated` (`functions/tickets.js`, shared) will still see as "newly
+added assignees" and email individually per ticket — there's no way for a
+caller to suppress that from outside tickets.js. The "one summary email"
+guarantee `reassignWork` promises therefore holds fully for tasks / series /
+subtasks / waitingOn / onboarding, but only partially (audit event yes, no
+duplicate email suppression) for tickets. A future fix: have
+`onTicketUpdated` skip its added-assignee email when the triggering update
+carries a sentinel (e.g. `_skipAssigneeNotify: true`), and have
+`reassignWork` set it. Left as a follow-up rather than edited directly since
+`tickets.js` is outside this lane's fence.
 
