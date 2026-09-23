@@ -364,3 +364,38 @@ batch it with everything else your lane needs from `index.js`.
 ## Change requests
 _(append here, then return BLOCKED)_
 
+### Lane 5 (Notifications & workload) — functions/index.js wiring, 2026-09-23
+
+`functions/taskNotifications.js` and `functions/digest.js` are landed, green
+(`node --check` on both, plus `npx tsc --noEmit` / `npm run lint` / `npm run
+build` / `npm test` all exit 0 for the repo as a whole). They are not wired
+into `functions/index.js`, which this lane doesn't own, so nothing in them is
+actually deployed yet. Needed, in one batch:
+
+1. Add re-exports for the three triggers in `taskNotifications.js`:
+   `onTaskCreated`, `onTaskUpdated`, `onTaskCommentCreated`.
+2. Add a re-export for `sendMorningBrief` from `digest.js`.
+3. Retire `sendTicketReminders` (`tickets.js`) and `sendOnboardingReminders`
+   (`onboarding.js`) as separate scheduled 07:00 exports — `sendMorningBrief`
+   now covers both, plus a tasks section. Leaving all three exported would (a)
+   send three emails a morning again, the exact problem §7 asks this lane to
+   fix, and (b) fail the phase-5 DONE-CHECK's assertion that exactly one
+   scheduled 07:00 digest function is exported across `functions/`.
+
+Why this lane didn't do it: `functions/index.js`, `tickets.js`, and
+`onboarding.js` are all listed foundation-owned above, and neither
+`sendTicketReminders` nor `sendOnboardingReminders` exports its digest body
+separately from its `onSchedule(...)` registration — there's nothing to
+re-export without editing one of those three files, which this lane's fence
+(and the phase-5 task's own collision guard) forbids. `digest.js` reproduces
+their query/grouping/sort/copy itself instead (see the header comment in that
+file) so the merged email's behavior doesn't depend on this wiring landing
+first; only the "exactly one 07:00 schedule" assertion is blocked on it.
+
+Also worth folding into the same index.js pass, from the "Open gap" noted
+above: `getPageTitle()` in `src/components/Layout.tsx` has no entry for
+`/admin/workload` (or the other eight new task routes), so it falls back to
+"Portal". The sidebar's label is "Workload" — use that.
+
+Once this lands, phase 5's DONE-CHECK is green end to end; nothing else is
+outstanding from this lane.
