@@ -10,3 +10,6 @@ dev-dist/
 
 # /gauntlet run evidence (screenshots, results) — manifest.yaml IS tracked
 .claude/qa/runs/
+
+# Swarm worktrees (transient)
+.claude/worktrees/
