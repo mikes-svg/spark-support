@@ -7,7 +7,7 @@
     "dev": "npx vite",
     "build": "npx vite build",
     "lint": "eslint . --ext .js,.jsx,.ts,.tsx",
-    "test": "vitest run",
+    "test": "vitest run && node --test functions/__tests__/gcal.test.js",
     "preview": "npx vite preview"
   },
   "dependencies": {
