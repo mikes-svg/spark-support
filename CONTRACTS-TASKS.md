@@ -364,3 +364,13 @@ batch it with everything else your lane needs from `index.js`.
 ## Change requests
 _(append here, then return BLOCKED)_
 
+- **Lane 2 (non-blocking FYI, not returning BLOCKED — Phase 2 shipped without it).**
+  `TaskEventType` in `src/types.ts` doesn't include `attachment_added` or
+  `carried_over`, and uses `subtask_toggled` rather than `subtask_completed`.
+  `src/lib/taskEvents.ts` and `TaskAttachments.tsx` were built against the
+  pinned union as-is (no event is logged for an attachment upload; the
+  metadata doc under `tasks/{id}/attachments` is the durable record). If a
+  later lane (5 — digest/metrics, or 3 — recurrence for `carried_over`) wants
+  an audit trail for uploads or carryovers, add the variant(s) to
+  `TaskEventType` and I'm happy to wire the call site.
+
