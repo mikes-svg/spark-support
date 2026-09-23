@@ -13,3 +13,7 @@ dev-dist/
 
 # Swarm worktrees (transient)
 .claude/worktrees/
+
+# Local function secrets (Google Calendar OAuth, etc.)
+functions/.env.local
+functions/.env
