@@ -14,22 +14,38 @@ https://console.cloud.google.com/apis/library/calendar-json.googleapis.com?proje
 
 Click **Enable**. If it already says "Manage", it's on.
 
-## 2. Configure the consent screen — **Internal**
+## 2. Consent screen — already done, and **leave it External**
 
-https://console.cloud.google.com/auth/overview?project=spark-support-28ed9
+Nothing to do here. The portal's existing Google sign-in already runs through
+this project's consent screen: it is **External**, **In production**, 0 of 100
+users used.
 
-- User type: **Internal**. This is the important one. Internal restricts sign-in
-  to `sparkmanage.com` accounts and, critically, **skips Google's verification
-  review** — an External app asking for a calendar scope goes into a queue that
-  can take weeks.
-- App name: `Spark Support Portal`
-- Support email + developer contact: your address.
-- Scopes: you can leave the scope list empty here. The app requests
-  `https://www.googleapis.com/auth/calendar.events` at authorization time, and
-  Internal apps don't need it pre-declared.
+**Do not click "Make Internal".** An earlier draft of this doc said to, and that
+was wrong. The project's organization is `standifercapital.com` (IAM & Admin →
+Settings → Location), but the team signs in with `@sparkmanage.com` — 11 of the
+12 people, and `src/lib/firebase.ts` pins Google login to
+`hd: 'sparkmanage.com'`. "Internal" means *this organization only*, so the click
+would restrict OAuth to `standifercapital.com` and lock every sparkmanage.com
+user out of signing in to the portal at all. Not just calendar — the whole login.
 
-If "Internal" is greyed out, the project isn't attached to the Workspace
-organization — tell me and we'll take the External + test-users route instead.
+That holds unless `sparkmanage.com` is a secondary domain inside the same
+Workspace account, which we did not confirm (checking it needs a passkey
+challenge in the admin console). The upside of Internal is cosmetic and the
+downside is a team-wide outage, so External stays.
+
+### What External costs
+
+- `calendar.events` is a sensitive scope on an unverified app, so each person
+  sees Google's **"unverified app" screen once** when they connect their
+  calendar: *Advanced → Go to Spark Support*. Annoying, not blocking.
+- The **100-user cap** applies. You have 12.
+
+Neither affects reliability. The 7-day refresh-token expiry that would wreck a
+sync integration applies only to External apps in **Testing**; this one is in
+production, so refresh tokens persist.
+
+Submitting for Google verification removes the warning screen, takes weeks, and
+is not worth blocking on.
 
 ## 3. Create the OAuth client
 
