@@ -22,8 +22,24 @@ const REVOKE_URL = 'https://oauth2.googleapis.com/revoke';
 const AUTH_URL = 'https://accounts.google.com/o/oauth2/v2/auth';
 const CALENDAR_BASE = 'https://www.googleapis.com/calendar/v3';
 
-/** The one scope this integration asks for (§8 of the plan). */
-const CALENDAR_SCOPE = 'https://www.googleapis.com/auth/calendar.events';
+/**
+ * The one scope this integration asks for.
+ *
+ * NOT `calendar.events`, which the plan originally specified: that scope grants
+ * event access across EVERY calendar the user owns, and still cannot create a
+ * calendar — `calendars.insert` returns 403 under it, which is exactly how this
+ * was found (the first real sync failed with "Could not create the Spark Tasks
+ * calendar (403)").
+ *
+ * `calendar.app.created` is both the working scope and the narrower one: it
+ * permits creating secondary calendars and managing events ON CALENDARS THIS APP
+ * CREATED, and nothing else. That makes the promise on the settings page — "Your
+ * other calendars are never touched" — enforced by Google rather than by our own
+ * good behaviour.
+ *
+ * Changing this value invalidates existing grants; everyone must reconnect.
+ */
+const CALENDAR_SCOPE = 'https://www.googleapis.com/auth/calendar.app.created';
 
 class GoogleTransportError extends Error {
   constructor(message, cause) {

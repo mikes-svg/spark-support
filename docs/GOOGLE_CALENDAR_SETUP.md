@@ -35,7 +35,7 @@ downside is a team-wide outage, so External stays.
 
 ### What External costs
 
-- `calendar.events` is a sensitive scope on an unverified app, so each person
+- `calendar.app.created` is a sensitive scope on an unverified app, so each person
   sees Google's **"unverified app" screen once** when they connect their
   calendar: *Advanced → Go to Spark Support*. Annoying, not blocking.
 - The **100-user cap** applies. You have 12.

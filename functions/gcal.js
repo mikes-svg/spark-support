@@ -39,6 +39,7 @@ const { logger } = require('firebase-functions');
 const crypto = require('crypto');
 
 const { createTransport, buildAuthUrl, CALENDAR_SCOPE } = require('./gcalTransport');
+const { FieldValue } = require('firebase-admin/firestore');
 
 // shared.js calls admin.initializeApp() at require time, so it is loaded lazily:
 // the pure layer above must stay importable in a plain `node --test` process
@@ -708,13 +709,19 @@ function publicStatus(conn) {
 
 /** Assemble real dependencies. Kept in one place so a test can swap all of it. */
 function realDeps(env = process.env) {
-  const { db, admin } = shared();
+  const { db } = shared();
   return {
     db,
     config: loadConfig(env),
     transport: createTransport(),
     now: () => Date.now(),
-    serverTimestamp: () => admin.firestore.FieldValue.serverTimestamp(),
+    // FieldValue comes from the MODULAR entry point, not `admin.firestore.FieldValue`.
+    // Under the Functions emulator the namespaced `admin.firestore` is wrapped so
+    // its calls reach the local Firestore, and that wrapper does not carry the
+    // FieldValue property — so the namespaced form throws "Cannot read properties
+    // of undefined" at runtime while looking perfectly correct in source and
+    // resolving fine outside the emulator. The modular import is unaffected.
+    serverTimestamp: () => FieldValue.serverTimestamp(),
   };
 }
 

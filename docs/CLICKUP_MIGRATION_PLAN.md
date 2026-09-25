@@ -309,7 +309,11 @@ Add `notificationPrefs` to profiles (`immediate` / `digest-only` /
 ## 8. Google Calendar — two-way OAuth sync
 
 1. Google Cloud OAuth client + consent screen, **internal** to `sparkmanage.com`,
-   scope `https://www.googleapis.com/auth/calendar.events`.
+   scope `https://www.googleapis.com/auth/calendar.app.created`.
+   (Originally specified as `calendar.events` — wrong on both counts. That scope
+   cannot create a calendar, so the first real sync failed 403, and it grants
+   event access across every calendar the user owns. `calendar.app.created`
+   covers only calendars this app made.)
 2. Each user authorizes once from a Settings tab; refresh tokens stored
    server-side only (never in the client bundle, never readable by rules).
 3. Portal → Google: on task create/update, upsert an event on a dedicated

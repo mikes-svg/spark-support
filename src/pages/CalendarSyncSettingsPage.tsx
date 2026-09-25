@@ -306,9 +306,10 @@ export function CalendarSyncSettingsPage() {
           </div>
         </div>
         <div className="px-6 py-4 border-t border-gray-200 bg-gray-50/50 text-xs text-gray-500">
-          The portal asks Google only for permission to manage calendar events — not to read your email,
-          your contacts, or anything else. Disconnecting revokes that permission; events already on your
-          calendar stay where they are.
+          The portal asks Google only for permission to make its own calendar and manage the events on
+          it — it cannot see or change your existing calendars, your email or your contacts. That limit
+          is enforced by Google, not just by us. Disconnecting revokes the permission; events already on
+          your calendar stay where they are.
         </div>
       </section>
 
