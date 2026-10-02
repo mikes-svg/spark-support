@@ -27,6 +27,16 @@ service cloud.firestore {
          get(/databases/$(database)/documents/profiles/$(request.auth.uid)).data.onboardingAccess == true);
     }
 
+    // Access to the Tasks section, granted per person from the Team page exactly
+    // as onboarding is: superadmins always, plus anyone whose tasksAccess flag is
+    // on. Within the section everyone sees every task — this gates the door, not
+    // the contents.
+    function canUseTasks() {
+      return isSuperAdmin() ||
+        (isSignedIn() &&
+         get(/databases/$(database)/documents/profiles/$(request.auth.uid)).data.tasksAccess == true);
+    }
+
     // Edit access to checklist tasks: superadmins always, plus a granted User —
     // but NOT a Manager (admin), who stays view-only even when granted, so the
     // isAdmin() branch is excluded here.
@@ -262,7 +272,7 @@ service cloud.firestore {
     // oversight, so don't "harmonize" them.
 
     match /tasks/{taskId} {
-      allow read: if isSignedIn();
+      allow read: if canUseTasks();
       // The creator field is pinned to the caller so a task can't be created
       // pre-attributed to someone else (which would hand them the delete right).
       allow create: if isSignedIn() && request.resource.data.creatorId == request.auth.uid;
@@ -279,7 +289,7 @@ service cloud.firestore {
       // Attachment metadata, written client-side on upload (tickets list theirs
       // through a callable instead; tasks don't need the round trip).
       match /attachments/{attachmentId} {
-        allow read: if isSignedIn();
+        allow read: if canUseTasks();
         allow create: if isSignedIn() && request.resource.data.uploadedBy == request.auth.uid;
         // Metadata describes a stored object; it's replaced, never edited.
         allow update: if false;
@@ -294,7 +304,7 @@ service cloud.firestore {
     // itself is. Gating comments tighter than their parent would leave Team
     // Tasks showing a comment count nobody could open.
     match /taskComments/{commentId} {
-      allow read: if isSignedIn();
+      allow read: if canUseTasks();
       allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
       // The author may edit their own comment, but the owner, task, and original
       // timestamp are pinned so an edit can't reassign authorship, move the
@@ -312,7 +322,7 @@ service cloud.firestore {
     // activity feed works for any viewer; never editable, so metrics computed
     // from it (cycle time, on-time %, recurring compliance) can't be rewritten.
     match /taskEvents/{eventId} {
-      allow read: if isSignedIn();
+      allow read: if canUseTasks();
       allow create: if isSignedIn() && request.resource.data.actorId == request.auth.uid;
       allow update, delete: if false;
     }
@@ -320,34 +330,34 @@ service cloud.firestore {
     // Workspace structure. Everyone reads it (every task view needs the names);
     // only superadmins shape it, from Task Settings.
     match /taskSpaces/{spaceId} {
-      allow read: if isSignedIn();
+      allow read: if canUseTasks();
       allow write: if isSuperAdmin();
     }
 
     match /taskLists/{listId} {
-      allow read: if isSignedIn();
+      allow read: if canUseTasks();
       allow write: if isSuperAdmin();
     }
 
     match /taskStatusSets/{setId} {
-      allow read: if isSignedIn();
+      allow read: if canUseTasks();
       allow write: if isSuperAdmin();
     }
 
     match /taskTemplates/{templateId} {
-      allow read: if isSignedIn();
+      allow read: if canUseTasks();
       allow write: if isSuperAdmin();
     }
 
     match /taskTags/{tagId} {
-      allow read: if isSignedIn();
+      allow read: if canUseTasks();
       allow write: if isSuperAdmin();
     }
 
     // Recurring-series definitions. Looser than the structure collections: the
     // person who set up a recurrence owns it, and admins can fix one.
     match /taskSeries/{seriesId} {
-      allow read: if isSignedIn();
+      allow read: if canUseTasks();
       allow create: if isSignedIn()
         && (request.resource.data.creatorId == request.auth.uid || isAdmin());
       allow update, delete: if isSignedIn()

@@ -64,6 +64,7 @@ export interface Profile {
   email?: string;
   role?: Role;
   onboardingAccess?: boolean;
+  tasksAccess?: boolean;
 }
 
 /**
@@ -85,6 +86,22 @@ export function hasOnboardingAccess(profile?: { role?: string | null; onboarding
 export function canEditOnboarding(profile?: { role?: string | null; onboardingAccess?: boolean } | null): boolean {
   if (!profile) return false;
   return isSuperadminRole(profile.role) || (profile.onboardingAccess === true && !isAdminRole(profile.role));
+}
+
+/**
+ * True if the user can see the Tasks section at all.
+ *
+ * Mirrors hasOnboardingAccess deliberately: Administrators always have it, and
+ * everyone else — Managers and Users alike — needs the flag toggled on from the
+ * Team page. Tasks replace a tool not everyone used, so defaulting the whole
+ * company in would put a section in front of people with nothing in it.
+ *
+ * This gates ACCESS to the section, not visibility within it: once someone is
+ * in, they see all tasks, which is how the team worked in ClickUp.
+ */
+export function hasTasksAccess(profile?: { role?: string | null; tasksAccess?: boolean } | null): boolean {
+  if (!profile) return false;
+  return isSuperadminRole(profile.role) || profile.tasksAccess === true;
 }
 
 // ─── Property onboarding ─────────────────────────────────────────────────────

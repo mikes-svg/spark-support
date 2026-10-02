@@ -7,7 +7,7 @@ import {
   Link,
 } from 'react-router-dom';
 import { AuthProvider, useAuth } from './context/AuthContext';
-import { isAdminRole, isSuperadminRole, hasOnboardingAccess } from './types';
+import { isAdminRole, isSuperadminRole, hasOnboardingAccess, hasTasksAccess } from './types';
 import { Layout } from './components/Layout';
 import { LoginPage } from './pages/LoginPage';
 import { DashboardPage } from './pages/DashboardPage';
@@ -44,11 +44,13 @@ function ProtectedRoute({
   requireAdmin = false,
   requireSuperadmin = false,
   requireOnboarding = false,
+  requireTasks = false,
 }: {
   children: React.ReactNode;
   requireAdmin?: boolean;
   requireSuperadmin?: boolean;
   requireOnboarding?: boolean;
+  requireTasks?: boolean;
 }) {
   const { user, loading } = useAuth();
 
@@ -67,6 +69,9 @@ function ProtectedRoute({
     return <Navigate to="/" replace />;
   }
   if (requireAdmin && !isAdminRole(user.role)) {
+    return <Navigate to="/" replace />;
+  }
+  if (requireTasks && !hasTasksAccess(user)) {
     return <Navigate to="/" replace />;
   }
   if (requireOnboarding && !hasOnboardingAccess(user)) {
@@ -116,13 +121,13 @@ export function App() {
                 anyone reads, writes are gated by participation in the rules.
                 Static paths are listed before ':id' for readability — React
                 Router ranks static segments above dynamic ones regardless. */}
-            <Route path="tasks" element={<TasksPage />} />
-            <Route path="tasks/all" element={<TeamTasksPage />} />
-            <Route path="tasks/calendar" element={<TaskCalendarPage />} />
-            <Route path="tasks/templates" element={<TaskTemplatesPage />} />
-            <Route path="tasks/:id" element={<TaskDetailPage />} />
+            <Route path="tasks" element={<ProtectedRoute requireTasks><TasksPage /></ProtectedRoute>} />
+            <Route path="tasks/all" element={<ProtectedRoute requireTasks><TeamTasksPage /></ProtectedRoute>} />
+            <Route path="tasks/calendar" element={<ProtectedRoute requireTasks><TaskCalendarPage /></ProtectedRoute>} />
+            <Route path="tasks/templates" element={<ProtectedRoute requireTasks><TaskTemplatesPage /></ProtectedRoute>} />
+            <Route path="tasks/:id" element={<ProtectedRoute requireTasks><TaskDetailPage /></ProtectedRoute>} />
 
-            <Route path="settings/notifications" element={<NotificationSettingsPage />} />
+            <Route path="settings/notifications" element={<ProtectedRoute requireTasks><NotificationSettingsPage /></ProtectedRoute>} />
             <Route
               path="settings/calendar"
               element={<CalendarSyncSettingsPage />}

@@ -20,7 +20,7 @@ import {
   UserMinus,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
-import { roleLabel, isAdminRole, isSuperadminRole, hasOnboardingAccess } from '../types';
+import { roleLabel, isAdminRole, isSuperadminRole, hasOnboardingAccess, hasTasksAccess } from '../types';
 
 interface SidebarProps {
   isOpen: boolean;
@@ -64,17 +64,23 @@ function SidebarContent({ onClose }: { onClose: () => void }) {
   const isAdmin = isAdminRole(user?.role);
   const isSuperadmin = isSuperadminRole(user?.role);
   const canOnboard = hasOnboardingAccess(user);
+  const canUseTasks = hasTasksAccess(user);
 
   const navItems: NavItem[] = [
     { to: '/', icon: LayoutDashboard, label: 'My Tickets', exact: true },
     { to: '/submit', icon: PlusCircle, label: 'Submit Request', ariaLabel: 'Submit Request page' },
-    // Tasks are open to everyone (plan §2), so these sit in the User section
-    // for all roles. 'My Tasks' is exact so /tasks/all and /tasks/calendar
-    // don't leave it highlighted alongside their own entry.
-    { to: '/tasks', icon: ListChecks, label: 'My Tasks', exact: true },
-    { to: '/tasks/all', icon: ListTodo, label: 'Team Tasks' },
-    { to: '/tasks/calendar', icon: CalendarDays, label: 'Calendar' },
-    { to: '/settings/notifications', icon: Bell, label: 'Notifications' },
+    // Tasks are granted per person from the Team page, the same way onboarding
+    // is: Administrators always have them, everyone else needs the toggle. The
+    // section replaces a tool not everyone used, so showing it to the whole
+    // company would put empty screens in front of people who have no tasks.
+    // 'My Tasks' is exact so /tasks/all and /tasks/calendar don't leave it
+    // highlighted alongside their own entry.
+    ...(canUseTasks ? [
+      { to: '/tasks', icon: ListChecks, label: 'My Tasks', exact: true },
+      { to: '/tasks/all', icon: ListTodo, label: 'Team Tasks' },
+      { to: '/tasks/calendar', icon: CalendarDays, label: 'Calendar' },
+      { to: '/settings/notifications', icon: Bell, label: 'Notifications' },
+    ] : []),
   ];
 
   const adminItems: NavItem[] = [

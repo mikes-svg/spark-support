@@ -9,7 +9,7 @@ import { PageSpinner } from '../components/PageSpinner';
 import { Avatar } from '../components/Avatar';
 import { roleLabel, isSuperadminRole } from '../types';
 
-interface Profile { id: string; name: string; email: string; photoURL: string; role: 'superadmin' | 'admin' | 'user'; onboardingAccess?: boolean; }
+interface Profile { id: string; name: string; email: string; photoURL: string; role: 'superadmin' | 'admin' | 'user'; onboardingAccess?: boolean; tasksAccess?: boolean; }
 
 interface Permission {
   label: string;
@@ -223,6 +223,20 @@ export function TeamPage() {
     }
   };
 
+  const toggleTasksAccess = async (profile: Profile) => {
+    if (isSuperadminRole(profile.role) || !db) return;
+    const next = !profile.tasksAccess;
+    setActionError('');
+    setProfiles((prev) => prev.map((p) => p.id === profile.id ? { ...p, tasksAccess: next } : p));
+    try {
+      await updateDoc(doc(db, 'profiles', profile.id), { tasksAccess: next });
+    } catch (err) {
+      console.error('Failed to update tasks access:', err);
+      setProfiles((prev) => prev.map((p) => p.id === profile.id ? { ...p, tasksAccess: profile.tasksAccess } : p));
+      setActionError('Could not update tasks access. Please try again.');
+    }
+  };
+
   const handleInviteUser = async () => {
     if (!inviteForm.name.trim() || !inviteForm.email.trim()) return;
     setInviting(true);
@@ -347,6 +361,21 @@ export function TeamPage() {
     </button>
   );
 
+  const renderTasksToggle = (profile: Profile) => (
+    <button
+      onClick={() => toggleTasksAccess(profile)}
+      disabled={isSuperadminRole(profile.role)}
+      title={isSuperadminRole(profile.role) ? 'Administrators always have tasks access' : undefined}
+      className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium transition-colors ${
+        isSuperadminRole(profile.role) || profile.tasksAccess
+          ? 'bg-green-100 text-green-800'
+          : 'bg-gray-100 text-gray-800'
+      } ${isSuperadminRole(profile.role) ? 'cursor-not-allowed opacity-70' : 'cursor-pointer hover:opacity-80'}`}
+    >
+      {isSuperadminRole(profile.role) || profile.tasksAccess ? 'On' : 'Off'}
+    </button>
+  );
+
   const renderRowActions = (profile: Profile) => (
     <>
       <button onClick={() => { setEditingUser(profile.id); setEditUserName(profile.name); }} className="text-gray-400 hover:text-brand-dark transition-colors inline-block">
@@ -409,6 +438,10 @@ export function TeamPage() {
                 {renderOnboardingToggle(profile)}
               </div>
               <div className="flex items-center justify-between gap-3">
+                <span className="text-xs font-medium text-gray-500 uppercase tracking-wider">Tasks</span>
+                {renderTasksToggle(profile)}
+              </div>
+              <div className="flex items-center justify-between gap-3">
                 <span className="text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</span>
                 <span className="space-x-3 text-sm font-medium">{renderRowActions(profile)}</span>
               </div>
@@ -418,7 +451,7 @@ export function TeamPage() {
         <div className="hidden sm:block overflow-x-auto">
           <table className="min-w-full divide-y divide-gray-200">
             <thead className="bg-white">
-              <tr>{['Name', 'Email', 'Role', 'Onboarding', 'Actions'].map((h) => <th key={h} scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">{h}</th>)}</tr>
+              <tr>{['Name', 'Email', 'Role', 'Onboarding', 'Tasks', 'Actions'].map((h) => <th key={h} scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">{h}</th>)}</tr>
             </thead>
             <tbody className="bg-white divide-y divide-gray-200">
               {profiles.length === 0 && (
@@ -430,6 +463,7 @@ export function TeamPage() {
                   <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{profile.email}</td>
                   <td className="px-6 py-4 whitespace-nowrap">{renderRoleSelect(profile)}</td>
                   <td className="px-6 py-4 whitespace-nowrap">{renderOnboardingToggle(profile)}</td>
+                  <td className="px-6 py-4 whitespace-nowrap">{renderTasksToggle(profile)}</td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm font-medium space-x-3">{renderRowActions(profile)}</td>
                 </tr>
               ))}

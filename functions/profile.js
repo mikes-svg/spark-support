@@ -94,6 +94,13 @@ exports.ensureProfile = onCall({ region: REGION }, async (request) => {
   const onboardingAccess = existing.onboardingAccess === true ||
     dupes.some((d) => d.data().onboardingAccess === true);
 
+  // Carried through for exactly the same reason as onboardingAccess above: this
+  // write merges over the profile on every sign-in, so omitting the flag here
+  // would silently revoke a superadmin's Tasks grant the next time that person
+  // signed in.
+  const tasksAccess = existing.tasksAccess === true ||
+    dupes.some((d) => d.data().tasksAccess === true);
+
   const dupeName = dupes.map((d) => d.data().name).find(Boolean);
   // Prefer the already-stored name over the Google token, so a superadmin's
   // Team-page rename sticks instead of being reset to the Google display name
@@ -102,7 +109,7 @@ exports.ensureProfile = onCall({ region: REGION }, async (request) => {
   const photoURL = token.picture || existing.photoURL ||
     `https://ui-avatars.com/api/?name=${encodeURIComponent(name)}&background=1B4332&color=D4A843`;
 
-  const data = { name, email, photoURL, role, onboardingAccess };
+  const data = { name, email, photoURL, role, onboardingAccess, tasksAccess };
   if (firstTime) data.createdAt = admin.firestore.FieldValue.serverTimestamp();
   await profileRef.set(data, { merge: true });
 
@@ -113,7 +120,7 @@ exports.ensureProfile = onCall({ region: REGION }, async (request) => {
     await batch.commit();
   }
 
-  return { id: uid, name, email, photoURL, role, onboardingAccess };
+  return { id: uid, name, email, photoURL, role, onboardingAccess, tasksAccess };
 });
 
 /**
