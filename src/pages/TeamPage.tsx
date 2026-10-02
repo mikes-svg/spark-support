@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { collection, getDocs, doc, updateDoc, deleteDoc, setDoc, serverTimestamp } from 'firebase/firestore';
-import { db } from '../lib/firebase';
-import { Trash2, Edit2, Check, X, UserPlus, Users } from 'lucide-react';
+import { httpsCallable } from 'firebase/functions';
+import { db, functions } from '../lib/firebase';
+import { Trash2, Edit2, Check, X, UserPlus, Users, RefreshCw } from 'lucide-react';
 import { ConfirmModal } from '../components/ConfirmModal';
 import { Modal } from '../components/Modal';
 import { PageSpinner } from '../components/PageSpinner';
@@ -84,6 +85,30 @@ export function TeamPage() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
   const [actionError, setActionError] = useState('');
+  // Rebuilding meta/adminIds — the denormalised Manager/Administrator list that
+  // firestore.rules reads to check a ticket still has someone accountable on it.
+  // The syncAdminIds trigger keeps it current, but only fires when somebody's
+  // manager-ness actually changes, so a project where it has never existed needs
+  // building once by hand. Kept afterwards as a repair hatch.
+  const [rebuilding, setRebuilding] = useState(false);
+  const [rebuildResult, setRebuildResult] = useState('');
+
+  const rebuildAdminIds = async () => {
+    if (!functions || rebuilding) return;
+    setRebuilding(true);
+    setRebuildResult('');
+    setActionError('');
+    try {
+      const call = httpsCallable<void, { count: number }>(functions, 'backfillAdminIds');
+      const res = await call();
+      setRebuildResult(`Manager list rebuilt — ${res.data.count} Manager${res.data.count === 1 ? '' : 's'}/Administrator${res.data.count === 1 ? '' : 's'}.`);
+    } catch (err) {
+      console.error('Failed to rebuild the manager list:', err);
+      setActionError('Could not rebuild the manager list. Please try again.');
+    } finally {
+      setRebuilding(false);
+    }
+  };
   const [showInviteModal, setShowInviteModal] = useState(false);
   const [inviteForm, setInviteForm] = useState({ name: '', email: '', role: 'user' as Profile['role'] });
   const [inviting, setInviting] = useState(false);
@@ -338,6 +363,9 @@ export function TeamPage() {
       {actionError && (
         <p className="text-sm text-red-700 bg-red-50 border border-red-200 px-4 py-3 rounded-md" role="alert">{actionError}</p>
       )}
+      {rebuildResult && (
+        <p className="text-sm text-emerald-800 bg-emerald-50 border border-emerald-200 px-4 py-3 rounded-md">{rebuildResult}</p>
+      )}
       {/* Manage Users */}
       <div className="bg-white shadow-sm rounded-xl border border-gray-200 overflow-hidden">
         <div className="px-6 py-5 border-b border-gray-200 bg-gray-50/50 flex justify-between items-center">
@@ -346,6 +374,15 @@ export function TeamPage() {
             <p className="mt-1 text-sm text-gray-500">Invite team members and assign their role.</p>
           </div>
           <div className="flex items-center gap-2">
+            <button
+              onClick={rebuildAdminIds}
+              disabled={rebuilding}
+              title="Rebuilds the Manager list that ticket permissions depend on. Safe to run any time."
+              className="inline-flex items-center justify-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 shadow-sm transition-colors disabled:opacity-50"
+            >
+              <RefreshCw className={`h-4 w-4 mr-2 ${rebuilding ? 'animate-spin' : ''}`} />
+              {rebuilding ? 'Rebuilding…' : 'Rebuild manager list'}
+            </button>
             <button onClick={() => { setShowBulkModal(true); setBulkResult(null); }} className="inline-flex items-center justify-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 shadow-sm transition-colors">
               <Users className="h-4 w-4 mr-2" />Bulk Invite
             </button>
