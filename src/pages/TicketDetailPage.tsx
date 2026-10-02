@@ -15,6 +15,7 @@ import { Avatar } from '../components/Avatar';
 import { getAssigneeIds, isScheduled, isAdminRole, isSuperadminRole } from '../types';
 import type { TicketStatus, TicketPriority, Ticket, Profile } from '../types';
 import { toDate, localDateTimeMin } from '../lib/dates';
+import { lockedAssigneeIds, LAST_MANAGER_MESSAGE } from '../lib/ticketAssignees';
 import { partitionFiles, ATTACHMENT_HINT } from '../lib/attachments';
 import {
   updateTicketStatus,
@@ -105,7 +106,9 @@ export function TicketDetailPage() {
     }
     fetchTicket();
 
-    // Load admin profiles for assignee dropdown
+    // Real Managers/Administrators ONLY. This list is not the assignee picker
+    // any more (that offers everyone) — it still decides who is @mentionable,
+    // which must stay "people who can read this ticket".
     getDocs(query(collection(db!, 'profiles'), where('role', 'in', ['admin', 'superadmin'])))
       .then((snap) => setAdminProfiles(snap.docs.map((d) => ({ id: d.id, ...d.data() } as Profile))))
       .catch(() => {});
@@ -381,6 +384,16 @@ export function TicketDetailPage() {
   const assignees = assigneeIds.map((id) => profiles[id]).filter(Boolean);
   const submitter = profiles[ticket.submitterId];
   const isAdmin = isAdminRole(user?.role);
+  // Anyone assigned to the ticket may work it, whatever their role — that is
+  // the point of being able to assign a User. firestore.rules grants the same
+  // pair (admin OR assignee), so the UI is not the thing holding the line.
+  const isAssignee = !!user && assigneeIds.includes(user.id);
+  const canEditTicket = isAdmin || isAssignee;
+
+  // Every ticket must keep a Manager/Administrator on it, so the sole remaining
+  // one cannot be removed here. The same invariant is enforced in the rules.
+  const profilesById = Object.fromEntries(allProfiles.map((p) => [p.id, p]));
+  const lockedIds = lockedAssigneeIds(assigneeIds, profilesById);
   const isSuperadmin = isSuperadminRole(user?.role);
   const scheduled = isScheduled(ticket);
   const nowLocalMin = localDateTimeMin();
@@ -584,7 +597,7 @@ export function TicketDetailPage() {
               <div><span className="block text-xs font-medium text-gray-500 uppercase mb-1">Type</span><span className="text-sm text-gray-900 font-medium">{ticket.type}</span></div>
               <div>
                 <span className="block text-xs font-medium text-gray-500 uppercase mb-1">Status</span>
-                {isAdmin && !scheduled ? (
+                {canEditTicket && !scheduled ? (
                   <select value={ticket.status} onChange={(e) => handleStatusChange(e.target.value as TicketStatus)} className="block w-full pl-3 pr-8 py-1.5 text-sm border-gray-300 focus:outline-none focus:ring-brand-dark focus:border-brand-dark rounded-md border bg-gray-50">
                     {STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
                   </select>
@@ -594,7 +607,7 @@ export function TicketDetailPage() {
               </div>
               <div>
                 <span className="block text-xs font-medium text-gray-500 uppercase mb-1">Priority</span>
-                {isAdmin ? (
+                {canEditTicket ? (
                   <select value={ticket.priority} onChange={(e) => handlePriorityChange(e.target.value as TicketPriority)} className="block w-full pl-3 pr-8 py-1.5 text-sm border-gray-300 focus:outline-none focus:ring-brand-dark focus:border-brand-dark rounded-md border bg-gray-50">
                     {PRIORITIES.map((p) => <option key={p} value={p}>{p}</option>)}
                   </select>
@@ -611,8 +624,14 @@ export function TicketDetailPage() {
               </div>
               <div>
                 <span className="block text-xs font-medium text-gray-500 uppercase mb-1">Assignees</span>
-                {isAdmin ? (
-                  <AssigneeChips value={assigneeIds} onChange={handleAssigneesChange} admins={adminProfiles} />
+                {canEditTicket ? (
+                  <AssigneeChips
+                    value={assigneeIds}
+                    onChange={handleAssigneesChange}
+                    admins={allProfiles}
+                    lockedIds={lockedIds}
+                    lockedReason={LAST_MANAGER_MESSAGE}
+                  />
                 ) : assignees.length > 0 ? (
                   <div className="flex flex-wrap gap-2 mt-1">
                     {assignees.map((a) => (
