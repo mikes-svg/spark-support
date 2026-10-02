@@ -1,3 +1,4 @@
+import { useState, useCallback } from 'react';
 import { NavLink } from 'react-router-dom';
 import {
   LayoutDashboard,
@@ -15,6 +16,7 @@ import {
   ListTodo,
   CalendarDays,
   Bell,
+  ChevronDown,
   Gauge,
   SlidersHorizontal,
   UserMinus,
@@ -59,12 +61,84 @@ function SidebarNavLink({ item, onClose }: { item: NavItem; onClose: () => void 
   );
 }
 
+const COLLAPSED_KEY = 'sparkSidebarCollapsed';
+
+/**
+ * Which sections are collapsed, remembered per browser.
+ *
+ * localStorage is the right home for this: it is a per-viewer convenience, not
+ * shared state, and it must not break the nav when it is unavailable — private
+ * windows and blocked site data both make these calls throw, so every read and
+ * write is guarded and the sidebar renders fully expanded if anything fails.
+ */
+function readCollapsed(): Record<string, boolean> {
+  try {
+    const raw = window.localStorage.getItem(COLLAPSED_KEY);
+    return raw ? (JSON.parse(raw) as Record<string, boolean>) : {};
+  } catch {
+    return {};
+  }
+}
+
+function writeCollapsed(next: Record<string, boolean>) {
+  try {
+    window.localStorage.setItem(COLLAPSED_KEY, JSON.stringify(next));
+  } catch {
+    /* Non-fatal: the sidebar simply forgets between visits. */
+  }
+}
+
+function NavSection({
+  title, items, collapsed, onToggle, onClose, first = false,
+}: {
+  title: string;
+  items: NavItem[];
+  collapsed: boolean;
+  onToggle: () => void;
+  onClose: () => void;
+  first?: boolean;
+}) {
+  const id = `sidebar-section-${title.toLowerCase().replace(/\s+/g, '-')}`;
+  return (
+    <div className={first ? '' : 'mt-6'}>
+      <button
+        type="button"
+        onClick={onToggle}
+        aria-expanded={!collapsed}
+        aria-controls={id}
+        className="w-full flex items-center justify-between px-3 py-2 text-xs font-semibold text-gray-300 uppercase tracking-wider hover:text-white transition-colors"
+      >
+        <span>{title}</span>
+        <ChevronDown
+          className={`h-3.5 w-3.5 transition-transform ${collapsed ? '-rotate-90' : ''}`}
+          aria-hidden="true"
+        />
+      </button>
+      {!collapsed && (
+        <div id={id} className="space-y-1 mt-1">
+          {items.map((item) => (
+            <SidebarNavLink key={item.to} item={item} onClose={onClose} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function SidebarContent({ onClose }: { onClose: () => void }) {
   const { user, logout } = useAuth();
   const isAdmin = isAdminRole(user?.role);
   const isSuperadmin = isSuperadminRole(user?.role);
   const canOnboard = hasOnboardingAccess(user);
   const canUseTasks = hasTasksAccess(user);
+  const [collapsed, setCollapsed] = useState<Record<string, boolean>>(readCollapsed);
+  const toggleSection = useCallback((key: string) => {
+    setCollapsed((prev) => {
+      const next = { ...prev, [key]: !prev[key] };
+      writeCollapsed(next);
+      return next;
+    });
+  }, []);
 
   const navItems: NavItem[] = [
     { to: '/', icon: LayoutDashboard, label: 'My Tickets', exact: true },
@@ -121,34 +195,37 @@ function SidebarContent({ onClose }: { onClose: () => void }) {
         </button>
       </div>
 
-      <nav className="flex-1 px-3 py-4 space-y-1">
-        <div className="mb-4 px-3">
-          <p className="text-xs font-semibold text-gray-300 uppercase tracking-wider">User</p>
-        </div>
-        {navItems.map((item) => (
-          <SidebarNavLink key={item.to} item={item} onClose={onClose} />
-        ))}
+      {/* Scrolls independently of the logo and the footer, which stay pinned —
+          with three sections expanded the nav is taller than a laptop viewport,
+          and without this the sign-out control fell off the bottom. */}
+      <nav className="flex-1 min-h-0 overflow-y-auto px-3 py-4 sidebar-scroll">
+        <NavSection
+          first
+          title="User"
+          items={navItems}
+          collapsed={!!collapsed.user}
+          onToggle={() => toggleSection('user')}
+          onClose={onClose}
+        />
 
         {isAdmin && (
-          <>
-            <div className="mt-8 mb-4 px-3">
-              <p className="text-xs font-semibold text-gray-300 uppercase tracking-wider">Admin</p>
-            </div>
-            {adminItems.map((item) => (
-              <SidebarNavLink key={item.to} item={item} onClose={onClose} />
-            ))}
-          </>
+          <NavSection
+            title="Admin"
+            items={adminItems}
+            collapsed={!!collapsed.admin}
+            onToggle={() => toggleSection('admin')}
+            onClose={onClose}
+          />
         )}
 
         {canOnboard && (
-          <>
-            <div className="mt-8 mb-4 px-3">
-              <p className="text-xs font-semibold text-gray-300 uppercase tracking-wider">Onboarding</p>
-            </div>
-            {onboardingItems.map((item) => (
-              <SidebarNavLink key={item.to} item={item} onClose={onClose} />
-            ))}
-          </>
+          <NavSection
+            title="Onboarding"
+            items={onboardingItems}
+            collapsed={!!collapsed.onboarding}
+            onToggle={() => toggleSection('onboarding')}
+            onClose={onClose}
+          />
         )}
       </nav>
 
