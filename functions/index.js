@@ -25,7 +25,7 @@
 
 const { onSchedule } = require('firebase-functions/v2/scheduler');
 const { onCall, HttpsError } = require('firebase-functions/v2/https');
-const { onDocumentCreated, onDocumentUpdated } = require('firebase-functions/v2/firestore');
+const { onDocumentCreated, onDocumentUpdated, onDocumentWritten } = require('firebase-functions/v2/firestore');
 const { logger } = require('firebase-functions');
 const admin = require('firebase-admin');
 
@@ -224,6 +224,43 @@ exports.getTicketAttachments = onCall({ region: REGION }, async (request) => {
   }
   return attachments;
 });
+
+/**
+ * Keep `meta/adminIds` holding the uid of every Manager / Administrator.
+ *
+ * firestore.rules has to answer "does this ticket still have a Manager on it?"
+ * on every ticket update. Rules cannot iterate assignees and look up each
+ * profile's role, so the answer is denormalised into one document the rule can
+ * read with a single get(). This trigger is the only writer.
+ *
+ * Runs on every profile write — role changes are rare, so the cost is noise,
+ * and the alternative (recomputing lazily) risks the list being stale at
+ * exactly the moment a rule depends on it.
+ */
+exports.syncAdminIds = onDocumentWritten(
+  { document: 'profiles/{uid}', region: REGION },
+  async (event) => {
+    const before = event.data?.before?.data();
+    const after = event.data?.after?.data();
+    const wasAdmin = before ? ['admin', 'superadmin'].includes(before.role) : false;
+    const isAdmin = after ? ['admin', 'superadmin'].includes(after.role) : false;
+    // Profile edits are frequent (name, photo, onboarding flag); role changes
+    // are not. Only rebuild when the answer could actually have changed.
+    if (wasAdmin === isAdmin && !!before === !!after) return;
+
+    try {
+      const snap = await db.collection('profiles').where('role', 'in', ['admin', 'superadmin']).get();
+      const ids = snap.docs.map((d) => d.id).sort();
+      await db.collection('meta').doc('adminIds').set({
+        ids,
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+      logger.info(`meta/adminIds rebuilt: ${ids.length} managers/administrators`);
+    } catch (err) {
+      logger.error('Failed to rebuild meta/adminIds', err);
+    }
+  }
+);
 
 exports.sendTicketReminders = onSchedule(
   {

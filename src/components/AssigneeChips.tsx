@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useLayoutEffect } from 'react';
 import { createPortal } from 'react-dom';
-import { Plus, X, Users } from 'lucide-react';
+import { Plus, X, Users, Lock } from 'lucide-react';
 import type { Profile } from '../types';
 import { Avatar } from './Avatar';
 
@@ -9,9 +9,13 @@ interface Props {
   onChange: (ids: string[]) => void;
   admins: Profile[];
   disabled?: boolean;
+  /** Selected ids that cannot be removed — keeps the last Manager on a ticket. */
+  lockedIds?: string[];
+  /** Tooltip explaining why a locked chip has no remove button. */
+  lockedReason?: string;
 }
 
-export function AssigneeChips({ value, onChange, admins, disabled }: Props) {
+export function AssigneeChips({ value, onChange, admins, disabled, lockedIds = [], lockedReason }: Props) {
   const [pickerOpen, setPickerOpen] = useState(false);
   const [search, setSearch] = useState('');
   const ref = useRef<HTMLDivElement>(null);
@@ -63,6 +67,7 @@ export function AssigneeChips({ value, onChange, admins, disabled }: Props) {
   };
 
   const remove = (id: string) => {
+    if (lockedIds.includes(id)) return;
     onChange(value.filter((v) => v !== id));
   };
 
@@ -76,7 +81,7 @@ export function AssigneeChips({ value, onChange, admins, disabled }: Props) {
           >
             <Avatar src={p.photoURL} name={p.name} className="w-5 h-5 rounded-full" />
             <span className="max-w-[110px] truncate">{p.name}</span>
-            {!disabled && (
+            {!disabled && !lockedIds.includes(p.id) && (
               <button
                 type="button"
                 onClick={() => remove(p.id)}
@@ -85,6 +90,11 @@ export function AssigneeChips({ value, onChange, admins, disabled }: Props) {
               >
                 <X className="w-3 h-3" />
               </button>
+            )}
+            {!disabled && lockedIds.includes(p.id) && (
+              <Lock className="w-3 h-3 ml-0.5 opacity-50" aria-label="Cannot be removed" >
+                <title>{lockedReason}</title>
+              </Lock>
             )}
           </span>
         ))}
