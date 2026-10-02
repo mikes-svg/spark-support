@@ -40,6 +40,7 @@ const scheduledTasks = require('./scheduledTasks');
 const gcal = require('./gcal');
 const gcalWebhook = require('./gcalWebhook');
 const reassign = require('./reassign');
+const adminIds = require('./adminIds');
 
 // ─── profile.js ──────────────────────────────────────────────────────────────
 exports.ensureProfile = profile.ensureProfile;
@@ -83,3 +84,10 @@ exports.gcalWebhook = gcalWebhook.gcalWebhook;
 
 // ─── reassign.js ─────────────────────────────────────────────────────────────
 exports.reassignWork = reassign.reassignWork;
+
+// ─── adminIds.js ─────────────────────────────────────────────────────────────
+// Maintains meta/adminIds, which firestore.rules reads to decide whether a
+// ticket still has a Manager assigned. backfillAdminIds builds it the first
+// time; the trigger keeps it current after that.
+exports.syncAdminIds = adminIds.syncAdminIds;
+exports.backfillAdminIds = adminIds.backfillAdminIds;

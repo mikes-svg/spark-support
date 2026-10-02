@@ -61,6 +61,36 @@ service cloud.firestore {
     }
 
     match /tickets/{ticketId} {
+      // The denormalised list of Manager/Administrator uids, rebuilt by the
+      // syncAdminIds function on every role change. Rules cannot look up a role
+      // per assignee, so the accountability check below needs it in one read.
+      function adminIdsExist() {
+        return exists(/databases/$(database)/documents/meta/adminIds);
+      }
+      function adminIds() {
+        return get(/databases/$(database)/documents/meta/adminIds).data.ids;
+      }
+
+      // A ticket with assignees must keep at least one Manager/Administrator
+      // among them. This binds EVERYONE, Managers included — the failure it
+      // prevents is "reassign to a User, then take yourself off", which is just
+      // as bad when a Manager does it. An empty list is allowed: unassigned is
+      // a normal state and the triage queue depends on it.
+      function keepsAManager() {
+        return request.resource.data.assigneeIds.size() == 0
+          // If meta/adminIds has not been built yet, get() on the missing doc
+          // would throw and DENY every ticket update — locking the whole team
+          // out over a deploy-ordering mistake. Fall back to the old behaviour
+          // instead: the invariant is unenforced until the backfill runs, but
+          // nothing breaks. backfillAdminIds creates it; the trigger maintains it.
+          || !adminIdsExist()
+          || request.resource.data.assigneeIds.hasAny(adminIds());
+      }
+
+      function isTicketAssignee() {
+        return isSignedIn() && resource.data.assigneeIds.hasAny([request.auth.uid]);
+      }
+
       allow read: if isSignedIn() && (
         resource.data.participants.hasAny([request.auth.uid]) || isAdmin()
       );
@@ -68,7 +98,10 @@ service cloud.firestore {
       // may create a normal ticket.
       allow create: if isSignedIn() &&
         (request.resource.data.status != 'Scheduled' || isSuperAdmin());
-      allow update: if isAdmin();
+      // Managers/Administrators may update any ticket; an assignee of ANY role
+      // may update one they are on, so work can actually be delegated to a User
+      // and marked done by them. Both are held to keepsAManager().
+      allow update: if (isAdmin() || isTicketAssignee()) && keepsAManager();
       // Superadmins can delete any ticket (this also covers cancelling a
       // not-yet-live scheduled ticket).
       allow delete: if isSuperAdmin();
@@ -114,11 +147,25 @@ service cloud.firestore {
 
     match /meta/{docId} {
       allow read: if isSignedIn();
-      // The only doc here is the ticket counter. Allow initial create and a
-      // strictly monotonic increment so a signed-in user can't rewrite it
-      // backwards and cause ticket-ID collisions.
-      allow create: if isSignedIn() && request.resource.data.count is int;
-      allow update: if isSignedIn() && request.resource.data.count is int
+      // `adminIds` is written ONLY by the syncAdminIds Cloud Function, which
+      // uses the Admin SDK and bypasses these rules. It must be excluded from
+      // the counter rules below, not merely denied in a separate match block:
+      // Firestore evaluates every matching rule and grants if ANY of them
+      // allows, so a narrower "deny" match would not override this one.
+      //
+      // It matters because the tickets rule trusts this document to decide who
+      // may update a ticket. Without the exclusion, any signed-in user could
+      // create it (it satisfies `count is int` while the doc does not yet
+      // exist) with their own uid inside, and hand themselves edit rights over
+      // every ticket.
+      //
+      // The remaining doc here is the ticket counter: allow an initial create
+      // and a strictly monotonic increment, so nobody can rewrite it backwards
+      // and cause ticket-ID collisions.
+      allow create: if isSignedIn() && docId != 'adminIds'
+        && request.resource.data.count is int;
+      allow update: if isSignedIn() && docId != 'adminIds'
+        && request.resource.data.count is int
         && request.resource.data.count > resource.data.count;
       allow delete: if false;
     }

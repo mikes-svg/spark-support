@@ -13,9 +13,16 @@ interface Props {
   placeholder?: string;
   /** Shown when the list is empty. Onboarding picks from people with access, not admins. */
   emptyLabel?: string;
+  /**
+   * Selected ids that cannot be deselected — used to keep the last Manager on a
+   * ticket. Still rendered as selected; the control is inert and explains why.
+   */
+  lockedIds?: string[];
+  /** Tooltip shown when a locked id is clicked. */
+  lockedReason?: string;
 }
 
-export function AssigneeSelector({ value, onChange, admins, disabled, variant = 'full', placeholder = 'Unassigned', emptyLabel = 'No admins available' }: Props) {
+export function AssigneeSelector({ value, onChange, admins, disabled, variant = 'full', placeholder = 'Unassigned', emptyLabel = 'No admins available', lockedIds = [], lockedReason }: Props) {
   const [open, setOpen] = useState(false);
   // Type-to-filter. AssigneeChips already had this; the dropdown did not, so
   // picking someone on a team of any size meant scrolling and reading.
@@ -31,6 +38,9 @@ export function AssigneeSelector({ value, onChange, admins, disabled, variant = 
   }, [open]);
 
   const toggle = (id: string) => {
+    // Locked ids are already selected and must stay that way; adding is always
+    // fine, so only the removal direction is blocked.
+    if (lockedIds.includes(id) && value.includes(id)) return;
     const next = value.includes(id) ? value.filter((v) => v !== id) : [...value, id];
     onChange(next);
   };
@@ -113,6 +123,7 @@ export function AssigneeSelector({ value, onChange, admins, disabled, variant = 
           ) : (
             shown.map((a) => {
               const checked = value.includes(a.id);
+              const locked = checked && lockedIds.includes(a.id);
               return (
                 <button
                   key={a.id}
@@ -121,7 +132,9 @@ export function AssigneeSelector({ value, onChange, admins, disabled, variant = 
                     e.stopPropagation();
                     toggle(a.id);
                   }}
-                  className="w-full flex items-center gap-2 px-3 py-2 hover:bg-gray-50 text-left"
+                  aria-disabled={locked}
+                  title={locked ? lockedReason : undefined}
+                  className={`w-full flex items-center gap-2 px-3 py-2 text-left ${locked ? 'cursor-not-allowed opacity-60' : 'hover:bg-gray-50'}`}
                 >
                   <div className={`w-4 h-4 rounded border flex items-center justify-center flex-shrink-0 ${checked ? 'bg-brand-dark border-brand-dark' : 'border-gray-300'}`}>
                     {checked && <Check className="h-3 w-3 text-white" />}

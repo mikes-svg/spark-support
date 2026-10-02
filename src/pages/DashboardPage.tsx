@@ -5,10 +5,11 @@ import { db } from '../lib/firebase';
 import { useAuth } from '../context/AuthContext';
 import { StatusBadge } from '../components/Badges';
 import { Avatar } from '../components/Avatar';
-import { Plus, Users, Tag } from 'lucide-react';
+import { Plus, Users, Tag, Search, X } from 'lucide-react';
 import { getAssigneeIds } from '../types';
 import type { Ticket, Profile, TicketStatus } from '../types';
 import { formatDate } from '../lib/dates';
+import { makeTicketMatcher } from '../lib/ticketSearch';
 
 // Sentinel for the "Unassigned" choice in the assignee filter, kept distinct
 // from '' which means "all assignees".
@@ -30,6 +31,11 @@ export function DashboardPage() {
   // Filter the view to one request type (e.g. MOR). '' = all types. Composes
   // with the assignee and status filters below.
   const [typeFilter, setTypeFilter] = useState<string>('');
+  // Free-text search across id, title, description, type and the submitter /
+  // assignee names. This page already loads the user's ENTIRE ticket history in
+  // one query (participants array-contains, no limit), so unlike All Tickets
+  // there is nothing more to fetch — the search genuinely covers everything.
+  const [search, setSearch] = useState('');
 
   useEffect(() => {
     if (!user || !db) { setLoading(false); return; }
@@ -99,8 +105,12 @@ export function DashboardPage() {
 
   // The assignee and type filters scope the whole view — both the status tile
   // counts and the table — so the tiles always reconcile with the rows below.
-  const scopedTickets = assigneeFilter || typeFilter
-    ? tickets.filter((t) => matchesAssignee(t) && matchesType(t))
+  const matcher = makeTicketMatcher(search, profiles);
+
+  // Search narrows the same set the stat tiles count, so the tiles stay
+  // consistent with the table instead of advertising totals you can't see.
+  const scopedTickets = assigneeFilter || typeFilter || !matcher.isEmpty
+    ? tickets.filter((t) => matchesAssignee(t) && matchesType(t) && matcher.matches(t))
     : tickets;
 
   const openCount = scopedTickets.filter((t) => t.status === 'Open').length;
@@ -114,7 +124,7 @@ export function DashboardPage() {
 
   const visibleTickets = statusFilter ? scopedTickets.filter((t) => t.status === statusFilter) : scopedTickets;
 
-  const anyFilterActive = statusFilter !== null || assigneeFilter !== '' || typeFilter !== '';
+  const anyFilterActive = statusFilter !== null || assigneeFilter !== '' || typeFilter !== '' || !matcher.isEmpty;
   const selectedAssigneeLabel =
     assigneeFilter === UNASSIGNED ? 'Unassigned'
     : assigneeFilter ? (profiles[assigneeFilter]?.name ?? 'Assignee')
@@ -162,6 +172,27 @@ export function DashboardPage() {
               </select>
             </div>
           )}
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
+            <input
+              type="search"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search my tickets…"
+              aria-label="Search my tickets"
+              className="block w-full sm:w-56 pl-9 pr-9 py-2 text-sm border border-gray-300 rounded-md bg-white focus:outline-none focus:ring-brand-dark focus:border-brand-dark"
+            />
+            {search && (
+              <button
+                type="button"
+                onClick={() => setSearch('')}
+                aria-label="Clear search"
+                className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center justify-center min-h-[32px] min-w-[32px] text-gray-400 hover:text-gray-600"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            )}
+          </div>
           <Link to="/submit" className="inline-flex items-center justify-center whitespace-nowrap px-4 py-2 border border-transparent text-sm font-medium rounded-md text-brand-dark bg-brand-gold hover:bg-brand-gold/80 shadow-sm transition-colors">
             <Plus className="h-4 w-4 mr-2" />Submit New Request
           </Link>
@@ -257,6 +288,10 @@ export function DashboardPage() {
                     </tr>
                   );
                 })
+              ) : !matcher.isEmpty ? (
+                <tr><td colSpan={6} className="px-6 py-12 text-center text-sm text-gray-500">
+                  No tickets match “{search.trim()}”. This searched all {tickets.length} of your tickets.
+                </td></tr>
               ) : (assigneeFilter || typeFilter) ? (
                 <tr><td colSpan={6} className="px-6 py-12 text-center text-sm text-gray-500">No tickets match the current filters.</td></tr>
               ) : statusFilter ? (

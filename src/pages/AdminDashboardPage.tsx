@@ -24,6 +24,8 @@ import { Avatar } from '../components/Avatar';
 import { getAssigneeIds, isSuperadminRole } from '../types';
 import type { TicketStatus, TicketPriority, Ticket, Profile } from '../types';
 import { formatDate, formatDateTime } from '../lib/dates';
+import { makeTicketMatcher } from '../lib/ticketSearch';
+import { lockedAssigneeIds, LAST_MANAGER_MESSAGE } from '../lib/ticketAssignees';
 import {
   updateTicketStatus,
   updateTicketPriority,
@@ -35,6 +37,17 @@ const PRIORITIES: TicketPriority[] = ['Low', 'Medium', 'High', 'Urgent'];
 const COUNT_STATUSES: TicketStatus[] = ['Open', 'In Progress', 'On Hold', 'Resolved', 'Scheduled'];
 const PAGE_SIZE = 50;
 
+/**
+ * Hard ceiling on the one-shot fetch that backs search.
+ *
+ * Search has to read every ticket, because Firestore has no text index — so the
+ * only question is whether that read is bounded. 5000 is far above this
+ * workspace's ticket count and still a single affordable query; if a search ever
+ * hits it, the UI says so rather than quietly searching only the newest slice,
+ * which is exactly the failure this change exists to fix.
+ */
+const SEARCH_FETCH_MAX = 5000;
+
 type Counts = Record<string, number>;
 
 export function AdminDashboardPage() {
@@ -42,7 +55,10 @@ export function AdminDashboardPage() {
   const { user } = useAuth();
   const [tickets, setTickets] = useState<Ticket[]>([]);
   const [profiles, setProfiles] = useState<Record<string, Profile>>({});
-  const [adminProfiles, setAdminProfiles] = useState<Profile[]>([]);
+  // Everyone who can be assigned a ticket — all roles, not just Managers.
+  // Tickets can be delegated to a User now; the accountability guard is that a
+  // Manager must remain assigned, not that only Managers can be.
+  const [assignableProfiles, setAssignableProfiles] = useState<Profile[]>([]);
   const [requestTypes, setRequestTypes] = useState<string[]>([]);
   const [counts, setCounts] = useState<Counts | null>(null);
   const [loading, setLoading] = useState(true);
@@ -55,9 +71,13 @@ export function AdminDashboardPage() {
   const [statusFilter, setStatusFilter] = useState('Active');
   const [typeFilter, setTypeFilter] = useState('');
   const [assigneeFilter, setAssigneeFilter] = useState('');
-  // Free-text search over loaded tickets (id, title, description, type, and
-  // submitter/assignee names). Client-side, so it only searches loaded pages.
+  // Free-text search over id, title, description, type and submitter/assignee
+  // names. Typing a term pulls the FULL set for the current status filter
+  // (loadAllForSearch) before matching, so results are never limited to the
+  // pages already scrolled into view.
   const [search, setSearch] = useState('');
+  const [searchLoading, setSearchLoading] = useState(false);
+  const [searchTruncated, setSearchTruncated] = useState(false);
   // Scheduled (not-yet-live) tickets are hidden by default; this toggle reveals them.
   const [showScheduled, setShowScheduled] = useState(false);
 
@@ -66,6 +86,10 @@ export function AdminDashboardPage() {
   const cursorRef = useRef<QueryDocumentSnapshot<DocumentData> | null>(null);
   const profilesRef = useRef<Record<string, Profile>>({});
   useEffect(() => { profilesRef.current = profiles; }, [profiles]);
+
+  // Which status set has already been fully loaded for search, so switching
+  // filters re-fetches but typing another character does not.
+  const fullyLoadedKeyRef = useRef<string | null>(null);
 
   // Which statuses the list query should fetch, given the status filter + the
   // show-scheduled toggle. Status is filtered SERVER-side (one composite index);
@@ -96,6 +120,68 @@ export function AdminDashboardPage() {
     });
   }, []);
 
+  /**
+   * Load the whole profile directory once.
+   *
+   * Searching by a person's name only works if that person's profile is in
+   * memory, and the per-page loader only fetches profiles for tickets already on
+   * screen — so before this, searching "Greg" missed every ticket of his that
+   * hadn't been scrolled to. The directory is a dozen documents; fetching it
+   * whole is cheaper than reasoning about which half is loaded.
+   */
+  const loadAllProfiles = useCallback(async () => {
+    const database = db;
+    if (!database) return;
+    try {
+      const snap = await getDocs(collection(database, 'profiles'));
+      setProfiles((prev) => {
+        const next = { ...prev };
+        snap.docs.forEach((d) => { next[d.id] = { id: d.id, ...d.data() } as Profile; });
+        return next;
+      });
+    } catch (err) {
+      console.warn('Could not load the full profile directory; name search may be incomplete:', err);
+    }
+  }, []);
+
+  /**
+   * Fetch every ticket in the current status set, so an in-memory search covers
+   * all of them rather than just the pages already loaded.
+   *
+   * Status stays a server-side filter (it has a composite index); type and
+   * assignee are narrowed in memory afterwards, as before.
+   */
+  const loadAllForSearch = useCallback(async () => {
+    const database = db;
+    if (!database) return;
+    const statuses = statusesForFilter();
+    const key = statuses.slice().sort().join('|');
+    if (fullyLoadedKeyRef.current === key) return;
+
+    setSearchLoading(true);
+    try {
+      const snap = await getDocs(query(
+        collection(database, 'tickets'),
+        where('status', 'in', statuses),
+        orderBy('createdAt', 'desc'),
+        limit(SEARCH_FETCH_MAX),
+      ));
+      setTickets(snap.docs.map((d) => ({ id: d.id, ...d.data() } as Ticket)));
+      // The cursor and hasMore now describe this full set, so "Load more"
+      // correctly disappears instead of re-appending rows we already have.
+      cursorRef.current = snap.docs[snap.docs.length - 1] ?? cursorRef.current;
+      setHasMore(false);
+      setSearchTruncated(snap.size === SEARCH_FETCH_MAX);
+      fullyLoadedKeyRef.current = key;
+      await loadAllProfiles();
+    } catch (err) {
+      console.error('Failed to load all tickets for search:', err);
+      setError(true);
+    } finally {
+      setSearchLoading(false);
+    }
+  }, [statusesForFilter, loadAllProfiles]);
+
   // Aggregate counts straight from the server (no full-collection read), so the
   // stat cards stay accurate at any data size.
   const fetchCounts = useCallback(async () => {
@@ -120,6 +206,9 @@ export function AdminDashboardPage() {
     else setLoadingMore(true);
     try {
       const statuses = statusesForFilter();
+      // A reset re-paginates from the top, so the full-set cache no longer
+      // describes what is in state.
+      if (reset) { fullyLoadedKeyRef.current = null; setSearchTruncated(false); }
       const col = collection(database, 'tickets');
       const q = !reset && cursorRef.current
         ? query(col, where('status', 'in', statuses), orderBy('createdAt', 'desc'), startAfter(cursorRef.current), limit(PAGE_SIZE))
@@ -148,8 +237,8 @@ export function AdminDashboardPage() {
       try {
         const rtSnap = await getDocs(collection(database, 'requestTypes'));
         setRequestTypes(rtSnap.docs.map((d) => d.data().name as string).sort());
-        const adminSnap = await getDocs(query(collection(database, 'profiles'), where('role', 'in', ['admin', 'superadmin'])));
-        setAdminProfiles(adminSnap.docs.map((d) => ({ id: d.id, ...d.data() } as Profile)));
+        const peopleSnap = await getDocs(collection(database, 'profiles'));
+        setAssignableProfiles(peopleSnap.docs.map((d) => ({ id: d.id, ...d.data() } as Profile)));
       } catch (err) {
         console.error('Failed to load admin directory/types:', err);
       }
@@ -159,6 +248,13 @@ export function AdminDashboardPage() {
 
   // (Re)load the first page whenever the server-side filter changes.
   useEffect(() => { loadPage(true); }, [loadPage]);
+
+  // The moment a search term exists, make sure the whole set is loaded. Guarded
+  // by fullyLoadedKeyRef inside loadAllForSearch, so this fires once per status
+  // filter rather than on every keystroke.
+  useEffect(() => {
+    if (search.trim()) void loadAllForSearch();
+  }, [search, loadAllForSearch]);
 
   const refreshAll = useCallback(async () => {
     setRefreshing(true);
@@ -180,7 +276,7 @@ export function AdminDashboardPage() {
     if (pendingChange.type === 'assignees') {
       const { ticket, value } = pendingChange;
       if (value.length === 0) return `Remove all assignees from ${ticket.id}?`;
-      const names = value.map((id) => adminProfiles.find((a) => a.id === id)?.name || 'Unknown').join(', ');
+      const names = value.map((id) => assignableProfiles.find((a) => a.id === id)?.name || 'Unknown').join(', ');
       return `Set assignees for ${ticket.id} to: ${names}?`;
     }
     const { ticket, value } = pendingChange;
@@ -237,13 +333,13 @@ export function AdminDashboardPage() {
   // type/assignee here, and re-apply the status set so optimistic status changes
   // that move a ticket out of view disappear immediately.
   const activeStatuses = statusesForFilter();
-  const q = search.trim().toLowerCase();
-  const matchesSearch = (t: Ticket) => {
-    if (!q) return true;
-    const names = [t.submitterId, ...getAssigneeIds(t)].map((id) => profiles[id]?.name || '');
-    return [t.id, t.title, t.description || '', t.type, ...names]
-      .some((field) => field.toLowerCase().includes(q));
-  };
+  // Role lookups for the last-Manager guard come from the full people list,
+  // which is loaded up front — `profiles` only holds whoever the visible rows
+  // referenced, so it can miss an assignee's role.
+  const profilesById = Object.fromEntries(assignableProfiles.map((p) => [p.id, p]));
+  const matcher = makeTicketMatcher(search, profiles);
+  const q = matcher.term;
+  const matchesSearch = matcher.matches;
   const visibleTickets = tickets.filter((t) => {
     if (!activeStatuses.includes(t.status)) return false;
     if (typeFilter && t.type !== typeFilter) return false;
@@ -323,7 +419,7 @@ export function AdminDashboardPage() {
         </select>
         <select value={assigneeFilter} onChange={(e) => setAssigneeFilter(e.target.value)} className="block pl-3 pr-10 py-2 text-sm border-gray-300 focus:outline-none focus:ring-brand-dark focus:border-brand-dark rounded-md border">
           <option value="">All Assignees</option>
-          {adminProfiles.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
+          {assignableProfiles.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
         </select>
         {isSuperadmin && (
           <button
@@ -402,7 +498,9 @@ export function AdminDashboardPage() {
                         <AssigneeSelector
                           value={ticketAssigneeIds}
                           onChange={(ids) => setPendingChange({ type: 'assignees', ticket, value: ids })}
-                          admins={adminProfiles}
+                          admins={assignableProfiles}
+                          lockedIds={lockedAssigneeIds(ticketAssigneeIds, profilesById)}
+                          lockedReason={LAST_MANAGER_MESSAGE}
                           variant="compact"
                         />
                       </td>
@@ -410,7 +508,13 @@ export function AdminDashboardPage() {
                   );
                 })
               ) : (
-                <tr><td colSpan={6} className="px-6 py-12 text-center text-sm text-gray-500">No tickets found.</td></tr>
+                <tr><td colSpan={6} className="px-6 py-12 text-center text-sm text-gray-500">
+                  {searchLoading
+                    ? 'Searching every ticket…'
+                    : !matcher.isEmpty
+                      ? `No tickets match “${search.trim()}”.`
+                      : 'No tickets found.'}
+                </td></tr>
               )}
             </tbody>
           </table>
@@ -419,7 +523,14 @@ export function AdminDashboardPage() {
           <div className="px-6 py-3 border-t border-gray-200 flex items-center justify-between text-sm text-gray-500">
             <span>
               Showing {visibleTickets.length} ticket{visibleTickets.length === 1 ? '' : 's'}
-              {clientFiltered && ' (filters/search apply to loaded tickets — load more to reach further back)'}
+              {!matcher.isEmpty && (
+                searchLoading
+                  ? ' — searching every ticket…'
+                  : searchTruncated
+                    ? ` — searched the most recent ${SEARCH_FETCH_MAX.toLocaleString()} tickets (the limit); narrow by status to reach further back`
+                    : ` — searched all ${tickets.length.toLocaleString()} tickets in this status filter`
+              )}
+              {matcher.isEmpty && clientFiltered && ' (filters apply to loaded tickets — load more to reach further back)'}
             </span>
             {hasMore && (
               <button
