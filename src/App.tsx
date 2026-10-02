@@ -36,6 +36,7 @@ const TaskDetailPage = lazy(() => import('./pages/TaskDetailPage').then((m) => (
 const WorkloadPage = lazy(() => import('./pages/WorkloadPage').then((m) => ({ default: m.WorkloadPage })));
 const TaskSettingsPage = lazy(() => import('./pages/admin/TaskSettingsPage').then((m) => ({ default: m.TaskSettingsPage })));
 const ReassignPage = lazy(() => import('./pages/admin/ReassignPage').then((m) => ({ default: m.ReassignPage })));
+const NotificationSettingsPage = lazy(() => import('./pages/NotificationSettingsPage').then((m) => ({ default: m.NotificationSettingsPage })));
 const CalendarSyncSettingsPage = lazy(() => import('./pages/CalendarSyncSettingsPage').then((m) => ({ default: m.CalendarSyncSettingsPage })));
 
 function ProtectedRoute({
@@ -121,6 +122,7 @@ export function App() {
             <Route path="tasks/templates" element={<TaskTemplatesPage />} />
             <Route path="tasks/:id" element={<TaskDetailPage />} />
 
+            <Route path="settings/notifications" element={<NotificationSettingsPage />} />
             <Route
               path="settings/calendar"
               element={<CalendarSyncSettingsPage />}

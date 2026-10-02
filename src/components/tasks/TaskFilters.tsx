@@ -129,9 +129,22 @@ export function TaskFilters({ value, onChange, lists, statusSets, people, hide =
   const show = (key: NonNullable<TaskFiltersProps['hide']>[number]) => !hide.includes(key);
   const patch = (p: Partial<TaskFilter>) => onChange({ ...value, ...p });
 
-  const spaceIds = [...new Set(lists.map((l) => l.spaceId))];
+  // Spaces come from the spaces collection, NOT from lists.
+  //
+  // Deriving them from `lists.map(l => l.spaceId)` meant a space with no lists
+  // in it yet contributed nothing, so creating a second space and looking for a
+  // way to switch to it found nothing at all — the control stayed hidden
+  // because, as far as it could tell, only one space existed.
+  // `spaceNames` is already every space in the workspace; use its keys, and
+  // fall back to the lists only if that load has not landed yet.
+  const spaceIds = (Object.keys(spaceNames).length > 0
+    ? Object.keys(spaceNames)
+    : [...new Set(lists.map((l) => l.spaceId))]
+  ).sort((a, b) => (spaceNames[a] ?? a).localeCompare(spaceNames[b] ?? b));
+  const sortedLists = [...lists].sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+  const sortedPeople = [...people].sort((a, b) => (a.name || '').localeCompare(b.name || ''));
   const tagIds = tags.map((t) => t.id);
-  const assigneeIds = people.map((p) => p.id);
+  const assigneeIds = sortedPeople.map((p) => p.id);
   // All status defs across every set, deduped by type — the bar filters by
   // TYPE (see module doc), never by the per-list label.
   const statusTypesInUse = new Set<TaskStatusType>();
@@ -234,7 +247,7 @@ export function TaskFilters({ value, onChange, lists, statusSets, people, hide =
           className="min-h-[44px] sm:min-h-0 px-3 py-2 text-sm border border-gray-300 rounded-md bg-white focus:outline-none focus:ring-brand-dark focus:border-brand-dark"
         >
           <option value="">All lists</option>
-          {lists
+          {sortedLists
             .filter((l) => !value.spaceId || l.spaceId === value.spaceId)
             .map((l) => (
               <option key={l.id} value={l.id}>{l.name}</option>

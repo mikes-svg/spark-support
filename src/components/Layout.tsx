@@ -27,6 +27,7 @@ export function Layout() {
     if (pathname === '/tasks/templates') return 'Task Templates';
     if (pathname.startsWith('/tasks/')) return 'Task Details';
     if (pathname === '/settings/calendar') return 'Calendar Sync';
+    if (pathname === '/settings/notifications') return 'Notifications';
     // Mirrors the sidebar label, which is "Onboarding Tasks" now that the
     // task section owns the plain "My Tasks" name.
     if (pathname === '/onboarding') return 'Onboarding Tasks';

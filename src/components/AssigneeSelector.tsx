@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { Check, ChevronDown, Users } from 'lucide-react';
+import { Check, ChevronDown, Users, Search } from 'lucide-react';
 import type { Profile } from '../types';
 import { Avatar } from './Avatar';
 
@@ -17,6 +17,9 @@ interface Props {
 
 export function AssigneeSelector({ value, onChange, admins, disabled, variant = 'full', placeholder = 'Unassigned', emptyLabel = 'No admins available' }: Props) {
   const [open, setOpen] = useState(false);
+  // Type-to-filter. AssigneeChips already had this; the dropdown did not, so
+  // picking someone on a team of any size meant scrolling and reading.
+  const [search, setSearch] = useState('');
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -33,6 +36,14 @@ export function AssigneeSelector({ value, onChange, admins, disabled, variant = 
   };
 
   const selected = admins.filter((a) => value.includes(a.id));
+
+  // Alphabetical, always: the source lists arrive in Firestore document-id
+  // order, which is effectively random to a reader.
+  const sorted = [...admins].sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+  const term = search.trim().toLowerCase();
+  const shown = term
+    ? sorted.filter((a) => (a.name || '').toLowerCase().includes(term) || (a.email || '').toLowerCase().includes(term))
+    : sorted;
 
   return (
     <div className="relative inline-block w-full" ref={ref}>
@@ -73,14 +84,34 @@ export function AssigneeSelector({ value, onChange, admins, disabled, variant = 
         <ChevronDown className="h-4 w-4 text-gray-400 flex-shrink-0" />
       </button>
       {open && (
-        <div className="absolute z-20 mt-1 bg-white border border-gray-200 rounded-md shadow-lg py-1 max-h-64 overflow-y-auto min-w-[220px] left-0 right-0 md:right-auto md:w-64">
+        <div className="absolute z-20 mt-1 bg-white border border-gray-200 rounded-md shadow-lg py-1 max-h-72 overflow-y-auto min-w-[220px] left-0 right-0 md:right-auto md:w-64">
+          {admins.length > 5 && (
+            // Only worth the row when the list is long enough to scan badly.
+            <div className="sticky top-0 bg-white px-2 pt-1 pb-2 border-b border-gray-100">
+              <div className="relative">
+                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400 pointer-events-none" />
+                <input
+                  type="search"
+                  autoFocus
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  onClick={(e) => e.stopPropagation()}
+                  placeholder="Search people…"
+                  aria-label="Search people"
+                  className="w-full pl-8 pr-2 py-1.5 text-sm border border-gray-200 rounded focus:outline-none focus:ring-1 focus:ring-brand-dark focus:border-brand-dark"
+                />
+              </div>
+            </div>
+          )}
           {admins.length === 0 ? (
             <div className="flex items-center gap-2 px-3 py-3 text-sm text-gray-500">
               <Users className="h-4 w-4" />
               {emptyLabel}
             </div>
+          ) : shown.length === 0 ? (
+            <div className="px-3 py-3 text-sm text-gray-500">No one matches “{search.trim()}”.</div>
           ) : (
-            admins.map((a) => {
+            shown.map((a) => {
               const checked = value.includes(a.id);
               return (
                 <button

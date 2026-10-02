@@ -43,6 +43,8 @@ export interface Profile {
   photoURL: string;
   role: Role;
   onboardingAccess?: boolean;
+  /** How much immediate task mail this person wants; read by taskNotifications.js. */
+  notificationPrefs?: 'immediate' | 'mentions-only' | 'digest-only';
 }
 
 interface AuthContextType {

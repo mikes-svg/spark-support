@@ -14,6 +14,7 @@ import {
   ListChecks,
   ListTodo,
   CalendarDays,
+  Bell,
   Gauge,
   SlidersHorizontal,
   UserMinus,
@@ -73,6 +74,7 @@ function SidebarContent({ onClose }: { onClose: () => void }) {
     { to: '/tasks', icon: ListChecks, label: 'My Tasks', exact: true },
     { to: '/tasks/all', icon: ListTodo, label: 'Team Tasks' },
     { to: '/tasks/calendar', icon: CalendarDays, label: 'Calendar' },
+    { to: '/settings/notifications', icon: Bell, label: 'Notifications' },
   ];
 
   const adminItems: NavItem[] = [

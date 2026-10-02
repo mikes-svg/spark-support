@@ -22,6 +22,12 @@ import { TaskActivity } from '../components/tasks/TaskActivity';
 import { TaskAttachments } from '../components/tasks/TaskAttachments';
 import { getTask, updateTask, deleteTask, setStatus, toggleSubtask, canEditTask, TASK_LISTS } from '../lib/tasks';
 import { getOrSeedStatusSets } from '../lib/taskStatuses';
+import { RecurrenceEditor } from '../components/tasks/RecurrenceEditor';
+import {
+  getSeriesForTask, makeTaskRecurring, updateSeries, stopSeries, resumeSeries,
+  type SeriesSettings,
+} from '../lib/taskSeries';
+import type { TaskSeries } from '../types';
 import { isSuperadminRole } from '../types';
 import type { Profile, Task, TaskList, TaskStatusSet } from '../types';
 
@@ -37,6 +43,11 @@ export function TaskDetailPage() {
   const [notFound, setNotFound] = useState(false);
   const [lists, setLists] = useState<TaskList[]>([]);
   const [statusSets, setStatusSets] = useState<TaskStatusSet[]>([]);
+  // The recurring definition behind this task, if it has one. Loaded alongside
+  // the task so the Repeat card can show the real schedule rather than a stub.
+  const [series, setSeries] = useState<TaskSeries | null>(null);
+  const [seriesSaving, setSeriesSaving] = useState(false);
+  const [seriesError, setSeriesError] = useState('');
   const [people, setPeople] = useState<Profile[]>([]);
   const [actionError, setActionError] = useState('');
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
@@ -59,7 +70,15 @@ export function TaskDetailPage() {
         setTask(taskData);
         setLists(listsSnap.docs.map((d) => ({ id: d.id, ...d.data() } as TaskList)));
         setStatusSets(sets);
-        setPeople(peopleSnap.docs.map((d) => ({ id: d.id, ...d.data() } as Profile)));
+        setPeople(
+          peopleSnap.docs
+            .map((d) => ({ id: d.id, ...d.data() } as Profile))
+            // Alphabetical: Firestore returns documents in id order, which put
+            // the assignee list in an order nobody could scan.
+            .sort((a, b) => (a.name || '').localeCompare(b.name || '')),
+        );
+        const existing = await getSeriesForTask(taskData);
+        if (!cancelled) setSeries(existing);
       } catch (err) {
         console.error('Failed to load task:', err);
         if (!cancelled) setNotFound(true);
@@ -145,6 +164,59 @@ export function TaskDetailPage() {
     }
   };
 
+  /**
+   * Turning repeat on for the first time creates the series and links THIS task
+   * to it as occurrence one, so comments, attachments and history survive being
+   * made recurring. Afterwards the editor just edits the series.
+   */
+  const handleRecurrenceChange = async (next: SeriesSettings | null) => {
+    if (!task || !user || seriesSaving) return;
+    setSeriesError('');
+    setSeriesSaving(true);
+    try {
+      if (next && !series) {
+        const seriesId = await makeTaskRecurring(task, next, user.id);
+        setTask({ ...task, seriesId });
+        setSeries({ id: seriesId, name: task.title, payload: {}, creatorId: user.id, ...next } as TaskSeries);
+      } else if (next && series) {
+        await updateSeries(series.id, next);
+        setSeries({ ...series, ...next });
+      } else if (!next && series) {
+        await stopSeries(series.id);
+        setSeries({ ...series, active: false });
+      }
+    } catch (err) {
+      console.error('Failed to save the repeat schedule:', err);
+      setSeriesError('Could not save the repeat schedule. Please try again.');
+    } finally {
+      setSeriesSaving(false);
+    }
+  };
+
+  const handleStopSeries = async () => {
+    if (!series) return;
+    setSeriesSaving(true);
+    try {
+      await stopSeries(series.id);
+      setSeries({ ...series, active: false });
+    } catch (err) {
+      console.error('Failed to stop the series:', err);
+      setSeriesError('Could not stop repeating. Please try again.');
+    } finally { setSeriesSaving(false); }
+  };
+
+  const handleResumeSeries = async () => {
+    if (!series) return;
+    setSeriesSaving(true);
+    try {
+      await resumeSeries(series.id);
+      setSeries({ ...series, active: true });
+    } catch (err) {
+      console.error('Failed to resume the series:', err);
+      setSeriesError('Could not resume repeating. Please try again.');
+    } finally { setSeriesSaving(false); }
+  };
+
   const handleSubtasksChange = async (subtasks: Task['subtasks']) => {
     if (!task) return;
     const prev = task;
@@ -216,6 +288,37 @@ export function TaskDetailPage() {
               people={people}
               onChange={handleEditorChange}
             />
+          </div>
+
+          <div className="bg-white shadow-sm rounded-xl border border-gray-200 overflow-hidden">
+            <div className="px-6 py-4 border-b border-gray-200 bg-gray-50/50 flex items-center justify-between">
+              <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-widest">Repeat</h3>
+              {series && (
+                <span className={`text-xs px-2 py-0.5 rounded-full ${series.active ? 'bg-brand-dark/10 text-brand-dark' : 'bg-gray-100 text-gray-500'}`}>
+                  {series.active ? 'Recurring' : 'Paused'}
+                </span>
+              )}
+            </div>
+            <div className="p-6 space-y-3">
+              {seriesError && (
+                <p className="text-sm text-red-600" role="alert">{seriesError}</p>
+              )}
+              <RecurrenceEditor
+                value={series}
+                disabled={!canEdit || seriesSaving}
+                onChange={handleRecurrenceChange}
+              />
+              {series && canEdit && (
+                <button
+                  type="button"
+                  onClick={() => (series.active ? handleStopSeries() : handleResumeSeries())}
+                  disabled={seriesSaving}
+                  className="text-sm font-medium text-gray-600 hover:text-brand-dark underline underline-offset-2 disabled:opacity-50"
+                >
+                  {series.active ? 'Stop repeating (keeps this task open)' : 'Resume repeating'}
+                </button>
+              )}
+            </div>
           </div>
 
           <div className="bg-white shadow-sm rounded-xl border border-gray-200 overflow-hidden">
