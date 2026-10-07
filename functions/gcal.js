@@ -715,7 +715,7 @@ function realDeps(env = process.env) {
     config: loadConfig(env),
     transport: createTransport(),
     now: () => Date.now(),
-    // FieldValue comes from the MODULAR entry point, not `admin.firestore.FieldValue`.
+    // FieldValue comes from the MODULAR entry point, not `FieldValue`.
     // Under the Functions emulator the namespaced `admin.firestore` is wrapped so
     // its calls reach the local Firestore, and that wrapper does not carry the
     // FieldValue property — so the namespaced form throws "Cannot read properties

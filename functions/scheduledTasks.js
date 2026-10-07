@@ -24,6 +24,13 @@ const { onSchedule } = require('firebase-functions/v2/scheduler');
 const { logger } = require('firebase-functions');
 const { admin, db, REGION, APP_URL, escapeHtml, emailsForAssignees, todayInTimeZone } = require('./shared');
 const { DEFAULT_TIMEZONE } = require('./recurrence');
+// FieldValue comes from the MODULAR entry point, never `admin.firestore.FieldValue`.
+// The Functions emulator wraps the namespaced `admin.firestore` so its calls reach
+// the local Firestore, and that wrapper does not carry FieldValue — so the
+// namespaced form throws "Cannot read properties of undefined" at runtime while
+// looking perfectly correct in source and resolving fine outside the emulator.
+// That made the emulator untrustworthy for exactly the paths most worth testing.
+const { FieldValue } = require('firebase-admin/firestore');
 
 /**
  * Mirror of DEFAULT_STATUS_SET in src/lib/taskStatuses.ts, used only when a list
@@ -160,9 +167,9 @@ async function buildTaskActivationBatch(batch, taskDoc, cache) {
     statusType: todo.type,
     // The go-live date has done its job; leaving it set would keep the task
     // looking pre-live to anything that checks the field rather than the type.
-    goLiveDate: admin.firestore.FieldValue.delete(),
+    goLiveDate: FieldValue.delete(),
     participants,
-    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    updatedAt: FieldValue.serverTimestamp(),
   });
 
   batch.set(db.collection('taskEvents').doc(), {
@@ -174,7 +181,7 @@ async function buildTaskActivationBatch(batch, taskDoc, cache) {
     fromStatusType: 'scheduled',
     toStatusType: todo.type,
     note: 'Scheduled task went live.',
-    createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    createdAt: FieldValue.serverTimestamp(),
   });
 
   // Server-side mail only — the client is forbidden from writing to `mail`, and

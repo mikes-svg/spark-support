@@ -12,7 +12,7 @@
 const { onDocumentWritten } = require('firebase-functions/v2/firestore');
 const { onCall, HttpsError } = require('firebase-functions/v2/https');
 const { logger } = require('firebase-functions');
-// The MODULAR FieldValue, not admin.firestore.FieldValue: under the Functions
+// The MODULAR FieldValue, not FieldValue: under the Functions
 // emulator the namespaced admin.firestore is wrapped and loses FieldValue, so
 // the namespaced form throws at runtime while looking correct in source.
 const { FieldValue } = require('firebase-admin/firestore');

@@ -12,6 +12,13 @@
 const { onSchedule } = require('firebase-functions/v2/scheduler');
 const { onDocumentCreated, onDocumentUpdated } = require('firebase-functions/v2/firestore');
 const { logger } = require('firebase-functions');
+// FieldValue comes from the MODULAR entry point, never `admin.firestore.FieldValue`.
+// The Functions emulator wraps the namespaced `admin.firestore` so its calls reach
+// the local Firestore, and that wrapper does not carry FieldValue — so the
+// namespaced form throws "Cannot read properties of undefined" at runtime while
+// looking perfectly correct in source and resolving fine outside the emulator.
+// That made the emulator untrustworthy for exactly the paths most worth testing.
+const { FieldValue } = require('firebase-admin/firestore');
 const {
   admin,
   db,
@@ -149,9 +156,9 @@ exports.activateScheduledTickets = onSchedule(
         batch.update(ticketDoc.ref, {
           status: 'Open',
           participants,
-          scheduledFor: admin.firestore.FieldValue.delete(),
-          createdAt: admin.firestore.FieldValue.serverTimestamp(),
-          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+          scheduledFor: FieldValue.delete(),
+          createdAt: FieldValue.serverTimestamp(),
+          updatedAt: FieldValue.serverTimestamp(),
         });
 
         // Audit 'created' now so analytics clock from the go-live date.
@@ -159,7 +166,7 @@ exports.activateScheduledTickets = onSchedule(
           ticketId: ticketDoc.id,
           type: 'created',
           actorId: ticket.submitterId,
-          createdAt: admin.firestore.FieldValue.serverTimestamp(),
+          createdAt: FieldValue.serverTimestamp(),
         });
 
         // Notify assignees, mirroring the submit-time assignment email.

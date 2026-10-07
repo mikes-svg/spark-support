@@ -58,6 +58,13 @@
 const { onCall, HttpsError } = require('firebase-functions/v2/https');
 const { logger } = require('firebase-functions');
 const { admin, db, REGION, APP_URL, escapeHtml, emailsForAssignees, sendMail } = require('./shared');
+// FieldValue comes from the MODULAR entry point, never `admin.firestore.FieldValue`.
+// The Functions emulator wraps the namespaced `admin.firestore` so its calls reach
+// the local Firestore, and that wrapper does not carry FieldValue — so the
+// namespaced form throws "Cannot read properties of undefined" at runtime while
+// looking perfectly correct in source and resolving fine outside the emulator.
+// That made the emulator untrustworthy for exactly the paths most worth testing.
+const { FieldValue } = require('firebase-admin/firestore');
 
 const BATCH_LIMIT = 400; // Firestore's 500-write cap, with headroom — same limit src/lib/onboarding.ts chunks at.
 
@@ -136,7 +143,7 @@ exports.reassignWork = onCall({ region: REGION }, async (request) => {
       batcher.add((batch) => batch.update(taskDoc.ref, {
         assigneeIds: nextAssignees,
         participants,
-        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        updatedAt: FieldValue.serverTimestamp(),
       }));
       updated++;
       toUserIds.forEach((u) => record(u, 'task', task.title, `${APP_URL}/tasks/${taskDoc.id}`));
@@ -153,7 +160,7 @@ exports.reassignWork = onCall({ region: REGION }, async (request) => {
       // waitingOnUserId holds exactly one person; the first pick-up inherits it.
       batcher.add((batch) => batch.update(taskDoc.ref, {
         waitingOnUserId: toUserIds[0],
-        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        updatedAt: FieldValue.serverTimestamp(),
       }));
       updated++;
       record(toUserIds[0], 'waitingOn', task.title, `${APP_URL}/tasks/${taskDoc.id}`);
@@ -176,7 +183,7 @@ exports.reassignWork = onCall({ region: REGION }, async (request) => {
       if (!touched) continue;
       batcher.add((batch) => batch.update(taskDoc.ref, {
         subtasks: nextSubtasks,
-        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        updatedAt: FieldValue.serverTimestamp(),
       }));
       updated++;
       toUserIds.forEach((u) => record(u, 'subtask', task.title, `${APP_URL}/tasks/${taskDoc.id}`));
@@ -194,7 +201,7 @@ exports.reassignWork = onCall({ region: REGION }, async (request) => {
       const next = dedupe([...assigneeIds.filter((id) => id !== fromUserId), ...toUserIds]);
       batcher.add((batch) => batch.update(seriesDoc.ref, {
         'payload.assigneeIds': next,
-        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        updatedAt: FieldValue.serverTimestamp(),
       }));
       updated++;
       toUserIds.forEach((u) => record(u, 'series', series.name, `${APP_URL}/tasks/templates`));
@@ -224,9 +231,9 @@ exports.reassignWork = onCall({ region: REGION }, async (request) => {
       const participants = dedupe([ticket.submitterId, ...nextAssignees]);
       batcher.add((batch) => batch.update(ticketDoc.ref, {
         assigneeIds: nextAssignees,
-        assigneeId: admin.firestore.FieldValue.delete(),
+        assigneeId: FieldValue.delete(),
         participants,
-        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        updatedAt: FieldValue.serverTimestamp(),
       }));
       updated++;
       toUserIds.forEach((u) => record(u, 'ticket', ticket.title, `${APP_URL}/tickets/${ticketDoc.id}`));
@@ -258,7 +265,7 @@ exports.reassignWork = onCall({ region: REGION }, async (request) => {
     fromAssigneeIds: [fromUserId],
     toAssigneeIds: toUserIds,
     note: `Mass reassign: ${updated} item(s) moved from ${fromUserId} to ${toUserIds.join(', ')} (scope: ${requestedScope.join(', ')}).`,
-    createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    createdAt: FieldValue.serverTimestamp(),
   }));
   await batcher.finish();
 

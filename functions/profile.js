@@ -13,6 +13,13 @@ const { onCall, HttpsError } = require('firebase-functions/v2/https');
 // visibly one initializeApp() in the codebase and no module can load an
 // uninitialised SDK by requiring itself first.
 const { admin, db, REGION } = require('./shared');
+// FieldValue comes from the MODULAR entry point, never `admin.firestore.FieldValue`.
+// The Functions emulator wraps the namespaced `admin.firestore` so its calls reach
+// the local Firestore, and that wrapper does not carry FieldValue — so the
+// namespaced form throws "Cannot read properties of undefined" at runtime while
+// looking perfectly correct in source and resolving fine outside the emulator.
+// That made the emulator untrustworthy for exactly the paths most worth testing.
+const { FieldValue } = require('firebase-admin/firestore');
 
 // ─── Role assignment (server-authoritative) ──────────────────────────────────
 // Roles are decided HERE, never by the client, so an authenticated user can't
@@ -110,7 +117,7 @@ exports.ensureProfile = onCall({ region: REGION }, async (request) => {
     `https://ui-avatars.com/api/?name=${encodeURIComponent(name)}&background=1B4332&color=D4A843`;
 
   const data = { name, email, photoURL, role, onboardingAccess, tasksAccess };
-  if (firstTime) data.createdAt = admin.firestore.FieldValue.serverTimestamp();
+  if (firstTime) data.createdAt = FieldValue.serverTimestamp();
   await profileRef.set(data, { merge: true });
 
   // Migrate then remove pre-reg duplicates.

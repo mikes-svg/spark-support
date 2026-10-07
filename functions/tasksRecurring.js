@@ -36,6 +36,13 @@ const {
   DEFAULT_TIMEZONE,
 } = require('./recurrence');
 const { loadStatusesForList, defaultTodoStatus, statusTripleFor, isDoneType } = require('./scheduledTasks');
+// FieldValue comes from the MODULAR entry point, never `admin.firestore.FieldValue`.
+// The Functions emulator wraps the namespaced `admin.firestore` so its calls reach
+// the local Firestore, and that wrapper does not carry FieldValue — so the
+// namespaced form throws "Cannot read properties of undefined" at runtime while
+// looking perfectly correct in source and resolving fine outside the emulator.
+// That made the emulator untrustworthy for exactly the paths most worth testing.
+const { FieldValue } = require('firebase-admin/firestore');
 
 const SERIES = 'taskSeries';
 const TASKS = 'tasks';
@@ -163,8 +170,8 @@ function buildOccurrenceTask(series, seriesId, occurrenceKey, previous, status) 
       gcalEventId: null,
       gcalSyncedAt: null,
       completedAt: null,
-      createdAt: admin.firestore.FieldValue.serverTimestamp(),
-      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      createdAt: FieldValue.serverTimestamp(),
+      updatedAt: FieldValue.serverTimestamp(),
     },
     carriedCount,
     carryFlagged,
@@ -221,13 +228,13 @@ async function commitOccurrence(seriesRef, seriesId, series, occurrenceKey, prev
     note: carriedCount
       ? `Occurrence ${occurrenceKey} created, carrying ${carriedCount} unfinished item(s)${carryFlagged ? ' — carried for more than three cycles' : ''}.`
       : `Occurrence ${occurrenceKey} created.`,
-    createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    createdAt: FieldValue.serverTimestamp(),
   });
   batch.update(seriesRef, {
     lastOccurrenceKey: occurrenceKey,
-    occurrencesCreated: admin.firestore.FieldValue.increment(1),
+    occurrencesCreated: FieldValue.increment(1),
     missedStreak: 0,
-    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    updatedAt: FieldValue.serverTimestamp(),
   });
 
   await batch.commit();
@@ -246,7 +253,7 @@ async function commitMissed(seriesRef, seriesId, decision, occurrenceKey, openTa
       // Move the key too: one task, always current. The event below keeps the
       // record of which occurrence it originally was.
       occurrenceKey,
-      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      updatedAt: FieldValue.serverTimestamp(),
     });
   }
 
@@ -258,14 +265,14 @@ async function commitMissed(seriesRef, seriesId, decision, occurrenceKey, openTa
       fromDueDate: openTask.dueDate ?? null,
       toDueDate: decision.action === 'roll-forward' ? occurrenceKey : (openTask.dueDate ?? null),
       note: decision.note,
-      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      createdAt: FieldValue.serverTimestamp(),
     });
   }
 
   batch.update(seriesRef, {
     lastOccurrenceKey: occurrenceKey,
-    missedStreak: admin.firestore.FieldValue.increment(1),
-    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    missedStreak: FieldValue.increment(1),
+    updatedAt: FieldValue.serverTimestamp(),
   });
 
   await batch.commit();
