@@ -5,6 +5,8 @@ import { defaultStatusFor } from '../../lib/taskStatuses';
 import { createTask } from '../../lib/tasks';
 import { useAuth } from '../../context/AuthContext';
 import { Modal } from '../Modal';
+import { RecurrenceEditor } from './RecurrenceEditor';
+import { makeTaskRecurring, type SeriesSettings } from '../../lib/taskSeries';
 import { AssigneeSelector } from '../AssigneeSelector';
 import { SubtaskEditor } from './SubtaskEditor';
 import { serializeTaskDescription, textToTaskDoc } from './TaskEditor';
@@ -73,6 +75,12 @@ export function TaskCreateModal({
     ? statusSets.find((s) => s.id === selectedList.defaultStatusSetId) ?? statusSets[0] ?? null
     : null;
 
+  // 'Repeat' is configured here rather than only after saving: a recurring task
+  // is usually recurring from the moment you think of it, and making people save
+  // and reopen to set that up is an odd extra step. The series is created after
+  // the task exists, because it needs the task's id to link occurrence one.
+  const [recurrence, setRecurrence] = useState<SeriesSettings | null>(null);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const trimmed = title.trim();
@@ -95,6 +103,18 @@ export function TaskCreateModal({
         subtasks,
         ...(def ? { statusId: def.id, statusName: def.name, statusType: def.type } : {}),
       });
+      if (recurrence) {
+        // A failure here must not lose the task the user just wrote, so it is
+        // reported separately rather than failing the whole submit.
+        try {
+          await makeTaskRecurring(task, recurrence, user.id);
+        } catch (err) {
+          console.error('Task created, but the repeat schedule failed to save:', err);
+          setError('Task created, but the repeat schedule could not be saved. Open the task and set it there.');
+          setSaving(false);
+          return;
+        }
+      }
       onCreated(task);
       onClose();
     } catch (err) {
@@ -105,8 +125,11 @@ export function TaskCreateModal({
     }
   };
 
+  // max-w-2xl, not max-w-lg: at lg the assignee and date controls wrapped and the
+  // lower fields sat below the fold, so every new task needed a scroll before you
+  // could see what you were filling in.
   return (
-    <Modal open={open} onClose={onClose} labelledBy="task-create-title" widthClass="max-w-lg">
+    <Modal open={open} onClose={onClose} labelledBy="task-create-title" widthClass="max-w-2xl">
       <form onSubmit={handleSubmit}>
         <div className="px-6 py-4 border-b border-gray-200 flex items-center justify-between">
           <h3 id="task-create-title" className="text-lg font-serif font-semibold text-gray-900">New Task</h3>
@@ -115,7 +138,7 @@ export function TaskCreateModal({
           </button>
         </div>
 
-        <div className="p-6 space-y-4 max-h-[70vh] overflow-y-auto">
+        <div className="p-6 space-y-4 max-h-[78vh] overflow-y-auto">
           {error && <p className="text-sm text-red-600" role="alert">{error}</p>}
 
           <div>
@@ -201,6 +224,11 @@ export function TaskCreateModal({
               onToggle={(id, done) => setSubtasks((prev) => prev.map((s) => (s.id === id ? { ...s, done } : s)))}
               onChange={setSubtasks}
             />
+          </div>
+
+          <div className="pt-2 border-t border-gray-100">
+            <span className="block text-xs font-medium text-gray-500 uppercase mb-2">Repeat</span>
+            <RecurrenceEditor value={recurrence} onChange={setRecurrence} disabled={saving} />
           </div>
         </div>
 

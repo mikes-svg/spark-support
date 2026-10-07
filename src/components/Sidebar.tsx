@@ -17,6 +17,7 @@ import {
   CalendarDays,
   Bell,
   ChevronDown,
+  Repeat,
   Gauge,
   SlidersHorizontal,
   UserMinus,
@@ -153,6 +154,9 @@ function SidebarContent({ onClose }: { onClose: () => void }) {
       { to: '/tasks', icon: ListChecks, label: 'My Tasks', exact: true },
       { to: '/tasks/all', icon: ListTodo, label: 'Team Tasks' },
       { to: '/tasks/calendar', icon: CalendarDays, label: 'Calendar' },
+      // The recurring view existed at this route from the start but was never
+      // put in the nav, so the only way to reach it was to know the URL.
+      { to: '/tasks/templates', icon: Repeat, label: 'Recurring' },
       { to: '/settings/notifications', icon: Bell, label: 'Notifications' },
     ] : []),
   ];

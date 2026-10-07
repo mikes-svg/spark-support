@@ -268,6 +268,39 @@ export interface TaskList {
   archived: boolean;
   /** Which status set this list's tasks use. Null falls back to the seeded default. */
   defaultStatusSetId: string | null;
+  /**
+   * Optional parent list, giving Space > List > Sub-list.
+   *
+   * One level of nesting, not arbitrary depth: the third tier is what people
+   * actually asked for (Accounting > FOM Activities > Housing), and a general
+   * tree would mean recursive pickers, cycle detection and a migration for a
+   * depth nobody has described wanting. A sub-list is an ordinary list in every
+   * other respect — it holds tasks, has its own status set, and can be archived.
+   */
+  parentListId?: string | null;
+}
+
+/** True when the list is a sub-list of another. */
+export function isSubList(list: Pick<TaskList, 'parentListId'>): boolean {
+  return !!list.parentListId;
+}
+
+/**
+ * Lists arranged for display: each top-level list followed by its sub-lists.
+ * Depth is capped at one, so a list that somehow points at a sub-list is treated
+ * as top-level rather than silently disappearing from every picker.
+ */
+export function orderListsByHierarchy(lists: TaskList[]): { list: TaskList; depth: 0 | 1 }[] {
+  const byName = (a: TaskList, b: TaskList) => (a.name || '').localeCompare(b.name || '');
+  const tops = lists.filter((l) => !l.parentListId || !lists.some((p) => p.id === l.parentListId && !p.parentListId));
+  const out: { list: TaskList; depth: 0 | 1 }[] = [];
+  for (const top of [...tops].sort(byName)) {
+    out.push({ list: top, depth: 0 });
+    for (const child of lists.filter((l) => l.parentListId === top.id).sort(byName)) {
+      out.push({ list: child, depth: 1 });
+    }
+  }
+  return out;
 }
 
 export interface TaskTag {
@@ -280,6 +313,55 @@ export interface TaskTag {
  * A checklist item on a task. Stored as an array field on the task, not a
  * subcollection — subtasks are always read and written with their parent.
  */
+/**
+ * One step in a sequential sign-off chain.
+ *
+ * Distinct from a subtask on purpose. Subtasks are a checklist — any of them,
+ * in any order, by anyone on the task. Stages are a handoff: only the current
+ * one is actionable, finishing it moves the task to the next person, and the
+ * last one finishing closes the task. "Adrian completes stage 1, it routes to a
+ * manager for final review" is a stage chain, not a checklist.
+ */
+export interface TaskStage {
+  id: string;
+  name: string;
+  /** Who the task is assigned to while this stage is current. */
+  assigneeIds: string[];
+  done: boolean;
+  doneAt?: FsTimestamp | null;
+  doneBy?: string | null;
+  order: number;
+}
+
+/**
+ * The stage awaiting action — the first unfinished one. Null when there are no
+ * stages, or when every stage is done.
+ */
+export function currentStage(stages?: TaskStage[] | null): TaskStage | null {
+  if (!stages || stages.length === 0) return null;
+  const ordered = [...stages].sort((a, b) => a.order - b.order);
+  return ordered.find((s) => !s.done) ?? null;
+}
+
+/** True once every stage is signed off. */
+export function allStagesComplete(stages?: TaskStage[] | null): boolean {
+  return !!stages && stages.length > 0 && stages.every((s) => s.done);
+}
+
+/**
+ * Whether `uid` may sign off right now.
+ *
+ * Only the current stage's assignees, so a later approver cannot reach back and
+ * close a step that has not come to them yet. An empty assignee list means
+ * "whoever is on the task", which keeps a half-configured chain usable rather
+ * than stuck.
+ */
+export function canCompleteStage(uid: string, stage: TaskStage | null, taskAssignees: string[]): boolean {
+  if (!stage) return false;
+  if (stage.assigneeIds.length === 0) return taskAssignees.includes(uid);
+  return stage.assigneeIds.includes(uid);
+}
+
 export interface Subtask {
   id: string;
   title: string;
@@ -326,6 +408,8 @@ export interface Task {
   goLiveDate?: string | null;
   tagIds: string[];
   subtasks: Subtask[];
+  /** Sequential sign-off chain. Empty or absent means an ordinary task. */
+  stages?: TaskStage[];
   /** Manual sort position within its list (see the listId+order index). */
   order?: number;
   seriesId?: string | null;

@@ -164,3 +164,48 @@ export async function stopSeries(seriesId: string): Promise<void> {
 export async function resumeSeries(seriesId: string): Promise<void> {
   await updateSeries(seriesId, { active: true });
 }
+
+const WEEKDAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+/**
+ * A one-line, human description of when a series fires — "Every week on Mon,
+ * skipping weekends". The Recurring page lists a dozen of these, and nobody can
+ * review a schedule from `{freq:'weekly',byWeekday:[1]}`.
+ */
+export function describeRecurrence(series: Pick<TaskSeries, 'recurrence' | 'skipWeekends' | 'trigger'>): string {
+  const r = series.recurrence;
+  if (!r) return 'No schedule set';
+  const every = r.interval && r.interval > 1 ? `every ${r.interval} ` : 'every ';
+  let base: string;
+  switch (r.freq) {
+    case 'daily': base = `${every}day`; break;
+    case 'weekly': base = `${every}week`; break;
+    case 'biweekly': base = 'every other week'; break;
+    case 'monthly': base = `${every}month`; break;
+    case 'yearly': base = `${every}year`; break;
+    default: base = `${every}${r.interval || 1} days`; break;
+  }
+  const days = (r.byWeekday ?? []).length
+    ? ` on ${(r.byWeekday ?? []).map((d) => WEEKDAY_NAMES[d] ?? d).join(', ')}`
+    : '';
+  const dom = r.dayOfMonth != null ? ` on the ${r.dayOfMonth === 'last' ? 'last day' : r.dayOfMonth}` : '';
+  const weekends = series.skipWeekends ? ', skipping weekends' : '';
+  const trigger = series.trigger === 'on-completion' ? ' (next one appears when you finish this one)' : '';
+  return `Repeats ${base}${days}${dom}${weekends}${trigger}`;
+}
+
+/**
+ * How healthy a series is, for the Recurring page.
+ *
+ * `consecutiveMissed` is written by the generator when an occurrence comes due
+ * while the previous one is still open — it is the number the old ClickUp
+ * workspace would have shown climbing for a year on "Check for Expired
+ * Concessions" before anybody noticed.
+ */
+export function seriesHealth(series: TaskSeries): { label: string; tone: 'ok' | 'warn' | 'bad' } {
+  if (series.active === false) return { label: 'Paused', tone: 'warn' };
+  const missed = (series as unknown as { consecutiveMissed?: number }).consecutiveMissed ?? 0;
+  if (missed >= 3) return { label: `${missed} missed in a row`, tone: 'bad' };
+  if (missed > 0) return { label: `${missed} missed`, tone: 'warn' };
+  return { label: 'On track', tone: 'ok' };
+}

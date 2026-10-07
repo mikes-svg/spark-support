@@ -41,6 +41,7 @@ const gcal = require('./gcal');
 const gcalWebhook = require('./gcalWebhook');
 const reassign = require('./reassign');
 const adminIds = require('./adminIds');
+const taskStages = require('./taskStages');
 
 // ─── profile.js ──────────────────────────────────────────────────────────────
 exports.ensureProfile = profile.ensureProfile;
@@ -91,3 +92,8 @@ exports.reassignWork = reassign.reassignWork;
 // time; the trigger keeps it current after that.
 exports.syncAdminIds = adminIds.syncAdminIds;
 exports.backfillAdminIds = adminIds.backfillAdminIds;
+
+// ─── taskStages.js ───────────────────────────────────────────────────────────
+// Sequential sign-off chains: advancing the baton and closing the task on the
+// final sign-off happen server-side so a closed laptop cannot strand a task.
+exports.onTaskStageAdvanced = taskStages.onTaskStageAdvanced;

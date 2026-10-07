@@ -3,6 +3,7 @@ import { collection, getDocs } from 'firebase/firestore';
 import { ChevronDown, Search, X } from 'lucide-react';
 import { db } from '../../lib/firebase';
 import { addDaysStr, todayStr } from '../../lib/dates';
+import { orderListsByHierarchy } from '../../types';
 import type { Profile, TaskFilter, TaskList, TaskPriority, TaskStatusSet, TaskStatusType, TaskTag } from '../../types';
 
 /**
@@ -247,10 +248,12 @@ export function TaskFilters({ value, onChange, lists, statusSets, people, hide =
           className="min-h-[44px] sm:min-h-0 px-3 py-2 text-sm border border-gray-300 rounded-md bg-white focus:outline-none focus:ring-brand-dark focus:border-brand-dark"
         >
           <option value="">All lists</option>
-          {sortedLists
-            .filter((l) => !value.spaceId || l.spaceId === value.spaceId)
-            .map((l) => (
-              <option key={l.id} value={l.id}>{l.name}</option>
+          {orderListsByHierarchy(sortedLists.filter((l) => !value.spaceId || l.spaceId === value.spaceId))
+            .map(({ list: l, depth }) => (
+              // A sub-list is prefixed rather than nested: <select> gives no
+              // structure to work with, and indentation is the one cue that
+              // survives in a native dropdown on every platform.
+              <option key={l.id} value={l.id}>{depth ? `\u2007\u2007↳ ${l.name}` : l.name}</option>
             ))}
         </select>
       )}

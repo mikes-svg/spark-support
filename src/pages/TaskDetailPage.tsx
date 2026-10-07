@@ -17,6 +17,7 @@ import { PageSpinner } from '../components/PageSpinner';
 import { ConfirmModal } from '../components/ConfirmModal';
 import { TaskEditor } from '../components/tasks/TaskEditor';
 import { SubtaskEditor } from '../components/tasks/SubtaskEditor';
+import { StageEditor } from '../components/tasks/StageEditor';
 import { TaskComments } from '../components/tasks/TaskComments';
 import { TaskActivity } from '../components/tasks/TaskActivity';
 import { TaskAttachments } from '../components/tasks/TaskAttachments';
@@ -48,6 +49,10 @@ export function TaskDetailPage() {
   const [series, setSeries] = useState<TaskSeries | null>(null);
   const [seriesSaving, setSeriesSaving] = useState(false);
   const [seriesError, setSeriesError] = useState('');
+  // The repeat panel saves on change rather than behind a Save button, which is
+  // consistent with the rest of the page — but silent autosave on a screen full
+  // of scheduling rules reads as "did that take?". This says so, briefly.
+  const [seriesSaved, setSeriesSaved] = useState(false);
   const [people, setPeople] = useState<Profile[]>([]);
   const [actionError, setActionError] = useState('');
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
@@ -172,6 +177,7 @@ export function TaskDetailPage() {
   const handleRecurrenceChange = async (next: SeriesSettings | null) => {
     if (!task || !user || seriesSaving) return;
     setSeriesError('');
+    setSeriesSaved(false);
     setSeriesSaving(true);
     try {
       if (next && !series) {
@@ -185,6 +191,7 @@ export function TaskDetailPage() {
         await stopSeries(series.id);
         setSeries({ ...series, active: false });
       }
+      setSeriesSaved(true);
     } catch (err) {
       console.error('Failed to save the repeat schedule:', err);
       setSeriesError('Could not save the repeat schedule. Please try again.');
@@ -215,6 +222,24 @@ export function TaskDetailPage() {
       console.error('Failed to resume the series:', err);
       setSeriesError('Could not resume repeating. Please try again.');
     } finally { setSeriesSaving(false); }
+  };
+
+  /**
+   * Stage edits and sign-offs are both just a write of the stages array. The
+   * handoff that follows — reassigning to the next stage and closing the task on
+   * the final sign-off — is done by onTaskStageAdvanced, so it happens whether or
+   * not this tab stays open.
+   */
+  const handleStagesChange = async (stages: NonNullable<Task['stages']>) => {
+    if (!task) return;
+    const previous = task.stages ?? [];
+    setTask({ ...task, stages });
+    try {
+      await updateTask(task.id, { stages });
+    } catch (err) {
+      console.error('Failed to save stages:', err);
+      setTask({ ...task, stages: previous });
+    }
   };
 
   const handleSubtasksChange = async (subtasks: Task['subtasks']) => {
@@ -303,6 +328,12 @@ export function TaskDetailPage() {
               {seriesError && (
                 <p className="text-sm text-red-600" role="alert">{seriesError}</p>
               )}
+              {seriesSaving && (
+                <p className="text-sm text-gray-500">Saving…</p>
+              )}
+              {seriesSaved && !seriesSaving && !seriesError && (
+                <p className="text-sm text-emerald-700" role="status">Repeat schedule saved.</p>
+              )}
               <RecurrenceEditor
                 value={series}
                 disabled={!canEdit || seriesSaving}
@@ -318,6 +349,22 @@ export function TaskDetailPage() {
                   {series.active ? 'Stop repeating (keeps this task open)' : 'Resume repeating'}
                 </button>
               )}
+            </div>
+          </div>
+
+          <div className="bg-white shadow-sm rounded-xl border border-gray-200 overflow-hidden">
+            <div className="px-6 py-4 border-b border-gray-200 bg-gray-50/50">
+              <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-widest">Sign-off stages</h3>
+            </div>
+            <div className="p-6">
+              <StageEditor
+                stages={task.stages ?? []}
+                taskAssignees={task.assigneeIds ?? []}
+                people={people}
+                canEdit={canEdit}
+                currentUserId={user?.id ?? ''}
+                onChange={handleStagesChange}
+              />
             </div>
           </div>
 

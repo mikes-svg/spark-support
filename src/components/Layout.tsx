@@ -24,7 +24,7 @@ export function Layout() {
     if (pathname === '/tasks') return 'My Tasks';
     if (pathname === '/tasks/all') return 'Team Tasks';
     if (pathname === '/tasks/calendar') return 'Calendar';
-    if (pathname === '/tasks/templates') return 'Task Templates';
+    if (pathname === '/tasks/templates') return 'Recurring Tasks';
     if (pathname.startsWith('/tasks/')) return 'Task Details';
     if (pathname === '/settings/calendar') return 'Calendar Sync';
     if (pathname === '/settings/notifications') return 'Notifications';

@@ -429,9 +429,21 @@ exports.onTaskCompletedRecurrence = onDocumentUpdated(
     if (!after) return;
     try {
       const outcome = await advanceSeriesOnCompletion(event.params.taskId, before, after);
-      if (outcome !== 'not-recurring' && outcome !== 'not-a-completion') {
-        logger.info(`onTaskCompletedRecurrence: ${event.params.taskId} → ${outcome}`);
+      if (outcome === 'not-recurring' || outcome === 'not-a-completion') {
+        // Previously silent, which made a real failure in production
+        // indistinguishable from the trigger correctly ignoring an ordinary
+        // edit: the logs showed it running and saying nothing at all. These are
+        // the two reasons a completion does NOT advance a series, so when
+        // somebody reports "I completed it and nothing happened", this line is
+        // the difference between a diagnosis and a guess.
+        logger.info(
+          `onTaskCompletedRecurrence: ${event.params.taskId} → ${outcome} ` +
+          `(seriesId=${after.seriesId ?? 'none'} ` +
+          `beforeType=${before?.statusType ?? 'none'} afterType=${after.statusType ?? 'none'})`
+        );
+        return;
       }
+      logger.info(`onTaskCompletedRecurrence: ${event.params.taskId} → ${outcome}`);
     } catch (err) {
       logger.error(`onTaskCompletedRecurrence failed for ${event.params.taskId}`, err);
     }

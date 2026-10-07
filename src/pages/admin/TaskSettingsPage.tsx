@@ -173,6 +173,8 @@ function SpacesAndLists({
 
   const [showAddList, setShowAddList] = useState(false);
   const [newListName, setNewListName] = useState('');
+  // Optional parent, giving Space > List > Sub-list. Empty means top level.
+  const [newListParentId, setNewListParentId] = useState('');
   const [newListSpaceId, setNewListSpaceId] = useState('');
   const [newListStatusSetId, setNewListStatusSetId] = useState('');
   const [savingList, setSavingList] = useState(false);
@@ -270,7 +272,18 @@ function SpacesAndLists({
     try {
       const siblings = lists.filter((l) => l.spaceId === newListSpaceId);
       const order = siblings.length ? Math.max(...siblings.map((l) => l.order)) + 1 : 0;
-      const data = { spaceId: newListSpaceId, name, order, archived: false, defaultStatusSetId: newListStatusSetId || null };
+      // Only a top-level list in the chosen space may be a parent, which keeps the
+      // hierarchy one level deep without needing cycle detection.
+      const parentValid = newListParentId
+        && lists.some((l) => l.id === newListParentId && l.spaceId === newListSpaceId && !l.parentListId);
+      const data = {
+        spaceId: newListSpaceId,
+        name,
+        order,
+        archived: false,
+        defaultStatusSetId: newListStatusSetId || null,
+        parentListId: parentValid ? newListParentId : null,
+      };
       const ref = await addDoc(collection(db, TASK_LISTS), data);
       setLists((prev) => [...prev, { id: ref.id, ...data }]);
       setShowAddList(false);
@@ -466,6 +479,24 @@ function SpacesAndLists({
             </select>
           </div>
           <div className="space-y-1">
+            <label htmlFor="new-list-parent" className="block text-sm font-medium text-gray-700">Inside another list (optional)</label>
+            <select
+              id="new-list-parent"
+              value={newListParentId}
+              onChange={(e) => setNewListParentId(e.target.value)}
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm min-h-[44px]"
+            >
+              <option value="">— top level —</option>
+              {lists
+                .filter((l) => l.spaceId === newListSpaceId && !l.parentListId && !l.archived)
+                .map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
+            </select>
+            <p className="text-xs text-gray-500">
+              Makes this a sub-list, e.g. Accounting &rsaquo; FOM Activities &rsaquo; Housing. Sub-lists
+              cannot contain further lists.
+            </p>
+          </div>
+          <div className="space-y-1">
             <label htmlFor="new-list-statusset" className="block text-sm font-medium text-gray-700">Status set</label>
             <select id="new-list-statusset" value={newListStatusSetId} onChange={(e) => setNewListStatusSetId(e.target.value)} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm min-h-[44px]">
               <option value="">— none yet —</option>
@@ -474,7 +505,7 @@ function SpacesAndLists({
           </div>
         </div>
         <div className="px-6 py-4 border-t border-gray-200 flex justify-end gap-3 bg-gray-50/50">
-          <button onClick={() => setShowAddList(false)} className="px-4 py-2 text-sm font-medium text-gray-700 hover:text-gray-900">Cancel</button>
+          <button onClick={() => { setShowAddList(false); setNewListParentId(''); }} className="px-4 py-2 text-sm font-medium text-gray-700 hover:text-gray-900">Cancel</button>
           <button onClick={addList} disabled={savingList || !newListName.trim() || !newListSpaceId} className="px-5 py-2 text-sm font-medium rounded-lg bg-brand-dark text-white hover:bg-[#05391B] disabled:opacity-50">{savingList ? 'Adding…' : 'Add List'}</button>
         </div>
       </Modal>

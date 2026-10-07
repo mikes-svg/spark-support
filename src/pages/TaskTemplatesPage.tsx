@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState } from 'react';
+import { listSeries, describeRecurrence, seriesHealth } from '../lib/taskSeries';
 import { addDoc, collection, deleteDoc, doc, getDocs, serverTimestamp, updateDoc } from 'firebase/firestore';
-import { LayoutTemplate, Pencil, Play, Plus, Trash2, X } from 'lucide-react';
+import { LayoutTemplate, Pencil, Play, Plus, Trash2, X , Repeat } from 'lucide-react';
 import { db } from '../lib/firebase';
 import { useAuth } from '../context/AuthContext';
 import { isSuperadminRole } from '../types';
-import type { TaskList, TaskPriority, TaskTemplate } from '../types';
+import type { TaskList, TaskPriority, TaskSeries, TaskTemplate } from '../types';
 import { TASK_LISTS, TASK_TEMPLATES, createTask } from '../lib/tasks';
 import { addDaysStr, formatDateOnly, todayStr } from '../lib/dates';
 import { PageSpinner } from '../components/PageSpinner';
@@ -41,6 +42,10 @@ export function TaskTemplatesPage() {
   const canEdit = isSuperadminRole(user?.role);
 
   const [templates, setTemplates] = useState<TaskTemplate[]>([]);
+  // Every recurring series in the workspace. This page is the only place to
+  // review them: before it, a schedule could only be seen by opening the one
+  // task that happened to be its current occurrence.
+  const [series, setSeries] = useState<TaskSeries[]>([]);
   const [lists, setLists] = useState<TaskList[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
@@ -86,6 +91,12 @@ export function TaskTemplatesPage() {
             .filter((l) => !l.archived)
             .sort((a, b) => (a.order ?? 0) - (b.order ?? 0)),
         );
+        try {
+          setSeries(await listSeries());
+        } catch (err) {
+          // Non-fatal: the templates half of the page still works without it.
+          console.warn('Could not load recurring series:', err);
+        }
       } catch (err) {
         console.error('Failed to load task templates:', err);
         setLoadError('Could not load templates.');
@@ -266,6 +277,41 @@ export function TaskTemplatesPage() {
           </button>
         </div>
       )}
+
+      <section className="space-y-3">
+        <div className="flex items-baseline justify-between">
+          <h2 className="font-serif text-lg font-semibold text-gray-900">Recurring tasks</h2>
+          <span className="text-sm text-gray-500">{series.length} series</span>
+        </div>
+        {series.length === 0 ? (
+          <div className="rounded-xl border border-gray-200 bg-white px-6 py-10 text-center shadow-sm">
+            <Repeat className="mx-auto h-8 w-8 text-gray-300" aria-hidden="true" />
+            <p className="mt-3 text-sm text-gray-500">
+              Nothing repeats yet. Open any task and use the <strong>Repeat</strong> panel to set a schedule.
+            </p>
+          </div>
+        ) : (
+          <div className="overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm divide-y divide-gray-200">
+            {series.map((sx) => {
+              const health = seriesHealth(sx);
+              const tone = health.tone === 'bad'
+                ? 'bg-red-100 text-red-800'
+                : health.tone === 'warn' ? 'bg-amber-100 text-amber-800' : 'bg-emerald-100 text-emerald-800';
+              return (
+                <div key={sx.id} className="flex flex-wrap items-center justify-between gap-3 px-6 py-4">
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium text-gray-900 truncate">{sx.name}</p>
+                    <p className="text-xs text-gray-500 mt-0.5">{describeRecurrence(sx)}</p>
+                  </div>
+                  <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${tone}`}>
+                    {health.label}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </section>
 
       {templates.length === 0 ? (
         <div className="rounded-xl border border-gray-200 bg-white px-6 py-16 text-center shadow-sm">
