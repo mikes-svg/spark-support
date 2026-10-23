@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useRef } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { doc, updateDoc, setDoc, serverTimestamp, collection } from 'firebase/firestore';
 import { Plus, Archive, ArchiveRestore, Trash2, Building2, LayoutTemplate } from 'lucide-react';
@@ -13,19 +13,25 @@ import { ChecklistTable, type ChecklistRow } from '../components/onboarding/Chec
 import { PostponeModal } from '../components/onboarding/PostponeModal';
 import { NotebookPanel } from '../components/notebook/NotebookPanel';
 import { DdMaterialsPanel } from '../components/onboarding/DdMaterialsPanel';
-import { getOrSeedTemplate } from '../lib/seedOnboardingTemplate';
+import {
+  fetchTemplates,
+  fetchTemplateItems,
+  createTemplate,
+  replaceTemplateRows,
+  type ChecklistTemplate,
+} from '../lib/checklistTemplates';
 import { todayStr } from '../lib/dates';
 import {
   CHECKLISTS,
   PROPERTIES,
-  instantiateInspections,
+  CHECKLIST_KINDS,
+  instantiateChecklist,
   fetchProperties,
   fetchTasksForProperty,
   fetchOnboardingPeople,
   createPropertyFromTemplate,
   applyClosingDate,
   deletePropertyWithTasks,
-  savePropertyChecklistAsTemplate,
   renameSection,
   deleteRows,
   computeDueDate,
@@ -86,13 +92,23 @@ export function OnboardingPropertiesPage() {
   const [postponeTarget, setPostponeTarget] = useState<{ task: OnboardingTask; newDate: string | null } | null>(null);
   const [saveTemplateTarget, setSaveTemplateTarget] = useState<OnboardingProperty | null>(null);
   const [savingTemplate, setSavingTemplate] = useState(false);
+  const [saveMode, setSaveMode] = useState<'new' | 'replace'>('new');
+  const [saveName, setSaveName] = useState('');
+  const [replaceId, setReplaceId] = useState('');
+
+  // Named templates of each checklist, for the New Property picker, the
+  // empty-tab picker, and Save as Template.
+  const [templateOptions, setTemplateOptions] = useState<Record<ChecklistKind, ChecklistTemplate[]>>({ onboarding: [], inspections: [] });
+  // Per kind: null = the first (default) template, '' = start empty, else an id.
+  const [newTemplateIds, setNewTemplateIds] = useState<Record<ChecklistKind, string | null>>({ onboarding: null, inspections: null });
+  const [applyTemplateId, setApplyTemplateId] = useState<string | null>(null);
+  const [applying, setApplying] = useState(false);
   const [successNotice, setSuccessNotice] = useState('');
 
   const visibleProperties = properties.filter((p) => showArchived || !p.archived);
   const property = properties.find((p) => p.id === propertyId) ?? null;
-  // Read by the load effect without making a property edit refetch the list.
-  const latest = useRef({ property, people, canEdit });
-  latest.current = { property, people, canEdit };
+  const chosenTemplate = (k: ChecklistKind, choice: string | null) =>
+    choice === null ? (templateOptions[k][0]?.id ?? '') : choice;
 
   useEffect(() => {
     (async () => {
@@ -100,6 +116,10 @@ export function OnboardingPropertiesPage() {
         const [props, peeps] = await Promise.all([fetchProperties(), fetchOnboardingPeople()]);
         setProperties(props);
         setPeople(peeps);
+        const [onboardingTemplates, inspectionTemplates] = await Promise.all(
+          CHECKLIST_KINDS.map((k) => fetchTemplates(k, peeps)),
+        );
+        setTemplateOptions({ onboarding: onboardingTemplates, inspections: inspectionTemplates });
       } catch (err) {
         console.error('Failed to load onboarding properties:', err);
         setPropertiesError('Could not load properties. Please refresh.');
@@ -123,14 +143,7 @@ export function OnboardingPropertiesPage() {
     setTasksLoading(true);
     (async () => {
       try {
-        let rows = await fetchTasksForProperty(propertyId, kind);
-        // Properties that predate DD Inspections (or were created before its
-        // template existed) get the template copied in on first open.
-        const { property: current, people: peeps, canEdit: editor } = latest.current;
-        if (rows.length === 0 && kind === 'inspections' && editor) {
-          const template = await getOrSeedTemplate('inspections', peeps);
-          if (template.length > 0) rows = await instantiateInspections(propertyId, current?.closingDate ?? null, template);
-        }
+        const rows = await fetchTasksForProperty(propertyId, kind);
         if (!cancelled) setTasks(rows);
       } catch (err) {
         console.error('Failed to load checklist:', err);
@@ -371,18 +384,22 @@ export function OnboardingPropertiesPage() {
     setCreating(true);
     setActionError('');
     try {
-      const template = await getOrSeedTemplate('onboarding', people);
+      const onboardingId = chosenTemplate('onboarding', newTemplateIds.onboarding);
+      const inspectionsId = chosenTemplate('inspections', newTemplateIds.inspections);
+      const template = onboardingId ? await fetchTemplateItems('onboarding', onboardingId) : [];
       const { property: created, tasks: createdTasks } = await createPropertyFromTemplate(
         { name: newName.trim(), closingDate: newClosingDate || null },
         template,
         user.id,
       );
-      try {
-        const inspections = await getOrSeedTemplate('inspections', people);
-        if (inspections.length > 0) await instantiateInspections(created.id, created.closingDate, inspections);
-      } catch (err) {
-        // Not fatal: the DD Inspections tab copies the template in on first open.
-        console.warn('Could not copy the inspections template into the new property:', err);
+      if (inspectionsId) {
+        try {
+          const inspections = await fetchTemplateItems('inspections', inspectionsId);
+          await instantiateChecklist('inspections', created.id, created.closingDate, inspections);
+        } catch (err) {
+          // Not fatal: the empty DD Inspections tab offers to apply a template.
+          console.warn('Could not copy the inspections template into the new property:', err);
+        }
       }
       setProperties((prev) => [...prev, created]);
       setSubTab('onboarding');
@@ -390,12 +407,31 @@ export function OnboardingPropertiesPage() {
       setShowNewModal(false);
       setNewName('');
       setNewClosingDate('');
+      setNewTemplateIds({ onboarding: null, inspections: null });
       navigate(`/onboarding/properties/${created.id}`);
     } catch (err) {
       console.error('Failed to create property:', err);
       setActionError('Could not create the property. Please try again.');
     } finally {
       setCreating(false);
+    }
+  };
+
+  /** Fill an empty checklist from the chosen template. */
+  const handleApplyTemplate = async () => {
+    const templateId = chosenTemplate(kind, applyTemplateId);
+    if (!property || !templateId) return;
+    setApplying(true);
+    setActionError('');
+    try {
+      const items = await fetchTemplateItems(kind, templateId);
+      const rows = await instantiateChecklist(kind, property.id, property.closingDate, items);
+      setTasks(rows);
+    } catch (err) {
+      console.error('Failed to apply template:', err);
+      setActionError('Could not apply that template. Please try again.');
+    } finally {
+      setApplying(false);
     }
   };
 
@@ -416,16 +452,34 @@ export function OnboardingPropertiesPage() {
     }
   };
 
+  const openSaveTemplate = (target: OnboardingProperty) => {
+    setSuccessNotice('');
+    setSaveMode('new');
+    setSaveName(target.name);
+    setReplaceId(templateOptions[kind][0]?.id ?? '');
+    setSaveTemplateTarget(target);
+  };
+
   const confirmSaveTemplate = async () => {
     const target = saveTemplateTarget;
-    setSaveTemplateTarget(null);
     if (!target) return;
+    const label = CHECKLISTS[kind].label;
+    if (saveMode === 'new' && !saveName.trim()) return;
+    if (saveMode === 'replace' && !replaceId) return;
+    setSaveTemplateTarget(null);
     setSavingTemplate(true);
     setActionError('');
     setSuccessNotice('');
     try {
-      await savePropertyChecklistAsTemplate(tasks, kind);
-      setSuccessNotice(`The ${CHECKLISTS[kind].label} template was replaced with “${target.name}”. New properties will start from it; existing ones are unchanged.`);
+      if (saveMode === 'new') {
+        const created = await createTemplate(kind, saveName.trim(), tasks);
+        setTemplateOptions((prev) => ({ ...prev, [kind]: [...prev[kind], created] }));
+        setSuccessNotice(`Saved “${target.name}” as a new ${label} template, “${created.name}”.`);
+      } else {
+        await replaceTemplateRows(kind, replaceId, tasks);
+        const name = templateOptions[kind].find((t) => t.id === replaceId)?.name ?? 'the';
+        setSuccessNotice(`The “${name}” ${label} template was replaced with “${target.name}”'s checklist. Existing properties are unchanged.`);
+      }
     } catch (err) {
       console.error('Failed to save checklist as template:', err);
       setActionError('Could not save this checklist as the template. Please try again.');
@@ -542,9 +596,9 @@ export function OnboardingPropertiesPage() {
               {isSuperadmin && (
                 <div className="flex items-center gap-2">
                   <button
-                    onClick={() => { setSuccessNotice(''); setSaveTemplateTarget(property); }}
+                    onClick={() => openSaveTemplate(property)}
                     disabled={savingTemplate || tasks.length === 0}
-                    title={`Replace the master ${CHECKLISTS[kind].label} template with this property's checklist`}
+                    title={`Save this checklist as a ${CHECKLISTS[kind].label} template`}
                     className="inline-flex items-center px-3 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 shadow-sm transition-colors disabled:opacity-50"
                   >
                     <LayoutTemplate className="h-4 w-4 mr-2" />
@@ -618,6 +672,33 @@ export function OnboardingPropertiesPage() {
             )}
           </div>
 
+          {!tasksLoading && tasks.length === 0 && canEdit && templateOptions[kind].length > 0 && (
+            <div className="bg-white shadow-sm rounded-xl border border-gray-200 p-6 flex flex-wrap items-end gap-3">
+              <div className="flex-1 min-w-[14rem]">
+                <label htmlFor="apply-template" className="block text-sm font-medium text-gray-700 mb-1">
+                  Start this {CHECKLISTS[kind].label} checklist from a template
+                </label>
+                <select
+                  id="apply-template"
+                  value={chosenTemplate(kind, applyTemplateId)}
+                  onChange={(e) => setApplyTemplateId(e.target.value)}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-dark"
+                >
+                  {templateOptions[kind].map((t) => (
+                    <option key={t.id} value={t.id}>{t.name}</option>
+                  ))}
+                </select>
+              </div>
+              <button
+                onClick={handleApplyTemplate}
+                disabled={applying}
+                className="px-5 py-2 text-sm font-medium rounded-lg bg-brand-dark text-white hover:bg-[#05391B] disabled:opacity-50 transition-colors"
+              >
+                {applying ? 'Applying…' : 'Apply Template'}
+              </button>
+            </div>
+          )}
+
           {tasksLoading ? (
             <PageSpinner />
           ) : (
@@ -646,7 +727,7 @@ export function OnboardingPropertiesPage() {
       <Modal open={showNewModal} onClose={() => setShowNewModal(false)} labelledBy="new-property-title" widthClass="max-w-md">
         <div className="px-6 py-5 border-b border-gray-200">
           <h3 id="new-property-title" className="text-lg font-serif font-semibold text-gray-900">New Property</h3>
-          <p className="mt-1 text-sm text-gray-500">The PM Onboarding and DD Inspections templates are copied in, ready to customize.</p>
+          <p className="mt-1 text-sm text-gray-500">The templates you pick are copied in, ready to customize.</p>
         </div>
         <div className="p-6 space-y-4">
           <div>
@@ -670,6 +751,24 @@ export function OnboardingPropertiesPage() {
             />
             <p className="mt-1 text-xs text-gray-400">Every due date is calculated from this. You can set or change it later.</p>
           </div>
+          {CHECKLIST_KINDS.map((k) => (
+            <div key={k}>
+              <label htmlFor={`new-property-template-${k}`} className="block text-sm font-medium text-gray-700 mb-1">
+                {CHECKLISTS[k].label} template
+              </label>
+              <select
+                id={`new-property-template-${k}`}
+                value={chosenTemplate(k, newTemplateIds[k])}
+                onChange={(e) => setNewTemplateIds((prev) => ({ ...prev, [k]: e.target.value }))}
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-dark"
+              >
+                {templateOptions[k].map((t) => (
+                  <option key={t.id} value={t.id}>{t.name}</option>
+                ))}
+                <option value="">None — start empty</option>
+              </select>
+            </div>
+          ))}
         </div>
         <div className="px-6 py-4 border-t border-gray-200 flex justify-end gap-3 bg-gray-50/50">
           <button onClick={() => setShowNewModal(false)} className="px-4 py-2 text-sm font-medium text-gray-700 hover:text-gray-900">Cancel</button>
@@ -692,18 +791,59 @@ export function OnboardingPropertiesPage() {
         onConfirm={confirmPostpone}
       />
 
-      <ConfirmModal
-        open={!!saveTemplateTarget}
-        title="Save Checklist as Template"
-        message={
-          saveTemplateTarget
-            ? `Replace the master ${CHECKLISTS[kind].label} template with “${saveTemplateTarget.name}”'s checklist (${tasks.length} rows)? The sections, items, responsibilities, and days-from-closing carry over — notes, statuses, and due dates are cleared. This overwrites the current template and can't be undone, but existing properties keep their checklists.`
-            : ''
-        }
-        confirmLabel="Replace Template"
-        onConfirm={confirmSaveTemplate}
-        onCancel={() => setSaveTemplateTarget(null)}
-      />
+      <Modal open={!!saveTemplateTarget} onClose={() => setSaveTemplateTarget(null)} labelledBy="save-template-title" widthClass="max-w-md">
+        <div className="px-6 py-5 border-b border-gray-200">
+          <h3 id="save-template-title" className="text-lg font-serif font-semibold text-gray-900">Save as {CHECKLISTS[kind].label} Template</h3>
+          <p className="mt-1 text-sm text-gray-500">
+            The {tasks.length} rows' sections, items, responsibilities and days-from-closing carry over; notes,
+            statuses and due dates don't. Existing properties keep their checklists.
+          </p>
+        </div>
+        <div className="p-6 space-y-4">
+          <label className="flex items-start gap-2 text-sm text-gray-700">
+            <input type="radio" name="save-mode" checked={saveMode === 'new'} onChange={() => setSaveMode('new')} className="mt-1" />
+            <span className="flex-1">
+              Save as a new template
+              <input
+                aria-label="New template name"
+                value={saveName}
+                onFocus={() => setSaveMode('new')}
+                onChange={(e) => setSaveName(e.target.value)}
+                className="mt-1 w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-dark"
+              />
+            </span>
+          </label>
+          {templateOptions[kind].length > 0 && (
+            <label className="flex items-start gap-2 text-sm text-gray-700">
+              <input type="radio" name="save-mode" checked={saveMode === 'replace'} onChange={() => setSaveMode('replace')} className="mt-1" />
+              <span className="flex-1">
+                Replace an existing template
+                <select
+                  aria-label="Template to replace"
+                  value={replaceId}
+                  onFocus={() => setSaveMode('replace')}
+                  onChange={(e) => setReplaceId(e.target.value)}
+                  className="mt-1 w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-dark"
+                >
+                  {templateOptions[kind].map((t) => (
+                    <option key={t.id} value={t.id}>{t.name}</option>
+                  ))}
+                </select>
+              </span>
+            </label>
+          )}
+        </div>
+        <div className="px-6 py-4 border-t border-gray-200 flex justify-end gap-3 bg-gray-50/50">
+          <button onClick={() => setSaveTemplateTarget(null)} className="px-4 py-2 text-sm font-medium text-gray-700 hover:text-gray-900">Cancel</button>
+          <button
+            onClick={confirmSaveTemplate}
+            disabled={saveMode === 'new' ? !saveName.trim() : !replaceId}
+            className="px-5 py-2 text-sm font-medium rounded-lg bg-brand-dark text-white hover:bg-[#05391B] disabled:opacity-50 transition-colors"
+          >
+            {saveMode === 'new' ? 'Create Template' : 'Replace Template'}
+          </button>
+        </div>
+      </Modal>
 
       <ConfirmModal
         open={!!deleteRowTarget}

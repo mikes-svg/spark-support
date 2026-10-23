@@ -1,20 +1,18 @@
-import { collection, getDocs, query, orderBy, writeBatch, doc, serverTimestamp } from 'firebase/firestore';
-import { db } from './firebase';
-import { CHECKLISTS, type ChecklistKind } from './onboarding';
-import type { OnboardingTemplateItem, Profile } from '../types';
+import type { ChecklistKind } from './onboarding';
+import type { Profile } from '../types';
 
 /**
  * The starting checklist, transcribed from the "Acquisitions" tab of the
- * Standifer Capital Acquisition Checklist sheet. It only seeds an EMPTY
- * template collection — once a superadmin edits the template, this file is
- * never consulted again.
+ * Standifer Capital Acquisition Checklist sheet. It only seeds a checklist's
+ * "Standard" template when that checklist has no templates at all — once a
+ * superadmin edits it, this file is never consulted again.
  *
  * Tuple: [section, code, indent, title, responsibility, daysFromClosing].
  * `responsibility` is the first name as written in the sheet; it's matched
  * against the profile directory at seed time and dropped if nobody matches.
  * `daysFromClosing` is negative for "before closing", per the sheet.
  */
-type SeedRow = [string, string, 0 | 1, string, string | null, number | null];
+export type SeedRow = [string, string, 0 | 1, string, string | null, number | null];
 
 const LEGAL = 'Legal';
 const CM = 'Construction Management';
@@ -180,7 +178,7 @@ const INSPECTION_SEED_ROWS: SeedRow[] = [
   [DD, '129', 0, 'EisnerAmper Doc Review', null, null],
 ];
 
-const SEEDS: Record<ChecklistKind, SeedRow[]> = {
+export const SEEDS: Record<ChecklistKind, SeedRow[]> = {
   onboarding: SEED_ROWS,
   inspections: INSPECTION_SEED_ROWS,
 };
@@ -190,54 +188,10 @@ const SEEDS: Record<ChecklistKind, SeedRow[]> = {
  * name, case- and punctuation-insensitively. Ambiguous or unknown names seed
  * as unassigned rather than guessing wrong.
  */
-function resolveResponsible(name: string | null, profiles: Profile[]): string[] {
+export function resolveResponsible(name: string | null, profiles: Profile[]): string[] {
   if (!name) return [];
   const normalize = (s: string) => s.toLowerCase().replace(/[^a-z]/g, '');
   const target = normalize(name);
   const matches = profiles.filter((p) => normalize(p.name.split(' ')[0] || '') === target);
   return matches.length === 1 ? [matches[0].id] : [];
-}
-
-/**
- * Read a checklist's template, seeding it from its seed rows on first use.
- * Mirrors getOrSeedRequestTypes: seeding needs superadmin write access and
- * fails silently (returning an empty list) for everyone else.
- */
-export async function getOrSeedTemplate(kind: ChecklistKind, profiles: Profile[]): Promise<OnboardingTemplateItem[]> {
-  if (!db) return [];
-  const templateCollection = CHECKLISTS[kind].template;
-  const snap = await getDocs(query(collection(db, templateCollection), orderBy('order')));
-  if (snap.size > 0) {
-    return snap.docs.map((d) => ({ id: d.id, ...d.data() } as OnboardingTemplateItem));
-  }
-
-  const items: OnboardingTemplateItem[] = SEEDS[kind].map((row, i) => ({
-    id: doc(collection(db!, templateCollection)).id,
-    section: row[0],
-    code: row[1],
-    indent: row[2],
-    title: row[3],
-    responsibleIds: resolveResponsible(row[4], profiles),
-    daysFromClosing: row[5],
-    // Leave gaps so rows can be inserted between two neighbours without
-    // renumbering the whole list.
-    order: (i + 1) * 100,
-  }));
-
-  try {
-    // Firestore caps a batch at 500 writes; the seed is ~140 but chunk anyway so
-    // a grown seed list can't silently fail.
-    for (let i = 0; i < items.length; i += 400) {
-      const batch = writeBatch(db);
-      for (const item of items.slice(i, i + 400)) {
-        const { id, ...data } = item;
-        batch.set(doc(db, templateCollection, id), { ...data, createdAt: serverTimestamp() });
-      }
-      await batch.commit();
-    }
-  } catch (err) {
-    console.warn(`Could not seed the ${kind} template (superadmin required):`, err);
-    return [];
-  }
-  return items;
 }

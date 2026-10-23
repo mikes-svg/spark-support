@@ -180,8 +180,7 @@ function SidebarContent({ onClose }: { onClose: () => void }) {
     { to: '/onboarding', icon: ClipboardList, label: 'Onboarding Tasks', exact: true },
     { to: '/onboarding/properties', icon: Building2, label: 'Properties' },
     ...(isSuperadmin ? [
-      { to: '/onboarding/template', icon: LayoutTemplate, label: 'PM Onboarding Template' },
-      { to: '/onboarding/inspections-template', icon: LayoutTemplate, label: 'DD Inspections Template' },
+      { to: '/onboarding/templates', icon: LayoutTemplate, label: 'Templates' },
     ] : []),
   ];
 

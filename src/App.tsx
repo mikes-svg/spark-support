@@ -215,21 +215,16 @@ export function App() {
               }
             />
             <Route
-              path="onboarding/template"
+              path="onboarding/templates/:kind?/:templateId?"
               element={
                 <ProtectedRoute requireSuperadmin>
                   <OnboardingTemplatePage />
                 </ProtectedRoute>
               }
             />
-            <Route
-              path="onboarding/inspections-template"
-              element={
-                <ProtectedRoute requireSuperadmin>
-                  <OnboardingTemplatePage key="inspections" kind="inspections" />
-                </ProtectedRoute>
-              }
-            />
+            {/* The two template pages became one; keep their old links working. */}
+            <Route path="onboarding/template" element={<Navigate to="/onboarding/templates/onboarding" replace />} />
+            <Route path="onboarding/inspections-template" element={<Navigate to="/onboarding/templates/inspections" replace />} />
 
             <Route path="*" element={<NotFoundPage />} />
           </Route>
