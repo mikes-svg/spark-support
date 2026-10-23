@@ -122,6 +122,11 @@ export interface OnboardingTemplateItem {
   responsibleIds: string[];
   /** Offset in days from the property's closing date; negative = before closing. */
   daysFromClosing: number | null;
+  /**
+   * The named template this row belongs to. Rows written before templates were
+   * named have none and belong to their checklist's default ("Standard").
+   */
+  templateId?: string;
 }
 
 /** A property being onboarded — one "tab" in the UI. */

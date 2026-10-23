@@ -32,8 +32,7 @@ export function Layout() {
     // task section owns the plain "My Tasks" name.
     if (pathname === '/onboarding') return 'Onboarding Tasks';
     if (pathname.startsWith('/onboarding/properties')) return 'Property Onboarding';
-    if (pathname === '/onboarding/template') return 'PM Onboarding Template';
-    if (pathname === '/onboarding/inspections-template') return 'DD Inspections Template';
+    if (pathname.startsWith('/onboarding/templates')) return 'Checklist Templates';
     return 'Portal';
   };
 

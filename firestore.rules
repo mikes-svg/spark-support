@@ -210,6 +210,13 @@ service cloud.firestore {
       allow write: if canEditOnboardingTasks();
     }
 
+    // Template names — one doc per named template, for both checklists. The
+    // rows stay in onboardingTemplate / inspectionTemplate, tagged by id.
+    match /checklistTemplates/{templateId} {
+      allow read: if canReadOnboarding();
+      allow write: if isSuperAdmin();
+    }
+
     // Each property's due-diligence request list. Same access as its checklist.
     match /onboardingDdItems/{itemId} {
       allow read: if canReadOnboarding();

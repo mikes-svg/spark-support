@@ -156,11 +156,12 @@ function tasksFromTemplate(
 }
 
 /**
- * Copy the inspections template into a property. Task ids are derived from the
- * property and template row, so two people opening an empty tab at once write
- * the same docs rather than doubling the list.
+ * Copy a template into a property's checklist of the given kind. Task ids are
+ * derived from the property and template row, so two people applying the same
+ * template at once write the same docs rather than doubling the list.
  */
-export async function instantiateInspections(
+export async function instantiateChecklist(
+  kind: ChecklistKind,
   propertyId: string,
   closingDate: string | null,
   template: OnboardingTemplateItem[],
@@ -168,7 +169,7 @@ export async function instantiateInspections(
   if (!db) throw new Error('Firestore is not configured.');
   const tasks = tasksFromTemplate(propertyId, closingDate, template, (item) => `${propertyId}_${item.id}`);
   await commitChunks(tasks, (batch, { id, ...data }) =>
-    batch.set(doc(db!, INSPECTION_TASKS, id), { ...data, createdAt: serverTimestamp() }),
+    batch.set(doc(db!, CHECKLISTS[kind].tasks, id), { ...data, createdAt: serverTimestamp() }),
   );
   return tasks;
 }
@@ -257,60 +258,6 @@ export async function deletePropertyWithTasks(propertyId: string): Promise<void>
   await batch.commit();
 }
 
-/**
- * Replace the master template with a property's current checklist structure.
- * Only the reusable shape carries over — section, order, code, indent, title,
- * responsibility, and days-from-closing; the per-property notes, statuses, due
- * dates, and delay history are dropped, since a template is a clean starting
- * point. Existing properties are untouched; only ones created afterward inherit
- * this. Returns the new template items for optimistic rendering.
- */
-export async function savePropertyChecklistAsTemplate(
-  tasks: OnboardingTask[],
-  kind: ChecklistKind = 'onboarding',
-): Promise<OnboardingTemplateItem[]> {
-  if (!db) throw new Error('Firestore is not configured.');
-  const templateCollection = CHECKLISTS[kind].template;
-  const existing = await getDocs(collection(db, templateCollection));
-
-  const items: OnboardingTemplateItem[] = [...tasks]
-    .sort((a, b) => a.order - b.order)
-    .map((t) => ({
-      id: doc(collection(db!, templateCollection)).id,
-      section: t.section,
-      order: t.order,
-      code: t.code ?? '',
-      indent: t.indent,
-      title: t.title,
-      responsibleIds: t.responsibleIds ?? [],
-      daysFromClosing: t.daysFromClosing ?? null,
-    }));
-
-  // A checklist is well under 500 rows, so the swap — delete the old template
-  // and write the new one — fits a single atomic batch: no window where the
-  // collection is empty (which would let a concurrent open re-seed defaults)
-  // or holds duplicates. Fall back to create-then-delete only if it can't.
-  if (existing.size + items.length <= 450) {
-    const batch = writeBatch(db);
-    existing.docs.forEach((d) => batch.delete(d.ref));
-    items.forEach((item) => {
-      const { id, ...data } = item;
-      batch.set(doc(db!, templateCollection, id), { ...data, createdAt: serverTimestamp() });
-    });
-    await batch.commit();
-  } else {
-    // Create first so the template is never empty (an empty collection would
-    // re-seed the defaults if the Template page loaded mid-swap).
-    await commitChunks(items, (batch, item) => {
-      const { id, ...data } = item;
-      batch.set(doc(db!, templateCollection, id), { ...data, createdAt: serverTimestamp() });
-    });
-    await commitChunks(existing.docs, (batch, d) => batch.delete(d.ref));
-  }
-
-  return items;
-}
-
 /** Rename a section across every row that belongs to it. */
 export async function renameSection(
   collectionName: string,
@@ -336,7 +283,7 @@ export async function deleteRows(collectionName: string, rows: { id: string }[])
  * batch limit. An optional pre-seeded batch (carrying an extra write, e.g. the
  * parent property doc) is used as the first chunk.
  */
-async function commitChunks<T>(
+export async function commitChunks<T>(
   items: T[],
   apply: (batch: ReturnType<typeof writeBatch>, item: T) => void,
   seedBatch?: ReturnType<typeof writeBatch>,
