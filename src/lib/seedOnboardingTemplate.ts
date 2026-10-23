@@ -1,5 +1,6 @@
 import { collection, getDocs, query, orderBy, writeBatch, doc, serverTimestamp } from 'firebase/firestore';
 import { db } from './firebase';
+import { CHECKLISTS, type ChecklistKind } from './onboarding';
 import type { OnboardingTemplateItem, Profile } from '../types';
 
 /**
@@ -139,6 +140,51 @@ const SEED_ROWS: SeedRow[] = [
   [CLOSING, '908', 0, 'Send Termination to Charter Distribution Agreement', 'Jason', 0],
 ];
 
+const DD = 'Due Diligence';
+
+/**
+ * The DD inspections checklist, transcribed from section 100 ("Due Diligence")
+ * of the same sheet's Acquisition tab. Indented rows sit under the sub-header
+ * above them, as in the sheet.
+ */
+const INSPECTION_SEED_ROWS: SeedRow[] = [
+  [DD, '100', 0, 'Inspections', null, null],
+  [DD, '101', 1, 'Sewer Lines', null, null],
+  [DD, '102', 1, 'Roof', null, null],
+  [DD, '103', 1, 'Electrical', null, null],
+  [DD, '104', 1, 'Plumbing', null, null],
+  [DD, '105', 1, 'Pool (Equipment and Leak Detection Pressure Test)', null, null],
+  [DD, '106', 1, 'Termites', null, null],
+  [DD, '107', 1, 'Foundation', null, null],
+  [DD, '108', 1, 'Sprinkler Inspection', null, null],
+  [DD, '109', 0, 'Title', null, null],
+  [DD, '110', 0, 'Third Party Reports', null, null],
+  [DD, '111', 1, 'ALTA Survey', null, null],
+  [DD, '112', 1, 'Flood Determination Report', null, null],
+  [DD, '113', 1, 'Property Tax Opinion', null, null],
+  [DD, '114', 1, 'ESA w/ Radon', null, null],
+  [DD, '115', 1, 'PCA', null, null],
+  [DD, '116', 1, 'Zoning Report', null, null],
+  [DD, '117', 0, 'Insurance Quote', null, null],
+  [DD, '118', 0, 'Check Property YOC on Property Tax Records', null, null],
+  [DD, '119', 0, 'Service Contracts', null, null],
+  [DD, '120', 1, 'Landscaping', null, null],
+  [DD, '121', 1, 'Pest', null, null],
+  [DD, '122', 1, 'Trash', null, null],
+  [DD, '123', 1, 'Laundry', null, null],
+  [DD, '124', 1, 'Fire Monitoring', null, null],
+  [DD, '125', 0, 'Lease Audit', 'Jason', null],
+  [DD, '126', 0, 'Utility Audit', 'Jason', null],
+  [DD, '127', 0, 'Unit Walks', null, null],
+  [DD, '128', 0, 'Debt Term Sheets', null, null],
+  [DD, '129', 0, 'EisnerAmper Doc Review', null, null],
+];
+
+const SEEDS: Record<ChecklistKind, SeedRow[]> = {
+  onboarding: SEED_ROWS,
+  inspections: INSPECTION_SEED_ROWS,
+};
+
 /**
  * Match a sheet responsibility ("Jason", "Chloe'") to a profile id by first
  * name, case- and punctuation-insensitively. Ambiguous or unknown names seed
@@ -153,19 +199,20 @@ function resolveResponsible(name: string | null, profiles: Profile[]): string[] 
 }
 
 /**
- * Read the template, seeding it from SEED_ROWS on first use. Mirrors
- * getOrSeedRequestTypes: seeding needs superadmin write access and fails
- * silently (returning an empty list) for everyone else.
+ * Read a checklist's template, seeding it from its seed rows on first use.
+ * Mirrors getOrSeedRequestTypes: seeding needs superadmin write access and
+ * fails silently (returning an empty list) for everyone else.
  */
-export async function getOrSeedOnboardingTemplate(profiles: Profile[]): Promise<OnboardingTemplateItem[]> {
+export async function getOrSeedTemplate(kind: ChecklistKind, profiles: Profile[]): Promise<OnboardingTemplateItem[]> {
   if (!db) return [];
-  const snap = await getDocs(query(collection(db, 'onboardingTemplate'), orderBy('order')));
+  const templateCollection = CHECKLISTS[kind].template;
+  const snap = await getDocs(query(collection(db, templateCollection), orderBy('order')));
   if (snap.size > 0) {
     return snap.docs.map((d) => ({ id: d.id, ...d.data() } as OnboardingTemplateItem));
   }
 
-  const items: OnboardingTemplateItem[] = SEED_ROWS.map((row, i) => ({
-    id: doc(collection(db!, 'onboardingTemplate')).id,
+  const items: OnboardingTemplateItem[] = SEEDS[kind].map((row, i) => ({
+    id: doc(collection(db!, templateCollection)).id,
     section: row[0],
     code: row[1],
     indent: row[2],
@@ -184,12 +231,12 @@ export async function getOrSeedOnboardingTemplate(profiles: Profile[]): Promise<
       const batch = writeBatch(db);
       for (const item of items.slice(i, i + 400)) {
         const { id, ...data } = item;
-        batch.set(doc(db, 'onboardingTemplate', id), { ...data, createdAt: serverTimestamp() });
+        batch.set(doc(db, templateCollection, id), { ...data, createdAt: serverTimestamp() });
       }
       await batch.commit();
     }
   } catch (err) {
-    console.warn('Could not seed the onboarding template (superadmin required):', err);
+    console.warn(`Could not seed the ${kind} template (superadmin required):`, err);
     return [];
   }
   return items;

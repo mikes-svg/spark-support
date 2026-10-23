@@ -64,6 +64,7 @@ export interface Profile {
   email?: string;
   role?: Role;
   onboardingAccess?: boolean;
+  tasksAccess?: boolean;
 }
 
 /**
@@ -85,6 +86,22 @@ export function hasOnboardingAccess(profile?: { role?: string | null; onboarding
 export function canEditOnboarding(profile?: { role?: string | null; onboardingAccess?: boolean } | null): boolean {
   if (!profile) return false;
   return isSuperadminRole(profile.role) || (profile.onboardingAccess === true && !isAdminRole(profile.role));
+}
+
+/**
+ * True if the user can see the Tasks section at all.
+ *
+ * Mirrors hasOnboardingAccess deliberately: Administrators always have it, and
+ * everyone else — Managers and Users alike — needs the flag toggled on from the
+ * Team page. Tasks replace a tool not everyone used, so defaulting the whole
+ * company in would put a section in front of people with nothing in it.
+ *
+ * This gates ACCESS to the section, not visibility within it: once someone is
+ * in, they see all tasks, which is how the team worked in ClickUp.
+ */
+export function hasTasksAccess(profile?: { role?: string | null; tasksAccess?: boolean } | null): boolean {
+  if (!profile) return false;
+  return isSuperadminRole(profile.role) || profile.tasksAccess === true;
 }
 
 // ─── Property onboarding ─────────────────────────────────────────────────────
@@ -149,6 +166,23 @@ export interface OnboardingTask {
   delays?: OnboardingDelay[];
 }
 
+// ─── Due-diligence materials ─────────────────────────────────────────────────
+// The seller's DD request list, one row per document requested. Each property
+// gets its own copy of the standard list the first time its tab is opened.
+
+export type DdStatus = 'Outstanding' | 'To Review' | 'Complete' | 'N/A';
+
+export const DD_STATUSES: DdStatus[] = ['Outstanding', 'To Review', 'Complete', 'N/A'];
+
+export interface OnboardingDdItem {
+  id: string;
+  propertyId: string;
+  order: number;
+  item: string;
+  status: DdStatus;
+  notes: string;
+}
+
 // ─── Property notebooks ──────────────────────────────────────────────────────
 // One notebook per property, owned by its creator and private until shared.
 // `body` on a page is JSON.stringify(<TipTap doc>) — a string, so Firestore's
@@ -197,4 +231,413 @@ export function getDefaultAssigneeIds(rt: { defaultAssigneeIds?: string[] | null
   if (Array.isArray(rt.defaultAssigneeIds)) return rt.defaultAssigneeIds.filter(Boolean);
   if (rt.defaultAssigneeId) return [rt.defaultAssigneeId];
   return [];
+}
+
+// ─── Tasks (ClickUp replacement) ─────────────────────────────────────────────
+// A separate collection from `tickets` on purpose: tickets have a fixed
+// five-value status enum wired into StatusBadge, the analytics page, the 07:00
+// digest, and three email triggers. Tasks carry per-list custom statuses, so
+// every piece of logic here keys off `statusType` — NEVER a status label. That
+// is what makes a status safe to rename or add without silently breaking
+// carryover, digests, metrics, or overdue counts.
+
+/**
+ * The semantic kind of a status, independent of what it's called.
+ * - `scheduled` — pre-live; hidden from lists/calendar/digests until goLiveDate
+ *   (the same mechanic tickets already have; see `isScheduled` above).
+ * - `todo` / `active` / `waiting` — live work.
+ * - `done` / `closed` — finished; `closed` means "no longer relevant" rather
+ *   than "completed", but both count as done for progress and metrics.
+ */
+export type TaskStatusType = 'scheduled' | 'todo' | 'active' | 'waiting' | 'done' | 'closed';
+
+export type TaskPriority = 'Low' | 'Medium' | 'High' | 'Urgent';
+
+/** One status inside a status set. `color` is a hex string for the pill. */
+export interface TaskStatusDef {
+  id: string;
+  name: string;
+  color: string;
+  order: number;
+  type: TaskStatusType;
+}
+
+/** A reusable named collection of statuses, attached to a list. */
+export interface TaskStatusSet {
+  id: string;
+  name: string;
+  statuses: TaskStatusDef[];
+}
+
+/** Top level of the hierarchy: Space → List. Two levels, not three. */
+export interface TaskSpace {
+  id: string;
+  name: string;
+  order: number;
+  archived: boolean;
+}
+
+export interface TaskList {
+  id: string;
+  spaceId: string;
+  name: string;
+  order: number;
+  archived: boolean;
+  /** Which status set this list's tasks use. Null falls back to the seeded default. */
+  defaultStatusSetId: string | null;
+  /**
+   * Optional parent list, giving Space > List > Sub-list.
+   *
+   * One level of nesting, not arbitrary depth: the third tier is what people
+   * actually asked for (Accounting > FOM Activities > Housing), and a general
+   * tree would mean recursive pickers, cycle detection and a migration for a
+   * depth nobody has described wanting. A sub-list is an ordinary list in every
+   * other respect — it holds tasks, has its own status set, and can be archived.
+   */
+  parentListId?: string | null;
+}
+
+/** True when the list is a sub-list of another. */
+export function isSubList(list: Pick<TaskList, 'parentListId'>): boolean {
+  return !!list.parentListId;
+}
+
+/**
+ * Lists arranged for display: each top-level list followed by its sub-lists.
+ * Depth is capped at one, so a list that somehow points at a sub-list is treated
+ * as top-level rather than silently disappearing from every picker.
+ */
+export function orderListsByHierarchy(lists: TaskList[]): { list: TaskList; depth: 0 | 1 }[] {
+  const byName = (a: TaskList, b: TaskList) => (a.name || '').localeCompare(b.name || '');
+  const tops = lists.filter((l) => !l.parentListId || !lists.some((p) => p.id === l.parentListId && !p.parentListId));
+  const out: { list: TaskList; depth: 0 | 1 }[] = [];
+  for (const top of [...tops].sort(byName)) {
+    out.push({ list: top, depth: 0 });
+    for (const child of lists.filter((l) => l.parentListId === top.id).sort(byName)) {
+      out.push({ list: child, depth: 1 });
+    }
+  }
+  return out;
+}
+
+export interface TaskTag {
+  id: string;
+  name: string;
+  color: string;
+}
+
+/**
+ * A checklist item on a task. Stored as an array field on the task, not a
+ * subcollection — subtasks are always read and written with their parent.
+ */
+/**
+ * One step in a sequential sign-off chain.
+ *
+ * Distinct from a subtask on purpose. Subtasks are a checklist — any of them,
+ * in any order, by anyone on the task. Stages are a handoff: only the current
+ * one is actionable, finishing it moves the task to the next person, and the
+ * last one finishing closes the task. "Adrian completes stage 1, it routes to a
+ * manager for final review" is a stage chain, not a checklist.
+ */
+export interface TaskStage {
+  id: string;
+  name: string;
+  /** Who the task is assigned to while this stage is current. */
+  assigneeIds: string[];
+  done: boolean;
+  doneAt?: FsTimestamp | null;
+  doneBy?: string | null;
+  order: number;
+}
+
+/**
+ * The stage awaiting action — the first unfinished one. Null when there are no
+ * stages, or when every stage is done.
+ */
+export function currentStage(stages?: TaskStage[] | null): TaskStage | null {
+  if (!stages || stages.length === 0) return null;
+  const ordered = [...stages].sort((a, b) => a.order - b.order);
+  return ordered.find((s) => !s.done) ?? null;
+}
+
+/** True once every stage is signed off. */
+export function allStagesComplete(stages?: TaskStage[] | null): boolean {
+  return !!stages && stages.length > 0 && stages.every((s) => s.done);
+}
+
+/**
+ * Whether `uid` may sign off right now.
+ *
+ * Only the current stage's assignees, so a later approver cannot reach back and
+ * close a step that has not come to them yet. An empty assignee list means
+ * "whoever is on the task", which keeps a half-configured chain usable rather
+ * than stuck.
+ */
+export function canCompleteStage(uid: string, stage: TaskStage | null, taskAssignees: string[]): boolean {
+  if (!stage) return false;
+  if (stage.assigneeIds.length === 0) return taskAssignees.includes(uid);
+  return stage.assigneeIds.includes(uid);
+}
+
+export interface Subtask {
+  id: string;
+  title: string;
+  done: boolean;
+  doneAt?: FsTimestamp | null;
+  doneBy?: string | null;
+  assigneeIds?: string[];
+  /** 'YYYY-MM-DD'; see src/lib/dates.ts. */
+  dueDate?: string | null;
+  order: number;
+  /** Set by `carry-unfinished` recurrence, so the UI can mark it as carried over. */
+  carriedFromTaskId?: string | null;
+}
+
+export interface Task {
+  id: string;
+  listId: string;
+  /** Denormalized from the list so space-wide queries don't need a join. */
+  spaceId: string;
+  title: string;
+  /** JSON.stringify(<TipTap doc>) — a STRING, like notebook pages, so Firestore's
+   *  20-level nesting cap can't reject a deeply-nested rich-text description. */
+  description?: string;
+  /** Status is denormalized onto the task: the id points at the set, the name
+   *  renders without a lookup, and the type is what every query filters on. */
+  statusId: string;
+  statusName: string;
+  statusType: TaskStatusType;
+  /** Who the work is blocked on — replaces ClickUp's person-named statuses
+   *  (PENDING EDITA / PENDING CHLOE'), which broke whenever staff changed. */
+  waitingOnUserId?: string | null;
+  priority: TaskPriority | null;
+  assigneeIds: string[];
+  creatorId: string;
+  watcherIds: string[];
+  /** creator + assignees + watchers, deduped. Gates writes in firestore.rules. */
+  participants: string[];
+  /** Calendar days as 'YYYY-MM-DD' strings — never Date objects. */
+  startDate: string | null;
+  dueDate: string | null;
+  /** Optional 'HH:mm' for timed calendar events; a bare dueDate is all-day. */
+  dueTime?: string | null;
+  /** A `scheduled` task goes live on this date. */
+  goLiveDate?: string | null;
+  tagIds: string[];
+  subtasks: Subtask[];
+  /** Sequential sign-off chain. Empty or absent means an ordinary task. */
+  stages?: TaskStage[];
+  /** Manual sort position within its list (see the listId+order index). */
+  order?: number;
+  seriesId?: string | null;
+  /** Deterministic per-occurrence key (e.g. '2026-10-15'); with seriesId it
+   *  forms the doc id, so a retried generator run cannot duplicate. */
+  occurrenceKey?: string | null;
+  gcalEventId?: string | null;
+  gcalSyncedAt?: FsTimestamp | null;
+  completedAt?: FsTimestamp | null;
+  createdAt?: FsTimestamp;
+  updatedAt?: FsTimestamp;
+}
+
+/**
+ * What `createTask` accepts: the three fields a task can't exist without, plus
+ * any other task field. Everything omitted is defaulted by src/lib/tasks.ts.
+ */
+export type TaskInput = Pick<Task, 'listId' | 'spaceId' | 'title' | 'creatorId'> &
+  Partial<Omit<Task, 'id' | 'listId' | 'spaceId' | 'title' | 'creatorId' | 'participants'>>;
+
+/** Attachment metadata doc under `tasks/{taskId}/attachments`. Unlike tickets
+ *  (which list through a callable), tasks record uploads in Firestore, so
+ *  delete, uploader attribution, and size display need no function round-trip. */
+export interface TaskAttachment {
+  id: string;
+  name: string;
+  contentType: string;
+  size: number;
+  storagePath: string;
+  url: string;
+  uploadedBy: string;
+  uploadedAt?: FsTimestamp;
+}
+
+export interface TaskComment {
+  id: string;
+  taskId: string;
+  userId: string;
+  body: string;
+  mentionedIds: string[];
+  createdAt?: FsTimestamp;
+  editedAt?: FsTimestamp | null;
+}
+
+export type TaskEventType =
+  | 'created'
+  | 'status_changed'
+  | 'priority_changed'
+  | 'assignees_changed'
+  | 'due_date_changed'
+  | 'subtask_toggled'
+  | 'commented'
+  | 'activated'
+  | 'occurrence_created'
+  | 'missed_occurrence'
+  | 'reassigned';
+
+/** Audit-log entry. Append-only: rules forbid update and delete. */
+export interface TaskEvent {
+  id: string;
+  taskId: string;
+  type: TaskEventType;
+  actorId: string;
+  fromStatusId?: string | null;
+  toStatusId?: string | null;
+  fromStatusType?: TaskStatusType | null;
+  toStatusType?: TaskStatusType | null;
+  fromPriority?: TaskPriority | null;
+  toPriority?: TaskPriority | null;
+  fromAssigneeIds?: string[];
+  toAssigneeIds?: string[];
+  fromDueDate?: string | null;
+  toDueDate?: string | null;
+  subtaskId?: string | null;
+  /** Free-text detail for summary events (mass reassign, missed occurrence). */
+  note?: string | null;
+  createdAt?: FsTimestamp;
+}
+
+// ─── Recurrence ──────────────────────────────────────────────────────────────
+// Recurrence MATH lives server-side in functions/recurrence.js; these types only
+// describe the stored definition. The client never recomputes occurrences — two
+// copies of date math is how such features silently drift apart.
+
+export type TaskRecurrenceFreq = 'daily' | 'weekly' | 'biweekly' | 'monthly' | 'yearly' | 'custom';
+
+export interface TaskSeriesRecurrence {
+  freq: TaskRecurrenceFreq;
+  interval: number;
+  /** 0=Sunday … 6=Saturday. Weekly / biweekly. */
+  byWeekday?: number[];
+  dayOfMonth?: number | 'last';
+  monthlyMode?: 'day-of-month' | 'nth-weekday';
+}
+
+/** Mirrors ClickUp's "Include in new task" checkboxes. */
+export interface TaskCopyOnRecur {
+  description: boolean;
+  subtasks: boolean;
+  subtaskAssignees: boolean;
+  remapSubtaskDates: boolean;
+  assignees: boolean;
+  watchers: boolean;
+  comments: boolean;
+  tags: boolean;
+  /** false = each occurrence gets a fresh, unchecked subtask list. */
+  keepCheckedItems: boolean;
+  /** `reset` is ClickUp parity; `carry-unfinished` drags undone items forward
+   *  and is bounded at 3 consecutive carries before the UI/digest flags it. */
+  carryMode: 'reset' | 'carry-unfinished';
+  attachments: boolean;
+  activity: boolean;
+}
+
+/** What to do when the current occurrence is still open as the next falls due. */
+export type TaskMissedPolicy = 'skip-to-next' | 'accumulate' | 'keep-one-open';
+
+export interface TaskSeries {
+  id: string;
+  name: string;
+  /** The task fields each occurrence is minted from, plus the subtask template. */
+  payload: Partial<Omit<Task, 'id' | 'subtasks'>> & {
+    subtaskTemplate?: { title: string; order: number }[];
+  };
+  recurrence: TaskSeriesRecurrence;
+  /** DEFAULT 'on-completion': the next occurrence appears when someone finishes
+   *  the current one, which is how the audited ClickUp series were configured. */
+  trigger: 'on-completion' | 'on-schedule';
+  /** ClickUp's "Update status to: TO DO". */
+  resetStatusTo: string;
+  skipWeekends: boolean;
+  weekendShift: 'next' | 'previous';
+  startOffsetDays: number;
+  copyOnRecur: TaskCopyOnRecur;
+  missedPolicy: TaskMissedPolicy;
+  endDate?: string | null;
+  occurrenceLimit?: number | null;
+  active: boolean;
+  timezone: string;
+  creatorId: string;
+  createdAt?: FsTimestamp;
+  updatedAt?: FsTimestamp;
+}
+
+/** A saved set of tasks a user can instantiate at once, dated off a start day. */
+export interface TaskTemplate {
+  id: string;
+  name: string;
+  tasks: (Partial<Omit<Task, 'id'>> & { title: string; dueOffsetDays: number | null })[];
+  createdBy?: string;
+  createdAt?: FsTimestamp;
+}
+
+/**
+ * The composable filter every task list view passes to `listTasks`. Every field
+ * is optional and they AND together. Which parts run as Firestore constraints
+ * and which are applied in memory is documented on `listTasks` itself.
+ */
+export interface TaskFilter {
+  spaceId?: string | null;
+  listId?: string | null;
+  assigneeIds?: string[];
+  statusTypes?: TaskStatusType[];
+  tagIds?: string[];
+  priorities?: TaskPriority[];
+  seriesId?: string | null;
+  /** Inclusive 'YYYY-MM-DD' bounds on dueDate. */
+  dueFrom?: string | null;
+  dueTo?: string | null;
+  /** Default false — done/closed tasks are hidden unless asked for. */
+  includeDone?: boolean;
+  /** Default false — `scheduled` tasks stay hidden until they go live. */
+  includeScheduled?: boolean;
+  /** Case-insensitive substring match on the title, applied in memory. */
+  search?: string;
+  limit?: number;
+}
+
+// ─── Task predicates ─────────────────────────────────────────────────────────
+// All four key off `statusType` ONLY. Never compare a status label here: labels
+// are per-list, renameable, and were named after people in the old system.
+
+/** Finished: completed or closed-as-irrelevant. Both stop counting as work. */
+export function isTaskDone(task: { statusType?: string | null }): boolean {
+  return task.statusType === 'done' || task.statusType === 'closed';
+}
+
+/** Live work — shows in lists, the calendar, and digests. Excludes both
+ *  not-yet-live (`scheduled`) and finished tasks. */
+export function isTaskLive(task: { statusType?: string | null }): boolean {
+  return task.statusType === 'todo' || task.statusType === 'active' || task.statusType === 'waiting';
+}
+
+/** Blocked on someone else (pair with `waitingOnUserId` to say who). */
+export function isTaskWaiting(task: { statusType?: string | null }): boolean {
+  return task.statusType === 'waiting';
+}
+
+/**
+ * Past due. `today` is a 'YYYY-MM-DD' string from `todayStr()` — passed in
+ * rather than read here so this module stays dependency-free and so a whole
+ * list renders against one consistent "today".
+ *
+ * Strictly before today, matching isOverdue() in src/lib/onboarding.ts: a task
+ * due today is not yet late. Finished and not-yet-live tasks are never overdue.
+ */
+export function isTaskOverdue(
+  task: { statusType?: string | null; dueDate?: string | null },
+  today: string,
+): boolean {
+  if (!task.dueDate || !today) return false;
+  if (isTaskDone(task) || task.statusType === 'scheduled') return false;
+  return task.dueDate < today;
 }

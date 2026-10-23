@@ -14,6 +14,29 @@ service firebase.storage {
         && request.resource.contentType.matches('image/.*|application/pdf');
     }
 
+    // Task attachments. Tasks carry real work product — walkthrough videos,
+    // signed PDFs, spreadsheets — so the 10MB image/PDF ceiling that fits
+    // tickets is far too tight here; 200MB with documents and video allowed.
+    //
+    // Reads are open to any signed-in user, matching the task collection's own
+    // open-read rule (plan §2). Unlike tickets, there's nothing to hide behind
+    // a callable: everyone who can read the task can read its files.
+    match /taskAttachments/{taskId}/{filename} {
+      allow read: if request.auth != null;
+      // create/update carry a payload, so size and type are checkable here.
+      allow create, update: if request.auth != null
+        && request.resource.size < 200 * 1024 * 1024
+        && request.resource.contentType.matches('image/.*|video/.*|application/pdf|application/vnd.*|text/.*');
+      // Delete MUST be its own rule. A delete has no `request.resource`, so
+      // folding it into `write` next to the size/type checks evaluates
+      // `null.size` and denies every delete. That failure is invisible in the
+      // UI — the metadata doc under tasks/{id}/attachments is the only listing
+      // path, so the row disappears while the object stays behind, permanently
+      // orphaned and unreachable. Found by actually deleting one; the ticket
+      // and notebook rules below have the same latent shape but no delete UI.
+      allow delete: if request.auth != null;
+    }
+
     // Images pasted/dropped into property notebooks. Uploaded client-side and
     // embedded in a page by their tokenized download URL, so the uploader needs
     // read (getDownloadURL) too. Any signed-in user may read — the filename is a

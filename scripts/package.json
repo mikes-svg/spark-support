@@ -1,0 +1,5 @@
+{
+  "private": true,
+  "comment": "Scopes scripts/ back to CommonJS — the repo root is \"type\": \"module\" (Vite), but import-clickup.js uses require() to match the functions/ Admin SDK style. Node resolves module type per-directory via the nearest package.json, so this file alone does it without touching the root one.",
+  "type": "commonjs"
+}

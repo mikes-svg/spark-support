@@ -27,6 +27,16 @@ service cloud.firestore {
          get(/databases/$(database)/documents/profiles/$(request.auth.uid)).data.onboardingAccess == true);
     }
 
+    // Access to the Tasks section, granted per person from the Team page exactly
+    // as onboarding is: superadmins always, plus anyone whose tasksAccess flag is
+    // on. Within the section everyone sees every task — this gates the door, not
+    // the contents.
+    function canUseTasks() {
+      return isSuperAdmin() ||
+        (isSignedIn() &&
+         get(/databases/$(database)/documents/profiles/$(request.auth.uid)).data.tasksAccess == true);
+    }
+
     // Edit access to checklist tasks: superadmins always, plus a granted User —
     // but NOT a Manager (admin), who stays view-only even when granted, so the
     // isAdmin() branch is excluded here.
@@ -64,6 +74,9 @@ service cloud.firestore {
       // The denormalised list of Manager/Administrator uids, rebuilt by the
       // syncAdminIds function on every role change. Rules cannot look up a role
       // per assignee, so the accountability check below needs it in one read.
+      function adminIdsExist() {
+        return exists(/databases/$(database)/documents/meta/adminIds);
+      }
       function adminIds() {
         return get(/databases/$(database)/documents/meta/adminIds).data.ids;
       }
@@ -75,6 +88,12 @@ service cloud.firestore {
       // a normal state and the triage queue depends on it.
       function keepsAManager() {
         return request.resource.data.assigneeIds.size() == 0
+          // If meta/adminIds has not been built yet, get() on the missing doc
+          // would throw and DENY every ticket update — locking the whole team
+          // out over a deploy-ordering mistake. Fall back to the old behaviour
+          // instead: the invariant is unenforced until the backfill runs, but
+          // nothing breaks. backfillAdminIds creates it; the trigger maintains it.
+          || !adminIdsExist()
           || request.resource.data.assigneeIds.hasAny(adminIds());
       }
 
@@ -179,6 +198,24 @@ service cloud.firestore {
       allow write: if canEditOnboardingTasks();
     }
 
+    // DD inspections: a second checklist per property with its own template,
+    // gated exactly like the onboarding template and tasks above.
+    match /inspectionTemplate/{itemId} {
+      allow read: if canReadOnboarding();
+      allow write: if isSuperAdmin();
+    }
+
+    match /inspectionTasks/{taskId} {
+      allow read: if canReadOnboarding();
+      allow write: if canEditOnboardingTasks();
+    }
+
+    // Each property's due-diligence request list. Same access as its checklist.
+    match /onboardingDdItems/{itemId} {
+      allow read: if canReadOnboarding();
+      allow write: if canEditOnboardingTasks();
+    }
+
     // Property notebooks. One notebook per property, keyed by the property id,
     // owned by its creator and PRIVATE until shared — not even a superadmin sees
     // it unless they own it or it was shared with them. Every accessor must
@@ -244,6 +281,105 @@ service cloud.firestore {
           )
         );
       }
+    }
+
+    // ─── Tasks (the ClickUp replacement) ───────────────────────────────────
+    // Visibility is OPEN by decision (plan §2): any signed-in user reads every
+    // task, and WRITES are what's gated. That's the opposite of tickets, which
+    // are private to their participants — the two models are deliberate, not an
+    // oversight, so don't "harmonize" them.
+
+    match /tasks/{taskId} {
+      allow read: if canUseTasks();
+      // The creator field is pinned to the caller so a task can't be created
+      // pre-attributed to someone else (which would hand them the delete right).
+      allow create: if isSignedIn() && request.resource.data.creatorId == request.auth.uid;
+      // participants[] is creator + assignees + watchers, maintained by
+      // participantsOf() in src/lib/tasks.ts. Every mutation there recomputes
+      // it; a stale list is how a newly-assigned person loses write access.
+      allow update: if isSignedIn() && (
+        resource.data.participants.hasAny([request.auth.uid]) || isAdmin()
+      );
+      allow delete: if isSignedIn() && (
+        resource.data.creatorId == request.auth.uid || isSuperAdmin()
+      );
+
+      // Attachment metadata, written client-side on upload (tickets list theirs
+      // through a callable instead; tasks don't need the round trip).
+      match /attachments/{attachmentId} {
+        allow read: if canUseTasks();
+        allow create: if isSignedIn() && request.resource.data.uploadedBy == request.auth.uid;
+        // Metadata describes a stored object; it's replaced, never edited.
+        allow update: if false;
+        allow delete: if isSignedIn() && (
+          resource.data.uploadedBy == request.auth.uid || isAdmin()
+        );
+      }
+    }
+
+    // Mirrors the /comments rules above, with ONE deliberate difference: read is
+    // open to any signed-in user rather than participants-only, because the task
+    // itself is. Gating comments tighter than their parent would leave Team
+    // Tasks showing a comment count nobody could open.
+    match /taskComments/{commentId} {
+      allow read: if canUseTasks();
+      allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
+      // The author may edit their own comment, but the owner, task, and original
+      // timestamp are pinned so an edit can't reassign authorship, move the
+      // comment to another task, or backdate it.
+      allow update: if isSignedIn()
+        && resource.data.userId == request.auth.uid
+        && request.resource.data.userId == resource.data.userId
+        && request.resource.data.taskId == resource.data.taskId
+        && request.resource.data.createdAt == resource.data.createdAt;
+      allow delete: if isSuperAdmin()
+        || (isSignedIn() && resource.data.userId == request.auth.uid);
+    }
+
+    // Append-only audit log. Readable by everyone who can read the task, so the
+    // activity feed works for any viewer; never editable, so metrics computed
+    // from it (cycle time, on-time %, recurring compliance) can't be rewritten.
+    match /taskEvents/{eventId} {
+      allow read: if canUseTasks();
+      allow create: if isSignedIn() && request.resource.data.actorId == request.auth.uid;
+      allow update, delete: if false;
+    }
+
+    // Workspace structure. Everyone reads it (every task view needs the names);
+    // only superadmins shape it, from Task Settings.
+    match /taskSpaces/{spaceId} {
+      allow read: if canUseTasks();
+      allow write: if isSuperAdmin();
+    }
+
+    match /taskLists/{listId} {
+      allow read: if canUseTasks();
+      allow write: if isSuperAdmin();
+    }
+
+    match /taskStatusSets/{setId} {
+      allow read: if canUseTasks();
+      allow write: if isSuperAdmin();
+    }
+
+    match /taskTemplates/{templateId} {
+      allow read: if canUseTasks();
+      allow write: if isSuperAdmin();
+    }
+
+    match /taskTags/{tagId} {
+      allow read: if canUseTasks();
+      allow write: if isSuperAdmin();
+    }
+
+    // Recurring-series definitions. Looser than the structure collections: the
+    // person who set up a recurrence owns it, and admins can fix one.
+    match /taskSeries/{seriesId} {
+      allow read: if canUseTasks();
+      allow create: if isSignedIn()
+        && (request.resource.data.creatorId == request.auth.uid || isAdmin());
+      allow update, delete: if isSignedIn()
+        && (resource.data.creatorId == request.auth.uid || isAdmin());
     }
 
     // Email trigger queue (Firebase Trigger Email extension). All sends now come

@@ -1,8 +1,8 @@
 import { initializeApp, FirebaseApp } from 'firebase/app';
-import { Auth, getAuth, GoogleAuthProvider } from 'firebase/auth';
-import { Firestore, getFirestore } from 'firebase/firestore';
-import { FirebaseStorage, getStorage } from 'firebase/storage';
-import { Functions, getFunctions } from 'firebase/functions';
+import { Auth, getAuth, GoogleAuthProvider, connectAuthEmulator } from 'firebase/auth';
+import { Firestore, getFirestore, connectFirestoreEmulator } from 'firebase/firestore';
+import { FirebaseStorage, getStorage, connectStorageEmulator } from 'firebase/storage';
+import { Functions, getFunctions, connectFunctionsEmulator } from 'firebase/functions';
 
 // ── DATA project (this portal's own Firestore + Storage) ───────────────
 // Unchanged: Support's tickets, profiles, files all stay in its own project.
@@ -59,6 +59,35 @@ try {
   }
 } catch (e) {
   console.warn('Auth not configured — running in mock/dev mode');
+}
+
+/**
+ * Local Firebase Emulator Suite, for walking the app against seeded data
+ * without touching the real project.
+ *
+ * Gated on `import.meta.env.DEV`, which Vite statically replaces with `false`
+ * in any production build — so this entire block is eliminated from the shipped
+ * bundle and NO environment variable can switch it on in production. It reaches
+ * the dev server only via `npx vite --mode emulator` (see .env.emulator), and
+ * that file's Firebase config is deliberately fake, so a half-applied flag
+ * fails loudly instead of silently reaching prod.
+ *
+ * Each connect* call is idempotent per SDK instance but throws if the service
+ * has already issued a request, so this runs immediately after init and is
+ * wrapped defensively — a failure here must not take the app down.
+ */
+const USE_EMULATORS = import.meta.env.DEV && import.meta.env.VITE_USE_EMULATORS === 'true';
+
+if (USE_EMULATORS) {
+  try {
+    if (auth) connectAuthEmulator(auth, 'http://127.0.0.1:9099', { disableWarnings: true });
+    if (db) connectFirestoreEmulator(db, '127.0.0.1', 8080);
+    if (storage) connectStorageEmulator(storage, '127.0.0.1', 9199);
+    if (functions) connectFunctionsEmulator(functions, '127.0.0.1', 5001);
+    console.info('[emulator] Firebase pointed at local emulators — no production data is reachable.');
+  } catch (e) {
+    console.error('[emulator] Failed to connect to the Firebase emulators:', e);
+  }
 }
 
 export { auth, db, storage, functions, googleProvider };

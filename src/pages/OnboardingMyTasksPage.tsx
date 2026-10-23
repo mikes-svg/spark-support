@@ -8,7 +8,7 @@ import { ONBOARDING_STATUSES, canEditOnboarding } from '../types';
 import type { OnboardingProperty, OnboardingTask, OnboardingStatus } from '../types';
 import { PageSpinner } from '../components/PageSpinner';
 import { PostponeModal } from '../components/onboarding/PostponeModal';
-import { TASKS, fetchProperties, isOverdue, isTaskDone, deriveDaysFromClosing } from '../lib/onboarding';
+import { TASKS, INSPECTION_TASKS, CHECKLISTS, fetchProperties, isOverdue, isTaskDone, deriveDaysFromClosing, type ChecklistKind } from '../lib/onboarding';
 import { todayStr, formatDateOnly, diffDaysStr } from '../lib/dates';
 
 const STATUS_STYLES: Record<OnboardingStatus, string> = {
@@ -61,13 +61,16 @@ function EditableNotes({ value, onCommit, disabled }: { value: string; onCommit:
   );
 }
 
+/** A task tagged with the checklist it came from, so edits go back to the right collection. */
+type MyTask = OnboardingTask & { kind: ChecklistKind };
+
 export function OnboardingMyTasksPage() {
   const { user } = useAuth();
   // Managers can see their assigned tasks but not change them; superadmins and
   // granted users can update status, notes, and dates.
   const canEdit = canEditOnboarding(user);
 
-  const [tasks, setTasks] = useState<OnboardingTask[]>([]);
+  const [tasks, setTasks] = useState<MyTask[]>([]);
   const [properties, setProperties] = useState<Map<string, OnboardingProperty>>(new Map());
   const [loading, setLoading] = useState(true);
   const [actionError, setActionError] = useState('');
@@ -75,7 +78,7 @@ export function OnboardingMyTasksPage() {
   // Bumping this re-runs the load effect, which is what the error banner's Retry does.
   const [reloadKey, setReloadKey] = useState(0);
   const [showCompleted, setShowCompleted] = useState(false);
-  const [postponeTarget, setPostponeTarget] = useState<{ task: OnboardingTask; newDate: string | null } | null>(null);
+  const [postponeTarget, setPostponeTarget] = useState<{ task: MyTask; newDate: string | null } | null>(null);
 
   const today = useMemo(() => todayStr(), []);
 
@@ -93,12 +96,18 @@ export function OnboardingMyTasksPage() {
           if (!cancelled) { setProperties(propMap); setTasks([]); }
           return;
         }
-        const snap = await getDocs(
-          query(collection(db, TASKS), where('responsibleIds', 'array-contains', user.id), orderBy('dueDate'))
-        );
-        const rows = snap.docs
-          .map((d) => ({ id: d.id, ...d.data() } as OnboardingTask))
-          .filter((t) => propMap.has(t.propertyId));
+        // The inspections query skips orderBy so it needs no composite index;
+        // the table sorts by urgency itself either way.
+        const [onboardingSnap, inspectionSnap] = await Promise.all([
+          getDocs(query(collection(db, TASKS), where('responsibleIds', 'array-contains', user.id), orderBy('dueDate'))),
+          getDocs(query(collection(db, INSPECTION_TASKS), where('responsibleIds', 'array-contains', user.id))),
+        ]);
+        const tag = (kind: ChecklistKind) => (d: { id: string; data: () => unknown }) =>
+          ({ id: d.id, ...(d.data() as object), kind } as MyTask);
+        const rows = [
+          ...onboardingSnap.docs.map(tag('onboarding')),
+          ...inspectionSnap.docs.map(tag('inspections')),
+        ].filter((t) => propMap.has(t.propertyId));
 
         if (!cancelled) {
           setProperties(propMap);
@@ -122,12 +131,12 @@ export function OnboardingMyTasksPage() {
   }, [user, reloadKey]);
 
   /** Optimistically apply a task patch, rolling back if the write fails. */
-  const patchTask = async (task: OnboardingTask, patch: Partial<OnboardingTask>) => {
+  const patchTask = async (task: MyTask, patch: Partial<OnboardingTask>) => {
     if (!db) return;
     setActionError('');
     setTasks((prev) => prev.map((t) => (t.id === task.id ? { ...t, ...patch } : t)));
     try {
-      await updateDoc(doc(db, TASKS, task.id), { ...patch, updatedAt: serverTimestamp() });
+      await updateDoc(doc(db, CHECKLISTS[task.kind].tasks, task.id), { ...patch, updatedAt: serverTimestamp() });
     } catch (err) {
       console.error('Failed to update task:', err);
       setTasks((prev) => prev.map((t) => (t.id === task.id ? task : t)));
@@ -135,7 +144,7 @@ export function OnboardingMyTasksPage() {
     }
   };
 
-  const handleDueDateChange = (task: OnboardingTask, dueDate: string | null) => {
+  const handleDueDateChange = (task: MyTask, dueDate: string | null) => {
     if (isOverdue(task, today)) {
       setPostponeTarget({ task, newDate: dueDate });
       return;
@@ -210,7 +219,7 @@ export function OnboardingMyTasksPage() {
 
       {/* The page title itself lives in the app header — this is only its subtitle,
           so the screen keeps a single primary heading. */}
-      <p className="text-sm text-gray-600">Your onboarding tasks across every property, sorted by urgency.</p>
+      <p className="text-sm text-gray-600">Your PM onboarding and DD inspection tasks across every property, sorted by urgency.</p>
 
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <div className="bg-white shadow-sm rounded-xl border border-gray-200 p-4">
@@ -290,7 +299,12 @@ export function OnboardingMyTasksPage() {
                           </span>
                         </div>
                       </td>
-                      <td className="px-4 py-2 align-top whitespace-nowrap text-sm text-gray-500">{task.section}</td>
+                      <td className="px-4 py-2 align-top whitespace-nowrap text-sm text-gray-500">
+                        {task.section}
+                        {task.kind === 'inspections' && (
+                          <span className="block text-[11px] text-gray-400">{CHECKLISTS.inspections.label}</span>
+                        )}
+                      </td>
                       <td className="px-4 py-2 align-top whitespace-nowrap">
                         <div className="flex items-center gap-1">
                           <input

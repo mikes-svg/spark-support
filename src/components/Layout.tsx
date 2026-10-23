@@ -16,10 +16,24 @@ export function Layout() {
     if (pathname === '/admin/team') return 'Team';
     if (pathname === '/admin/analytics') return 'Analytics';
     if (pathname === '/admin/settings') return 'Settings';
-    // Matches the sidebar's "My Tasks" entry so the nav label and the page agree.
-    if (pathname === '/onboarding') return 'My Tasks';
+    if (pathname === '/admin/workload') return 'Workload';
+    if (pathname === '/admin/tasks') return 'Task Settings';
+    if (pathname === '/admin/reassign') return 'Reassign Work';
+    // The three /tasks/<literal> routes are matched BEFORE the /tasks/:id
+    // prefix below, or a detail-page test would swallow them.
+    if (pathname === '/tasks') return 'My Tasks';
+    if (pathname === '/tasks/all') return 'Team Tasks';
+    if (pathname === '/tasks/calendar') return 'Calendar';
+    if (pathname === '/tasks/templates') return 'Recurring Tasks';
+    if (pathname.startsWith('/tasks/')) return 'Task Details';
+    if (pathname === '/settings/calendar') return 'Calendar Sync';
+    if (pathname === '/settings/notifications') return 'Notifications';
+    // Mirrors the sidebar label, which is "Onboarding Tasks" now that the
+    // task section owns the plain "My Tasks" name.
+    if (pathname === '/onboarding') return 'Onboarding Tasks';
     if (pathname.startsWith('/onboarding/properties')) return 'Property Onboarding';
-    if (pathname === '/onboarding/template') return 'Checklist Template';
+    if (pathname === '/onboarding/template') return 'PM Onboarding Template';
+    if (pathname === '/onboarding/inspections-template') return 'DD Inspections Template';
     return 'Portal';
   };
 

@@ -11,7 +11,9 @@ import {
 import { db } from './firebase';
 import { addDaysStr, diffDaysStr } from './dates';
 import { hasOnboardingAccess } from '../types';
+import { DEFAULT_DD_ITEMS } from './ddMaterialsDefaults';
 import type {
+  OnboardingDdItem,
   OnboardingProperty,
   OnboardingTask,
   OnboardingTemplateItem,
@@ -21,6 +23,23 @@ import type {
 export const PROPERTIES = 'onboardingProperties';
 export const TASKS = 'onboardingTasks';
 export const TEMPLATE = 'onboardingTemplate';
+export const DD_ITEMS = 'onboardingDdItems';
+export const INSPECTION_TASKS = 'inspectionTasks';
+export const INSPECTION_TEMPLATE = 'inspectionTemplate';
+
+/**
+ * A property carries two checklists with the same shape — PM onboarding and DD
+ * inspections — each with its own master template. They live in separate
+ * collections so the two templates and task lists never mix.
+ */
+export type ChecklistKind = 'onboarding' | 'inspections';
+
+export const CHECKLISTS: Record<ChecklistKind, { tasks: string; template: string; label: string }> = {
+  onboarding: { tasks: TASKS, template: TEMPLATE, label: 'PM Onboarding' },
+  inspections: { tasks: INSPECTION_TASKS, template: INSPECTION_TEMPLATE, label: 'DD Inspections' },
+};
+
+export const CHECKLIST_KINDS = Object.keys(CHECKLISTS) as ChecklistKind[];
 
 /** Firestore refuses batches larger than 500 writes; commit in chunks below it. */
 const BATCH_LIMIT = 400;
@@ -98,12 +117,60 @@ export async function fetchProperties(): Promise<OnboardingProperty[]> {
   return snap.docs.map((d) => ({ id: d.id, ...d.data() } as OnboardingProperty));
 }
 
-export async function fetchTasksForProperty(propertyId: string): Promise<OnboardingTask[]> {
+/**
+ * A property's checklist of the given kind. Filtered on propertyId alone and
+ * sorted here, so the inspections list needs no composite index of its own.
+ */
+export async function fetchTasksForProperty(propertyId: string, kind: ChecklistKind = 'onboarding'): Promise<OnboardingTask[]> {
   if (!db) return [];
-  const snap = await getDocs(
-    query(collection(db, TASKS), where('propertyId', '==', propertyId), orderBy('order'))
+  const snap = await getDocs(query(collection(db, CHECKLISTS[kind].tasks), where('propertyId', '==', propertyId)));
+  return snap.docs
+    .map((d) => ({ id: d.id, ...d.data() } as OnboardingTask))
+    .sort((a, b) => a.order - b.order);
+}
+
+/** Turn template rows into a property's tasks, due dates computed from closing. */
+function tasksFromTemplate(
+  propertyId: string,
+  closingDate: string | null,
+  template: OnboardingTemplateItem[],
+  idFor: (item: OnboardingTemplateItem) => string,
+): OnboardingTask[] {
+  return [...template]
+    .sort((a, b) => a.order - b.order)
+    .map((item) => ({
+      id: idFor(item),
+      propertyId,
+      section: item.section,
+      order: item.order,
+      code: item.code,
+      indent: item.indent,
+      title: item.title,
+      responsibleIds: item.responsibleIds ?? [],
+      daysFromClosing: item.daysFromClosing ?? null,
+      dueDate: computeDueDate(closingDate, item.daysFromClosing ?? null),
+      status: 'Not Started',
+      notes: '',
+      delays: [],
+    }));
+}
+
+/**
+ * Copy the inspections template into a property. Task ids are derived from the
+ * property and template row, so two people opening an empty tab at once write
+ * the same docs rather than doubling the list.
+ */
+export async function instantiateInspections(
+  propertyId: string,
+  closingDate: string | null,
+  template: OnboardingTemplateItem[],
+): Promise<OnboardingTask[]> {
+  if (!db) throw new Error('Firestore is not configured.');
+  const tasks = tasksFromTemplate(propertyId, closingDate, template, (item) => `${propertyId}_${item.id}`);
+  await commitChunks(tasks, (batch, { id, ...data }) =>
+    batch.set(doc(db!, INSPECTION_TASKS, id), { ...data, createdAt: serverTimestamp() }),
   );
-  return snap.docs.map((d) => ({ id: d.id, ...d.data() } as OnboardingTask));
+  return tasks;
 }
 
 /**
@@ -131,23 +198,7 @@ export async function createPropertyFromTemplate(
     archived: false,
   };
 
-  const tasks: OnboardingTask[] = [...template]
-    .sort((a, b) => a.order - b.order)
-    .map((item) => ({
-      id: doc(collection(db!, TASKS)).id,
-      propertyId: propertyRef.id,
-      section: item.section,
-      order: item.order,
-      code: item.code,
-      indent: item.indent,
-      title: item.title,
-      responsibleIds: item.responsibleIds ?? [],
-      daysFromClosing: item.daysFromClosing ?? null,
-      dueDate: computeDueDate(input.closingDate, item.daysFromClosing ?? null),
-      status: 'Not Started',
-      notes: '',
-      delays: [],
-    }));
+  const tasks = tasksFromTemplate(propertyRef.id, input.closingDate, template, () => doc(collection(db!, TASKS)).id);
 
   const { id: _propertyId, ...propertyData } = property;
   const firstBatch = writeBatch(db);
@@ -163,38 +214,44 @@ export async function createPropertyFromTemplate(
 }
 
 /**
- * Apply a new closing date: every task carrying an offset gets its due date
- * recalculated. Returns the updated tasks for optimistic rendering.
+ * Apply a new closing date: every task carrying an offset, in both checklists,
+ * gets its due date recalculated. Returns the updated tasks of each checklist
+ * for optimistic rendering.
  */
 export async function applyClosingDate(
   propertyId: string,
   closingDate: string | null,
-  tasks: OnboardingTask[],
-): Promise<OnboardingTask[]> {
+): Promise<Record<ChecklistKind, OnboardingTask[]>> {
   if (!db) throw new Error('Firestore is not configured.');
   const propertyRef = doc(db, PROPERTIES, propertyId);
 
-  const affected = tasks.filter((t) => t.daysFromClosing != null);
-  const updated = tasks.map((t) =>
-    t.daysFromClosing == null ? t : { ...t, dueDate: computeDueDate(closingDate, t.daysFromClosing) }
+  const lists = await Promise.all(CHECKLIST_KINDS.map((kind) => fetchTasksForProperty(propertyId, kind)));
+  const affected = CHECKLIST_KINDS.flatMap((kind, i) =>
+    lists[i].filter((t) => t.daysFromClosing != null).map((task) => ({ kind, task })),
   );
 
   const firstBatch = writeBatch(db);
   firstBatch.update(propertyRef, { closingDate });
-  await commitChunks(affected, (batch, task) => {
-    batch.update(doc(db!, TASKS, task.id), {
+  await commitChunks(affected, (batch, { kind, task }) => {
+    batch.update(doc(db!, CHECKLISTS[kind].tasks, task.id), {
       dueDate: computeDueDate(closingDate, task.daysFromClosing),
       updatedAt: serverTimestamp(),
     });
   }, firstBatch);
 
-  return updated;
+  const updated = (tasks: OnboardingTask[]) => tasks.map((t) =>
+    t.daysFromClosing == null ? t : { ...t, dueDate: computeDueDate(closingDate, t.daysFromClosing) }
+  );
+  return { onboarding: updated(lists[0]), inspections: updated(lists[1]) };
 }
 
-/** Delete a property and every task under it. */
-export async function deletePropertyWithTasks(propertyId: string, tasks: OnboardingTask[]): Promise<void> {
+/** Delete a property and everything under it: both checklists and its DD list. */
+export async function deletePropertyWithTasks(propertyId: string): Promise<void> {
   if (!db) throw new Error('Firestore is not configured.');
-  await commitChunks(tasks, (batch, task) => batch.delete(doc(db!, TASKS, task.id)));
+  for (const kind of CHECKLIST_KINDS) {
+    await deleteRows(CHECKLISTS[kind].tasks, await fetchTasksForProperty(propertyId, kind));
+  }
+  await deleteRows(DD_ITEMS, await fetchDdItems(propertyId));
   const batch = writeBatch(db);
   batch.delete(doc(db, PROPERTIES, propertyId));
   await batch.commit();
@@ -208,14 +265,18 @@ export async function deletePropertyWithTasks(propertyId: string, tasks: Onboard
  * point. Existing properties are untouched; only ones created afterward inherit
  * this. Returns the new template items for optimistic rendering.
  */
-export async function savePropertyChecklistAsTemplate(tasks: OnboardingTask[]): Promise<OnboardingTemplateItem[]> {
+export async function savePropertyChecklistAsTemplate(
+  tasks: OnboardingTask[],
+  kind: ChecklistKind = 'onboarding',
+): Promise<OnboardingTemplateItem[]> {
   if (!db) throw new Error('Firestore is not configured.');
-  const existing = await getDocs(collection(db, TEMPLATE));
+  const templateCollection = CHECKLISTS[kind].template;
+  const existing = await getDocs(collection(db, templateCollection));
 
   const items: OnboardingTemplateItem[] = [...tasks]
     .sort((a, b) => a.order - b.order)
     .map((t) => ({
-      id: doc(collection(db!, TEMPLATE)).id,
+      id: doc(collection(db!, templateCollection)).id,
       section: t.section,
       order: t.order,
       code: t.code ?? '',
@@ -234,7 +295,7 @@ export async function savePropertyChecklistAsTemplate(tasks: OnboardingTask[]): 
     existing.docs.forEach((d) => batch.delete(d.ref));
     items.forEach((item) => {
       const { id, ...data } = item;
-      batch.set(doc(db!, TEMPLATE, id), { ...data, createdAt: serverTimestamp() });
+      batch.set(doc(db!, templateCollection, id), { ...data, createdAt: serverTimestamp() });
     });
     await batch.commit();
   } else {
@@ -242,7 +303,7 @@ export async function savePropertyChecklistAsTemplate(tasks: OnboardingTask[]): 
     // re-seed the defaults if the Template page loaded mid-swap).
     await commitChunks(items, (batch, item) => {
       const { id, ...data } = item;
-      batch.set(doc(db!, TEMPLATE, id), { ...data, createdAt: serverTimestamp() });
+      batch.set(doc(db!, templateCollection, id), { ...data, createdAt: serverTimestamp() });
     });
     await commitChunks(existing.docs, (batch, d) => batch.delete(d.ref));
   }
@@ -297,4 +358,37 @@ async function commitChunks<T>(
     }
   }
   if (dirty) await batch.commit();
+}
+
+/**
+ * A property's DD request list. Filtered on propertyId alone and sorted here,
+ * so it needs no composite index.
+ */
+export async function fetchDdItems(propertyId: string): Promise<OnboardingDdItem[]> {
+  if (!db) return [];
+  const snap = await getDocs(query(collection(db, DD_ITEMS), where('propertyId', '==', propertyId)));
+  return snap.docs
+    .map((d) => ({ id: d.id, ...d.data() } as OnboardingDdItem))
+    .sort((a, b) => a.order - b.order);
+}
+
+/**
+ * Copy the standard DD list into a property. Ids are derived from the property
+ * and position, so two people opening an empty tab at once write the same docs
+ * rather than doubling the list.
+ */
+export async function seedDdItems(propertyId: string): Promise<OnboardingDdItem[]> {
+  if (!db) throw new Error('Firestore is not configured.');
+  const items: OnboardingDdItem[] = DEFAULT_DD_ITEMS.map((item, i) => ({
+    id: `${propertyId}_dd_${i + 1}`,
+    propertyId,
+    order: (i + 1) * 100,
+    item,
+    status: 'Outstanding',
+    notes: '',
+  }));
+  await commitChunks(items, (batch, { id, ...data }) =>
+    batch.set(doc(db!, DD_ITEMS, id), { ...data, createdAt: serverTimestamp(), updatedAt: serverTimestamp() }),
+  );
+  return items;
 }

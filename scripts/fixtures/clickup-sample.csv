@@ -1,0 +1,42 @@
+Task ID,Task Name,Status,Priority,Assignees,Space,Folder,List,Due Date,Date Created
+HR-1,Onboard new hire — Q4,FUTURE,Medium,Chloe Price,Human Resources,,List,10/1/2026,9/1/2026
+HR-2,Update employee handbook,TO DO,Low,Edita Gomez,Human Resources,,List,,9/5/2026
+OPM-1,Q4 social campaign brief,PENDING EDITA,High,Mike Sanghvi,Operations,,Marketing,9/30/2026,9/10/2026
+OPM-2,Vendor contract review,PENDING CHLOE',Medium,Mike Sanghvi,Operations,,Marketing,9/25/2026,9/12/2026
+OPM-3,Design new flyer,IN PROGRESS,Low,Chloe Price,Operations,,Marketing,9/20/2026,9/8/2026
+OPM-4,Weekly - Facebook Marketplace Listing Refresh,TO DO,Low,Edita Gomez,Operations,,Marketing,9/14/2026,9/7/2026
+OPG-1,Fix leaking faucet - Unit 4B,IN PROGRESS,High,Mike Sanghvi,Operations,,General,9/24/2026,9/18/2026
+OPG-2,Investigate old maintenance request,CLOSED,Low,Mike Sanghvi,Operations,,General,,8/1/2026
+CKC-01,Check for Expired Concessions,TO DO,Medium,Edita Gomez,Operations,,General,9/12/2025,9/5/2025
+CKC-02,Check for Expired Concessions,TO DO,Medium,Edita Gomez,Operations,,General,9/19/2025,9/12/2025
+CKC-03,Check for Expired Concessions,TO DO,Medium,Edita Gomez,Operations,,General,9/26/2025,9/19/2025
+CKC-04,Check for Expired Concessions,TO DO,Medium,Edita Gomez,Operations,,General,10/3/2025,9/26/2025
+CKC-05,Check for Expired Concessions,TO DO,Medium,Edita Gomez,Operations,,General,10/10/2025,10/3/2025
+CKC-06,Check for Expired Concessions,TO DO,Medium,Edita Gomez,Operations,,General,10/17/2025,10/10/2025
+CKC-07,Check for Expired Concessions,TO DO,Medium,Edita Gomez,Operations,,General,10/24/2025,10/17/2025
+CKC-08,Check for Expired Concessions,TO DO,Medium,Edita Gomez,Operations,,General,10/31/2025,10/24/2025
+CKC-09,Check for Expired Concessions,TO DO,Medium,Edita Gomez,Operations,,General,11/7/2025,10/31/2025
+CKC-10,Check for Expired Concessions,TO DO,Medium,Edita Gomez,Operations,,General,11/14/2025,11/7/2025
+CKC-11,Check for Expired Concessions,TO DO,Medium,Edita Gomez,Operations,,General,11/21/2025,11/14/2025
+CKC-12,Check for Expired Concessions,TO DO,Medium,Edita Gomez,Operations,,General,11/28/2025,11/21/2025
+CKC-13,Check for Expired Concessions,TO DO,Medium,Edita Gomez,Operations,,General,12/5/2025,11/28/2025
+CKC-14,Check for Expired Concessions,TO DO,Medium,Edita Gomez,Operations,,General,12/12/2025,12/5/2025
+CKC-15,Check for Expired Concessions,TO DO,Medium,Edita Gomez,Operations,,General,12/19/2025,12/12/2025
+CKC-16,Check for Expired Concessions,TO DO,Medium,Edita Gomez,Operations,,General,12/26/2025,12/19/2025
+CKC-17,Check for Expired Concessions,TO DO,Medium,Edita Gomez,Operations,,General,1/2/2026,12/26/2025
+CKC-18,Check for Expired Concessions,TO DO,Medium,Edita Gomez,Operations,,General,1/9/2026,1/2/2026
+CKC-19,Check for Expired Concessions,TO DO,Medium,Edita Gomez,Operations,,General,1/16/2026,1/9/2026
+CKC-20,Check for Expired Concessions,TO DO,Medium,Edita Gomez,Operations,,General,1/23/2026,1/16/2026
+CKC-21,Check for Expired Concessions,TO DO,Medium,Edita Gomez,Operations,,General,1/30/2026,1/23/2026
+CKC-22,Check for Expired Concessions,TO DO,Medium,Edita Gomez,Operations,,General,2/6/2026,1/30/2026
+CKC-23,Check for Expired Concessions,TO DO,Medium,Edita Gomez,Operations,,General,2/13/2026,2/6/2026
+CKC-24,Check for Expired Concessions,TO DO,Medium,Edita Gomez,Operations,,General,2/20/2026,2/13/2026
+CKC-25,Check for Expired Concessions,TO DO,Medium,Edita Gomez,Operations,,General,2/27/2026,2/20/2026
+CKC-26,Check for Expired Concessions,TO DO,Medium,Edita Gomez,Operations,,General,3/6/2026,2/27/2026
+CKC-27,Check for Expired Concessions,TO DO,Medium,Edita Gomez,Operations,,General,3/13/2026,3/6/2026
+CKC-28,Check for Expired Concessions,TO DO,Medium,Edita Gomez,Operations,,General,3/20/2026,3/13/2026
+CKC-29,Check for Expired Concessions,TO DO,Medium,Edita Gomez,Operations,,General,3/27/2026,3/20/2026
+CKC-30,Check for Expired Concessions,TO DO,Medium,Edita Gomez,Operations,,General,4/3/2026,3/27/2026
+SC-1,Review Q3 financials,TO DO,High,Mike Sanghvi,Standifer Capital,,Mike's To-do,9/28/2026,9/15/2026
+OPI-1,Renew general liability policy,TO DO,High,Mike Sanghvi,Operations,Insurance,Marketing,10/5/2026,9/20/2026
+OPI-2,Collect COI from vendors,COMPLETE,Medium,"Chloe Price, Mike Sanghvi",Operations,Insurance,Marketing,9/1/2026,8/15/2026

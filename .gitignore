@@ -10,3 +10,10 @@ dev-dist/
 
 # /gauntlet run evidence (screenshots, results) — manifest.yaml IS tracked
 .claude/qa/runs/
+
+# Swarm worktrees (transient)
+.claude/worktrees/
+
+# Local function secrets (Google Calendar OAuth, etc.)
+functions/.env.local
+functions/.env
