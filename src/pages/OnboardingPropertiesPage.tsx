@@ -12,6 +12,7 @@ import { ConfirmModal } from '../components/ConfirmModal';
 import { ChecklistTable, type ChecklistRow } from '../components/onboarding/ChecklistTable';
 import { PostponeModal } from '../components/onboarding/PostponeModal';
 import { NotebookPanel } from '../components/notebook/NotebookPanel';
+import { DdMaterialsPanel } from '../components/onboarding/DdMaterialsPanel';
 import { getOrSeedOnboardingTemplate } from '../lib/seedOnboardingTemplate';
 import { todayStr } from '../lib/dates';
 import {
@@ -32,6 +33,13 @@ import {
   isTaskDone,
   isOverdue,
 } from '../lib/onboarding';
+
+/** The sub-tabs under each property, in display order. */
+const SUB_TABS = [
+  { key: 'checklist', label: 'Onboarding' },
+  { key: 'dd', label: 'DD Materials' },
+  { key: 'notebook', label: 'Notebook' },
+] as const;
 
 /** The editable milestone fields on a property, in display order. */
 const PROPERTY_DATES: { key: keyof OnboardingProperty; label: string }[] = [
@@ -58,7 +66,7 @@ export function OnboardingPropertiesPage() {
   const [propertiesError, setPropertiesError] = useState('');
   const [checklistError, setChecklistError] = useState('');
   const [showArchived, setShowArchived] = useState(false);
-  const [subTab, setSubTab] = useState<'checklist' | 'notebook'>('checklist');
+  const [subTab, setSubTab] = useState<'checklist' | 'dd' | 'notebook'>('checklist');
 
   const [showNewModal, setShowNewModal] = useState(false);
   const [newName, setNewName] = useState('');
@@ -476,23 +484,25 @@ export function OnboardingPropertiesPage() {
         </div>
       ) : (
         <>
-          {/* Checklist / Notebook sub-tabs */}
+          {/* Onboarding / DD Materials / Notebook sub-tabs */}
           <div className="inline-flex rounded-lg border border-gray-200 bg-gray-50 p-1">
-            {(['checklist', 'notebook'] as const).map((tab) => (
+            {SUB_TABS.map(({ key, label }) => (
               <button
-                key={tab}
-                onClick={() => setSubTab(tab)}
+                key={key}
+                onClick={() => setSubTab(key)}
                 className={`px-4 py-1.5 text-sm font-medium rounded-md transition-colors ${
-                  subTab === tab ? 'bg-brand-dark text-white shadow-sm' : 'text-gray-600 hover:text-gray-900'
+                  subTab === key ? 'bg-brand-dark text-white shadow-sm' : 'text-gray-600 hover:text-gray-900'
                 }`}
               >
-                {tab === 'checklist' ? 'Checklist' : 'Notebook'}
+                {label}
               </button>
             ))}
           </div>
 
           {subTab === 'notebook' ? (
             <NotebookPanel propertyId={property.id} />
+          ) : subTab === 'dd' ? (
+            <DdMaterialsPanel key={property.id} propertyId={property.id} propertyName={property.name} canEdit={canEdit} />
           ) : (
           <>
           {/* Property header */}

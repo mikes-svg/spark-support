@@ -65,7 +65,7 @@ const STATUS_STYLES: Record<OnboardingStatus, string> = {
  * A text cell that edits in place: it keeps a local draft while typing and
  * commits on blur or Enter, so a slow Firestore write never fights the cursor.
  */
-function EditableText({
+export function EditableText({
   value,
   onCommit,
   disabled,

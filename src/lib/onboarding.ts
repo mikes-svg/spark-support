@@ -11,7 +11,9 @@ import {
 import { db } from './firebase';
 import { addDaysStr, diffDaysStr } from './dates';
 import { hasOnboardingAccess } from '../types';
+import { DEFAULT_DD_ITEMS } from './ddMaterialsDefaults';
 import type {
+  OnboardingDdItem,
   OnboardingProperty,
   OnboardingTask,
   OnboardingTemplateItem,
@@ -21,6 +23,7 @@ import type {
 export const PROPERTIES = 'onboardingProperties';
 export const TASKS = 'onboardingTasks';
 export const TEMPLATE = 'onboardingTemplate';
+export const DD_ITEMS = 'onboardingDdItems';
 
 /** Firestore refuses batches larger than 500 writes; commit in chunks below it. */
 const BATCH_LIMIT = 400;
@@ -195,6 +198,7 @@ export async function applyClosingDate(
 export async function deletePropertyWithTasks(propertyId: string, tasks: OnboardingTask[]): Promise<void> {
   if (!db) throw new Error('Firestore is not configured.');
   await commitChunks(tasks, (batch, task) => batch.delete(doc(db!, TASKS, task.id)));
+  await deleteRows(DD_ITEMS, await fetchDdItems(propertyId));
   const batch = writeBatch(db);
   batch.delete(doc(db, PROPERTIES, propertyId));
   await batch.commit();
@@ -297,4 +301,37 @@ async function commitChunks<T>(
     }
   }
   if (dirty) await batch.commit();
+}
+
+/**
+ * A property's DD request list. Filtered on propertyId alone and sorted here,
+ * so it needs no composite index.
+ */
+export async function fetchDdItems(propertyId: string): Promise<OnboardingDdItem[]> {
+  if (!db) return [];
+  const snap = await getDocs(query(collection(db, DD_ITEMS), where('propertyId', '==', propertyId)));
+  return snap.docs
+    .map((d) => ({ id: d.id, ...d.data() } as OnboardingDdItem))
+    .sort((a, b) => a.order - b.order);
+}
+
+/**
+ * Copy the standard DD list into a property. Ids are derived from the property
+ * and position, so two people opening an empty tab at once write the same docs
+ * rather than doubling the list.
+ */
+export async function seedDdItems(propertyId: string): Promise<OnboardingDdItem[]> {
+  if (!db) throw new Error('Firestore is not configured.');
+  const items: OnboardingDdItem[] = DEFAULT_DD_ITEMS.map((item, i) => ({
+    id: `${propertyId}_dd_${i + 1}`,
+    propertyId,
+    order: (i + 1) * 100,
+    item,
+    status: 'Outstanding',
+    notes: '',
+  }));
+  await commitChunks(items, (batch, { id, ...data }) =>
+    batch.set(doc(db!, DD_ITEMS, id), { ...data, createdAt: serverTimestamp(), updatedAt: serverTimestamp() }),
+  );
+  return items;
 }

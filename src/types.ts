@@ -166,6 +166,23 @@ export interface OnboardingTask {
   delays?: OnboardingDelay[];
 }
 
+// ─── Due-diligence materials ─────────────────────────────────────────────────
+// The seller's DD request list, one row per document requested. Each property
+// gets its own copy of the standard list the first time its tab is opened.
+
+export type DdStatus = 'Outstanding' | 'To Review' | 'Complete' | 'N/A';
+
+export const DD_STATUSES: DdStatus[] = ['Outstanding', 'To Review', 'Complete', 'N/A'];
+
+export interface OnboardingDdItem {
+  id: string;
+  propertyId: string;
+  order: number;
+  item: string;
+  status: DdStatus;
+  notes: string;
+}
+
 // ─── Property notebooks ──────────────────────────────────────────────────────
 // One notebook per property, owned by its creator and private until shared.
 // `body` on a page is JSON.stringify(<TipTap doc>) — a string, so Firestore's

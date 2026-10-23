@@ -198,6 +198,12 @@ service cloud.firestore {
       allow write: if canEditOnboardingTasks();
     }
 
+    // Each property's due-diligence request list. Same access as its checklist.
+    match /onboardingDdItems/{itemId} {
+      allow read: if canReadOnboarding();
+      allow write: if canEditOnboardingTasks();
+    }
+
     // Property notebooks. One notebook per property, keyed by the property id,
     // owned by its creator and PRIVATE until shared — not even a superadmin sees
     // it unless they own it or it was shared with them. Every accessor must

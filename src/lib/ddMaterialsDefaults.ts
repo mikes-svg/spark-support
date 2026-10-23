@@ -1,0 +1,43 @@
+/**
+ * The standard due-diligence request list sent to a seller, copied into each
+ * property the first time its DD Materials tab is opened. Mirrors the "DD
+ * Checklist" sheet of the acquisition workbook.
+ */
+export const DEFAULT_DD_ITEMS: string[] = [
+  "The most recently completed ALTA survey of the Property, exception documents, violation notices, and all easements, liens, contracts and in place agreements affecting the Property.",
+  "The existing title policy for the Property.",
+  "A copy of all existing leases, along with any other lease documents still in use, including rental applications and contact information for all tenants (full name, phone number, and email address). Rental applications and contract information can be at Closing.",
+  "For all units governed by income restrictions (ie LIHTC), the following forms must be included with each lease:\n · 0420 – Household Income Certifications\n · 0422 – Employment Verification\n · 0423 – if applicable, Housing Choice Voucher Verification\n · 0430 – if applicable, 140% Verification\n · 0433 – if applicable, Student Verification\n · 0436 – if applicable, Zero Income Verification\n · 0485 – if applicable, Under $5,000 Asset Certification\n · 0489 – Continuing Residency Certification\n · 0427 – if applicable, Nonrevenue Form",
+  "Copy of the current Tenant Selection Criteria for the property including current Income Limits",
+  "Please denote which units meet Accessibility Requirements",
+  "Please note if any Supportive Services are provided by the property in connection with any LIHTC restrictions",
+  "Current rent roll or other report, detailing for current and future tenants security deposits per unit, unit number, unit type, square footage, resident name, current market rent, concessions, all monthly billables, vacant units, units undergoing an eviction, units with reserved parking, move-in date, lease expiration date, and move-out date.",
+  "Please denote units with Section 8, LIHTC or other governmental assistance. Please provide any supporting documents which pertain to affordable housing including rent restrictions, covenants and agreements, including documentation for the qualified contract process.",
+  "An accounting of all deposits on hand (refundable and non-refundable), including security, pet, key and any other deposits (separate totals for each category) (may be provided as part of the rent roll).",
+  "Operating Statements for the past 3 Calendar Years & Trailing Twelve Months for the Property.",
+  "All utility bills for the last 12 months for the Property (not individual units).",
+  "Utility Allowances (Current Year and Previous 3 Years)",
+  "A copy of all contracts, service agreements, and long term leases affecting the Property including, but not limited to, internet, cable, landscaping, pest control, billboard signage, equipment, laundry, elevator, security, alarm monitoring, etc.",
+  "Detailed cost breakdown of all capital expenditures in excess of $10,000.00 for last 5 years.",
+  "All licenses, permits, certificates of occupancy, building inspection approvals, and covenants, conditions and restrictions affecting the Property, including certification of fire inspections and any other city sanctioned property inspections.",
+  "Copies of all insurance claims in the past 5 years and the current insurance policy.",
+  "Copies of all warranties/guarantees for roofs, appliances, HVAC, pool equipment, elevators or any other building system currently in effect.",
+  "Schedule of any known litigation, actions, claims, lawsuits, etc. affecting the Property, including with respect to the Department of Fair Housing and HUD.",
+  "Documentation and invoices showing any aluminum wiring has been completely retrofitted",
+  "Any Flood Map amendment documents",
+  "Zoning and permitted use documentation",
+  "Pertinent environmental documentation – Phase 1, Phase II and Geotechnical reports",
+  "Existing contractor agreements, permits, permit applications and/or open permits and city submissions for ongoing work and building repairs including, but not limited to, work for vacant units.",
+  "Aged receivable/rent delinquency report",
+  "Tax returns for every year since inception of the partnership through most recent year-end\n- If previous year return has not been filed, please inform us immediately as it will be a post-close condition.",
+  "Audited financial statements for every year since PIS through most recent year-end\n- If audited financials are not available for any year or period, please provide the following:\n  Balance Sheet\n  Income Statement\n  Detailed general ledger of all balance sheet and income statement accounts",
+  "Most recent month-end:\n  Balance sheet\n  Income statement\n  Detailed general ledger of all balance sheet and income statement accounts",
+  "Form 8609’s with part II completed for all buildings",
+  "Any Form 8823s, if applicable",
+  "Current Annual Owner’s Certification, if applicable [Exhibit A]",
+  "Current Year Applicable Fraction Worksheet [Exhibit C]",
+  "Original Partnership Agreement (signed with the original tax credit investor) and any amendments",
+  "Final Cost Certification",
+  "Tax Credit Land Use Restriction Agreement / Restrictive Covenants",
+  "Appraisal, if previously prepared",
+];
