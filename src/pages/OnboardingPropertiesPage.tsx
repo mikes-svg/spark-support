@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { doc, updateDoc, setDoc, serverTimestamp, collection } from 'firebase/firestore';
 import { Plus, Archive, ArchiveRestore, Trash2, Building2, LayoutTemplate } from 'lucide-react';
@@ -13,11 +13,12 @@ import { ChecklistTable, type ChecklistRow } from '../components/onboarding/Chec
 import { PostponeModal } from '../components/onboarding/PostponeModal';
 import { NotebookPanel } from '../components/notebook/NotebookPanel';
 import { DdMaterialsPanel } from '../components/onboarding/DdMaterialsPanel';
-import { getOrSeedOnboardingTemplate } from '../lib/seedOnboardingTemplate';
+import { getOrSeedTemplate } from '../lib/seedOnboardingTemplate';
 import { todayStr } from '../lib/dates';
 import {
-  TASKS,
+  CHECKLISTS,
   PROPERTIES,
+  instantiateInspections,
   fetchProperties,
   fetchTasksForProperty,
   fetchOnboardingPeople,
@@ -32,11 +33,13 @@ import {
   orderBetween,
   isTaskDone,
   isOverdue,
+  type ChecklistKind,
 } from '../lib/onboarding';
 
 /** The sub-tabs under each property, in display order. */
 const SUB_TABS = [
-  { key: 'checklist', label: 'Onboarding' },
+  { key: 'onboarding', label: CHECKLISTS.onboarding.label },
+  { key: 'inspections', label: CHECKLISTS.inspections.label },
   { key: 'dd', label: 'DD Materials' },
   { key: 'notebook', label: 'Notebook' },
 ] as const;
@@ -66,7 +69,11 @@ export function OnboardingPropertiesPage() {
   const [propertiesError, setPropertiesError] = useState('');
   const [checklistError, setChecklistError] = useState('');
   const [showArchived, setShowArchived] = useState(false);
-  const [subTab, setSubTab] = useState<'checklist' | 'dd' | 'notebook'>('checklist');
+  const [subTab, setSubTab] = useState<(typeof SUB_TABS)[number]['key']>('onboarding');
+  // The two checklist tabs share everything below; this picks which list the
+  // tasks state, handlers, and template actions point at.
+  const kind: ChecklistKind = subTab === 'inspections' ? 'inspections' : 'onboarding';
+  const tasksCollection = CHECKLISTS[kind].tasks;
 
   const [showNewModal, setShowNewModal] = useState(false);
   const [newName, setNewName] = useState('');
@@ -83,6 +90,9 @@ export function OnboardingPropertiesPage() {
 
   const visibleProperties = properties.filter((p) => showArchived || !p.archived);
   const property = properties.find((p) => p.id === propertyId) ?? null;
+  // Read by the load effect without making a property edit refetch the list.
+  const latest = useRef({ property, people, canEdit });
+  latest.current = { property, people, canEdit };
 
   useEffect(() => {
     (async () => {
@@ -113,7 +123,14 @@ export function OnboardingPropertiesPage() {
     setTasksLoading(true);
     (async () => {
       try {
-        const rows = await fetchTasksForProperty(propertyId);
+        let rows = await fetchTasksForProperty(propertyId, kind);
+        // Properties that predate DD Inspections (or were created before its
+        // template existed) get the template copied in on first open.
+        const { property: current, people: peeps, canEdit: editor } = latest.current;
+        if (rows.length === 0 && kind === 'inspections' && editor) {
+          const template = await getOrSeedTemplate('inspections', peeps);
+          if (template.length > 0) rows = await instantiateInspections(propertyId, current?.closingDate ?? null, template);
+        }
         if (!cancelled) setTasks(rows);
       } catch (err) {
         console.error('Failed to load checklist:', err);
@@ -123,7 +140,7 @@ export function OnboardingPropertiesPage() {
       }
     })();
     return () => { cancelled = true; };
-  }, [propertyId]);
+  }, [propertyId, kind]);
 
   const today = useMemo(() => todayStr(), []);
   const doneCount = tasks.filter(isTaskDone).length;
@@ -135,7 +152,7 @@ export function OnboardingPropertiesPage() {
     setActionError('');
     setTasks((prev) => prev.map((t) => (t.id === task.id ? { ...t, ...patch } : t)));
     try {
-      await updateDoc(doc(db, TASKS, task.id), { ...patch, updatedAt: serverTimestamp() });
+      await updateDoc(doc(db, tasksCollection, task.id), { ...patch, updatedAt: serverTimestamp() });
     } catch (err) {
       console.error('Failed to update task:', err);
       setTasks((prev) => prev.map((t) => (t.id === task.id ? task : t)));
@@ -198,7 +215,7 @@ export function OnboardingPropertiesPage() {
     const before = sorted[index] ?? null;
     const after = sorted[index + 1] ?? null;
     const newTask: OnboardingTask = {
-      id: doc(collection(db, TASKS)).id,
+      id: doc(collection(db, tasksCollection)).id,
       propertyId,
       section,
       order: orderBetween(before?.order ?? null, after?.order ?? null),
@@ -216,7 +233,7 @@ export function OnboardingPropertiesPage() {
     setTasks((prev) => [...prev, newTask]);
     try {
       const { id, ...data } = newTask;
-      await setDoc(doc(db, TASKS, id), { ...data, createdAt: serverTimestamp() });
+      await setDoc(doc(db, tasksCollection, id), { ...data, createdAt: serverTimestamp() });
     } catch (err) {
       console.error('Failed to add row:', err);
       setTasks((prev) => prev.filter((t) => t.id !== newTask.id));
@@ -247,8 +264,8 @@ export function OnboardingPropertiesPage() {
     );
     try {
       await Promise.all([
-        updateDoc(doc(db, TASKS, task.id), { order: neighbour.order, updatedAt: serverTimestamp() }),
-        updateDoc(doc(db, TASKS, neighbour.id), { order: task.order, updatedAt: serverTimestamp() }),
+        updateDoc(doc(db, tasksCollection, task.id), { order: neighbour.order, updatedAt: serverTimestamp() }),
+        updateDoc(doc(db, tasksCollection, neighbour.id), { order: task.order, updatedAt: serverTimestamp() }),
       ]);
     } catch (err) {
       console.error('Failed to reorder tasks:', err);
@@ -268,7 +285,7 @@ export function OnboardingPropertiesPage() {
     setActionError('');
     setTasks((prev) => prev.map((t) => (t.section === from ? { ...t, section: to } : t)));
     try {
-      await renameSection(TASKS, tasks, from, to);
+      await renameSection(tasksCollection, tasks, from, to);
     } catch (err) {
       console.error('Failed to rename section:', err);
       setTasks(previous);
@@ -285,7 +302,7 @@ export function OnboardingPropertiesPage() {
     setActionError('');
     setTasks((prev) => prev.filter((t) => t.section !== section));
     try {
-      await deleteRows(TASKS, doomed);
+      await deleteRows(tasksCollection, doomed);
     } catch (err) {
       console.error('Failed to delete section:', err);
       setTasks(previous);
@@ -301,7 +318,7 @@ export function OnboardingPropertiesPage() {
     setActionError('');
     setTasks((prev) => prev.filter((t) => t.id !== target.id));
     try {
-      await deleteRows(TASKS, [target]);
+      await deleteRows(tasksCollection, [target]);
     } catch (err) {
       console.error('Failed to delete task:', err);
       setTasks(previous);
@@ -339,8 +356,8 @@ export function OnboardingPropertiesPage() {
     setActionError('');
     setProperties((prev) => prev.map((p) => (p.id === property.id ? { ...p, closingDate: nextClosing } : p)));
     try {
-      const updated = await applyClosingDate(property.id, nextClosing, tasks);
-      setTasks(updated);
+      const updated = await applyClosingDate(property.id, nextClosing);
+      setTasks(updated[kind]);
     } catch (err) {
       console.error('Failed to apply the closing date:', err);
       setProperties((prev) => prev.map((p) => (p.id === property.id ? previousProperty : p)));
@@ -354,13 +371,21 @@ export function OnboardingPropertiesPage() {
     setCreating(true);
     setActionError('');
     try {
-      const template = await getOrSeedOnboardingTemplate(people);
+      const template = await getOrSeedTemplate('onboarding', people);
       const { property: created, tasks: createdTasks } = await createPropertyFromTemplate(
         { name: newName.trim(), closingDate: newClosingDate || null },
         template,
         user.id,
       );
+      try {
+        const inspections = await getOrSeedTemplate('inspections', people);
+        if (inspections.length > 0) await instantiateInspections(created.id, created.closingDate, inspections);
+      } catch (err) {
+        // Not fatal: the DD Inspections tab copies the template in on first open.
+        console.warn('Could not copy the inspections template into the new property:', err);
+      }
       setProperties((prev) => [...prev, created]);
+      setSubTab('onboarding');
       setTasks(createdTasks);
       setShowNewModal(false);
       setNewName('');
@@ -382,8 +407,7 @@ export function OnboardingPropertiesPage() {
     setActionError('');
     setProperties((prev) => prev.filter((p) => p.id !== target.id));
     try {
-      const doomedTasks = target.id === propertyId ? tasks : await fetchTasksForProperty(target.id);
-      await deletePropertyWithTasks(target.id, doomedTasks);
+      await deletePropertyWithTasks(target.id);
       if (target.id === propertyId) navigate('/onboarding/properties', { replace: true });
     } catch (err) {
       console.error('Failed to delete property:', err);
@@ -400,8 +424,8 @@ export function OnboardingPropertiesPage() {
     setActionError('');
     setSuccessNotice('');
     try {
-      await savePropertyChecklistAsTemplate(tasks);
-      setSuccessNotice(`The checklist template was replaced with “${target.name}”. New properties will start from it; existing ones are unchanged.`);
+      await savePropertyChecklistAsTemplate(tasks, kind);
+      setSuccessNotice(`The ${CHECKLISTS[kind].label} template was replaced with “${target.name}”. New properties will start from it; existing ones are unchanged.`);
     } catch (err) {
       console.error('Failed to save checklist as template:', err);
       setActionError('Could not save this checklist as the template. Please try again.');
@@ -484,7 +508,7 @@ export function OnboardingPropertiesPage() {
         </div>
       ) : (
         <>
-          {/* Onboarding / DD Materials / Notebook sub-tabs */}
+          {/* PM Onboarding / DD Inspections / DD Materials / Notebook sub-tabs */}
           <div className="inline-flex rounded-lg border border-gray-200 bg-gray-50 p-1">
             {SUB_TABS.map(({ key, label }) => (
               <button
@@ -520,7 +544,7 @@ export function OnboardingPropertiesPage() {
                   <button
                     onClick={() => { setSuccessNotice(''); setSaveTemplateTarget(property); }}
                     disabled={savingTemplate || tasks.length === 0}
-                    title="Replace the master checklist template with this property's checklist"
+                    title={`Replace the master ${CHECKLISTS[kind].label} template with this property's checklist`}
                     className="inline-flex items-center px-3 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 shadow-sm transition-colors disabled:opacity-50"
                   >
                     <LayoutTemplate className="h-4 w-4 mr-2" />
@@ -622,7 +646,7 @@ export function OnboardingPropertiesPage() {
       <Modal open={showNewModal} onClose={() => setShowNewModal(false)} labelledBy="new-property-title" widthClass="max-w-md">
         <div className="px-6 py-5 border-b border-gray-200">
           <h3 id="new-property-title" className="text-lg font-serif font-semibold text-gray-900">New Property</h3>
-          <p className="mt-1 text-sm text-gray-500">The full template checklist is copied in, ready to customize.</p>
+          <p className="mt-1 text-sm text-gray-500">The PM Onboarding and DD Inspections templates are copied in, ready to customize.</p>
         </div>
         <div className="p-6 space-y-4">
           <div>
@@ -673,7 +697,7 @@ export function OnboardingPropertiesPage() {
         title="Save Checklist as Template"
         message={
           saveTemplateTarget
-            ? `Replace the master checklist template with “${saveTemplateTarget.name}”'s checklist (${tasks.length} rows)? The sections, items, responsibilities, and days-from-closing carry over — notes, statuses, and due dates are cleared. This overwrites the current template and can't be undone, but existing properties keep their checklists.`
+            ? `Replace the master ${CHECKLISTS[kind].label} template with “${saveTemplateTarget.name}”'s checklist (${tasks.length} rows)? The sections, items, responsibilities, and days-from-closing carry over — notes, statuses, and due dates are cleared. This overwrites the current template and can't be undone, but existing properties keep their checklists.`
             : ''
         }
         confirmLabel="Replace Template"
@@ -708,7 +732,7 @@ export function OnboardingPropertiesPage() {
         title="Delete Property"
         message={
           deletePropertyTarget
-            ? `Delete “${deletePropertyTarget.name}” and its entire checklist? This can't be undone — consider archiving instead.`
+            ? `Delete “${deletePropertyTarget.name}” and all of its checklists? This can't be undone — consider archiving instead.`
             : ''
         }
         confirmLabel="Delete"

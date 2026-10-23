@@ -8,12 +8,14 @@ import type { OnboardingTemplateItem, Profile } from '../types';
 import { PageSpinner } from '../components/PageSpinner';
 import { ConfirmModal } from '../components/ConfirmModal';
 import { ChecklistTable, type ChecklistRow } from '../components/onboarding/ChecklistTable';
-import { getOrSeedOnboardingTemplate } from '../lib/seedOnboardingTemplate';
-import { TEMPLATE, fetchOnboardingPeople, orderBetween, renameSection, deleteRows } from '../lib/onboarding';
+import { getOrSeedTemplate } from '../lib/seedOnboardingTemplate';
+import { CHECKLISTS, fetchOnboardingPeople, orderBetween, renameSection, deleteRows, type ChecklistKind } from '../lib/onboarding';
 
-export function OnboardingTemplatePage() {
+/** The master template for one of a property's checklists (PM onboarding or DD inspections). */
+export function OnboardingTemplatePage({ kind = 'onboarding' }: { kind?: ChecklistKind }) {
   const { user } = useAuth();
   const canEdit = isSuperadminRole(user?.role);
+  const templateCollection = CHECKLISTS[kind].template;
 
   const [people, setPeople] = useState<Profile[]>([]);
   const [items, setItems] = useState<OnboardingTemplateItem[]>([]);
@@ -32,7 +34,7 @@ export function OnboardingTemplatePage() {
     (async () => {
       try {
         const peeps = await fetchOnboardingPeople();
-        const template = await getOrSeedOnboardingTemplate(peeps);
+        const template = await getOrSeedTemplate(kind, peeps);
         setPeople(peeps);
         setItems(template);
       } catch (err) {
@@ -42,7 +44,7 @@ export function OnboardingTemplatePage() {
         setLoading(false);
       }
     })();
-  }, [reloadKey]);
+  }, [reloadKey, kind]);
 
   const sectionCount = new Set(items.map((i) => i.section)).size;
 
@@ -51,7 +53,7 @@ export function OnboardingTemplatePage() {
     setActionError('');
     setItems((prev) => prev.map((i) => (i.id === item.id ? { ...i, ...patch } : i)));
     try {
-      await updateDoc(doc(db, TEMPLATE, item.id), { ...patch, updatedAt: serverTimestamp() });
+      await updateDoc(doc(db, templateCollection, item.id), { ...patch, updatedAt: serverTimestamp() });
     } catch (err) {
       console.error('Failed to update row:', err);
       setItems((prev) => prev.map((i) => (i.id === item.id ? item : i)));
@@ -73,7 +75,7 @@ export function OnboardingTemplatePage() {
     const before = sorted[index] ?? null;
     const after = sorted[index + 1] ?? null;
     const newItem: OnboardingTemplateItem = {
-      id: doc(collection(db, TEMPLATE)).id,
+      id: doc(collection(db, templateCollection)).id,
       section,
       order: orderBetween(before?.order ?? null, after?.order ?? null),
       code: '',
@@ -86,7 +88,7 @@ export function OnboardingTemplatePage() {
     setItems((prev) => [...prev, newItem]);
     try {
       const { id, ...data } = newItem;
-      await setDoc(doc(db, TEMPLATE, id), { ...data, createdAt: serverTimestamp() });
+      await setDoc(doc(db, templateCollection, id), { ...data, createdAt: serverTimestamp() });
     } catch (err) {
       console.error('Failed to add row:', err);
       setItems((prev) => prev.filter((i) => i.id !== newItem.id));
@@ -117,8 +119,8 @@ export function OnboardingTemplatePage() {
     );
     try {
       await Promise.all([
-        updateDoc(doc(db, TEMPLATE, item.id), { order: neighbour.order, updatedAt: serverTimestamp() }),
-        updateDoc(doc(db, TEMPLATE, neighbour.id), { order: item.order, updatedAt: serverTimestamp() }),
+        updateDoc(doc(db, templateCollection, item.id), { order: neighbour.order, updatedAt: serverTimestamp() }),
+        updateDoc(doc(db, templateCollection, neighbour.id), { order: item.order, updatedAt: serverTimestamp() }),
       ]);
     } catch (err) {
       console.error('Failed to reorder rows:', err);
@@ -138,7 +140,7 @@ export function OnboardingTemplatePage() {
     setActionError('');
     setItems((prev) => prev.map((i) => (i.section === from ? { ...i, section: to } : i)));
     try {
-      await renameSection(TEMPLATE, items, from, to);
+      await renameSection(templateCollection, items, from, to);
     } catch (err) {
       console.error('Failed to rename section:', err);
       setItems(previous);
@@ -155,7 +157,7 @@ export function OnboardingTemplatePage() {
     setActionError('');
     setItems((prev) => prev.filter((i) => i.section !== section));
     try {
-      await deleteRows(TEMPLATE, doomed);
+      await deleteRows(templateCollection, doomed);
     } catch (err) {
       console.error('Failed to delete section:', err);
       setItems(previous);
@@ -171,7 +173,7 @@ export function OnboardingTemplatePage() {
     setActionError('');
     setItems((prev) => prev.filter((i) => i.id !== target.id));
     try {
-      await deleteRows(TEMPLATE, [target]);
+      await deleteRows(templateCollection, [target]);
     } catch (err) {
       console.error('Failed to delete row:', err);
       setItems(previous);
@@ -215,7 +217,7 @@ export function OnboardingTemplatePage() {
           explanation rather than repeating "Checklist Template" as a second headline. */}
       <div className="bg-white shadow-sm rounded-xl border border-gray-200 p-6 space-y-2">
         <p className="text-sm text-gray-500">
-          This is the master checklist copied into every new property when it's created.
+          This is the master {CHECKLISTS[kind].label} checklist copied into every new property when it's created.
         </p>
         <p className="text-sm text-brand-dark font-medium">
           Edits here only apply to properties created after the change — existing properties keep

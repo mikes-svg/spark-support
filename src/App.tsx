@@ -222,6 +222,14 @@ export function App() {
                 </ProtectedRoute>
               }
             />
+            <Route
+              path="onboarding/inspections-template"
+              element={
+                <ProtectedRoute requireSuperadmin>
+                  <OnboardingTemplatePage key="inspections" kind="inspections" />
+                </ProtectedRoute>
+              }
+            />
 
             <Route path="*" element={<NotFoundPage />} />
           </Route>

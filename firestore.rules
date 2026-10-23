@@ -198,6 +198,18 @@ service cloud.firestore {
       allow write: if canEditOnboardingTasks();
     }
 
+    // DD inspections: a second checklist per property with its own template,
+    // gated exactly like the onboarding template and tasks above.
+    match /inspectionTemplate/{itemId} {
+      allow read: if canReadOnboarding();
+      allow write: if isSuperAdmin();
+    }
+
+    match /inspectionTasks/{taskId} {
+      allow read: if canReadOnboarding();
+      allow write: if canEditOnboardingTasks();
+    }
+
     // Each property's due-diligence request list. Same access as its checklist.
     match /onboardingDdItems/{itemId} {
       allow read: if canReadOnboarding();
