@@ -97,3 +97,10 @@ exports.backfillAdminIds = adminIds.backfillAdminIds;
 // Sequential sign-off chains: advancing the baton and closing the task on the
 // final sign-off happen server-side so a closed laptop cannot strand a task.
 exports.onTaskStageAdvanced = taskStages.onTaskStageAdvanced;
+
+// Deploy stamp. Firebase skips a function whose source hash is unchanged, so a
+// redeploy aimed at replacing a wedged Cloud Run revision does nothing at all —
+// every function comes back "Skipped (No changes detected)". Bumping this forces
+// a fresh build and a new revision. Last forced: 2026-10-22, to recover from an
+// ingress outage where every request returned 500 in 0ms without reaching the
+// container.

@@ -20,6 +20,8 @@ const { admin, db, REGION } = require('./shared');
 // looking perfectly correct in source and resolving fine outside the emulator.
 // That made the emulator untrustworthy for exactly the paths most worth testing.
 const { FieldValue } = require('firebase-admin/firestore');
+const logger = require('firebase-functions/logger');
+const { migrateReferences } = require('./profileMigration');
 
 // ─── Role assignment (server-authoritative) ──────────────────────────────────
 // Roles are decided HERE, never by the client, so an authenticated user can't
@@ -120,11 +122,22 @@ exports.ensureProfile = onCall({ region: REGION }, async (request) => {
   if (firstTime) data.createdAt = FieldValue.serverTimestamp();
   await profileRef.set(data, { merge: true });
 
-  // Migrate then remove pre-reg duplicates.
+  // Migrate then remove pre-reg duplicates. Everything assigned to the invited
+  // slug id follows the person onto their real UID first; deleting the slug
+  // without that strands their work (see profileMigration.js). A migration
+  // failure is logged, not thrown — the person must still be able to sign in,
+  // and the slug doc is kept so the next sign-in retries the rewrite.
   if (dupes.length) {
-    const batch = db.batch();
-    dupes.forEach((d) => batch.delete(d.ref));
-    await batch.commit();
+    const dupeIds = dupes.map((d) => d.id);
+    try {
+      const moved = await migrateReferences(db, dupeIds, uid);
+      if (Object.keys(moved).length) logger.info('ensureProfile: moved references to new uid', { uid, from: dupeIds, moved });
+      const batch = db.batch();
+      dupes.forEach((d) => batch.delete(d.ref));
+      await batch.commit();
+    } catch (err) {
+      logger.error('ensureProfile: reference migration failed; keeping pre-reg profile for retry', { uid, from: dupeIds, err: String(err) });
+    }
   }
 
   return { id: uid, name, email, photoURL, role, onboardingAccess, tasksAccess };

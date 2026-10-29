@@ -17,3 +17,6 @@ dev-dist/
 # Local function secrets (Google Calendar OAuth, etc.)
 functions/.env.local
 functions/.env
+
+# ClickUp API token for the one-off import (scripts/import-clickup-api.js)
+scripts/clickup-token.local
