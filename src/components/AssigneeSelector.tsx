@@ -20,9 +20,11 @@ interface Props {
   lockedIds?: string[];
   /** Tooltip shown when a locked id is clicked. */
   lockedReason?: string;
+  /** Render only the list, in normal flow, with no trigger button; the parent controls visibility. */
+  inline?: boolean;
 }
 
-export function AssigneeSelector({ value, onChange, admins, disabled, variant = 'full', placeholder = 'Unassigned', emptyLabel = 'No admins available', lockedIds = [], lockedReason }: Props) {
+export function AssigneeSelector({ value, onChange, admins, disabled, variant = 'full', placeholder = 'Unassigned', emptyLabel = 'No admins available', lockedIds = [], lockedReason, inline }: Props) {
   const [open, setOpen] = useState(false);
   // Type-to-filter. AssigneeChips already had this; the dropdown did not, so
   // picking someone on a team of any size meant scrolling and reading.
@@ -35,6 +37,17 @@ export function AssigneeSelector({ value, onChange, admins, disabled, variant = 
     };
     if (open) document.addEventListener('mousedown', handler);
     return () => document.removeEventListener('mousedown', handler);
+  }, [open]);
+
+  // Escape closes the list. Capture phase + stopPropagation so an enclosing
+  // Modal's own Escape handler doesn't also close the whole dialog.
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') { e.stopPropagation(); setOpen(false); }
+    };
+    document.addEventListener('keydown', handler, true);
+    return () => document.removeEventListener('keydown', handler, true);
   }, [open]);
 
   const toggle = (id: string) => {
@@ -55,9 +68,11 @@ export function AssigneeSelector({ value, onChange, admins, disabled, variant = 
     ? sorted.filter((a) => (a.name || '').toLowerCase().includes(term) || (a.email || '').toLowerCase().includes(term))
     : sorted;
 
+  const effectiveOpen = inline || open;
+
   return (
-    <div className="relative inline-block w-full" ref={ref}>
-      <button
+    <div className={inline ? '' : 'relative inline-block w-full'} ref={ref}>
+      {!inline && (<button
         type="button"
         disabled={disabled}
         onClick={(e) => {
@@ -92,9 +107,9 @@ export function AssigneeSelector({ value, onChange, admins, disabled, variant = 
           )}
         </div>
         <ChevronDown className="h-4 w-4 text-gray-400 flex-shrink-0" />
-      </button>
-      {open && (
-        <div className="absolute z-20 mt-1 bg-white border border-gray-200 rounded-md shadow-lg py-1 max-h-72 overflow-y-auto min-w-[220px] left-0 right-0 md:right-auto md:w-64">
+      </button>)}
+      {effectiveOpen && (
+        <div className={`bg-white border border-gray-200 rounded-md shadow-lg py-1 max-h-72 overflow-y-auto min-w-[220px]${inline ? '' : ' absolute z-20 mt-1 left-0 right-0 md:right-auto md:w-64'}`}>
           {admins.length > 5 && (
             // Only worth the row when the list is long enough to scan badly.
             <div className="sticky top-0 bg-white px-2 pt-1 pb-2 border-b border-gray-100">
