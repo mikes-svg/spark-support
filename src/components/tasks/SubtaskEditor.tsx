@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { Plus, Trash2, ChevronUp, ChevronDown, GitBranch } from 'lucide-react';
 import type { Profile, Subtask } from '../../types';
 import { AssigneeSelector } from '../AssigneeSelector';
@@ -37,6 +37,22 @@ function reindex(items: Subtask[]): Subtask[] {
 export function SubtaskEditor({ subtasks, canEdit, people, onToggle, onChange }: SubtaskEditorProps) {
   const [newTitle, setNewTitle] = useState('');
   const [openAssigneeId, setOpenAssigneeId] = useState<string | null>(null);
+  const assigneeRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!openAssigneeId) return;
+    const onMouseDown = (e: MouseEvent) => {
+      if (assigneeRef.current && !assigneeRef.current.contains(e.target as Node)) setOpenAssigneeId(null);
+    };
+    // Capture phase + stopPropagation: Escape closes this list, not the
+    // New Task modal around it.
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') { e.stopPropagation(); setOpenAssigneeId(null); }
+    };
+    document.addEventListener('mousedown', onMouseDown);
+    document.addEventListener('keydown', onKeyDown, true);
+    return () => { document.removeEventListener('mousedown', onMouseDown); document.removeEventListener('keydown', onKeyDown, true); };
+  }, [openAssigneeId]);
 
   const sorted = [...subtasks].sort((a, b) => a.order - b.order);
   const done = sorted.filter((s) => s.done).length;
@@ -70,6 +86,7 @@ export function SubtaskEditor({ subtasks, canEdit, people, onToggle, onChange }:
 
   const handleAssigneesChange = (id: string, ids: string[]) => {
     commit(sorted.map((s) => (s.id === id ? { ...s, assigneeIds: ids } : s)));
+    setOpenAssigneeId(null);
   };
 
   const handleDueDateChange = (id: string, dueDate: string) => {
@@ -142,9 +159,9 @@ export function SubtaskEditor({ subtasks, canEdit, people, onToggle, onChange }:
               </div>
 
               {(canEdit || assignees.length > 0 || s.dueDate) && (
-                <div className="mt-1.5 flex flex-wrap items-center gap-2 pl-7">
+                <div ref={openAssigneeId === s.id ? assigneeRef : undefined} className="mt-1.5 flex flex-wrap items-center gap-2 pl-7">
                   {canEdit && people && people.length > 0 ? (
-                    <div className="relative w-40">
+                    <div className="w-40">
                       <button
                         type="button"
                         onClick={() => setOpenAssigneeId(openAssigneeId === s.id ? null : s.id)}
@@ -152,16 +169,6 @@ export function SubtaskEditor({ subtasks, canEdit, people, onToggle, onChange }:
                       >
                         {assignees.length > 0 ? assignees.map((a) => a.name.split(' ')[0]).join(', ') : '+ assignee'}
                       </button>
-                      {openAssigneeId === s.id && (
-                        <div className="absolute z-10 mt-1 w-56">
-                          <AssigneeSelector
-                            value={s.assigneeIds ?? []}
-                            onChange={(ids) => handleAssigneesChange(s.id, ids)}
-                            admins={people}
-                            variant="compact"
-                          />
-                        </div>
-                      )}
                     </div>
                   ) : (
                     assignees.length > 0 && (
@@ -177,6 +184,21 @@ export function SubtaskEditor({ subtasks, canEdit, people, onToggle, onChange }:
                     />
                   ) : (
                     s.dueDate && <span className="text-xs text-gray-500">Due {s.dueDate}</span>
+                  )}
+                  {/* In normal flow on its own line, so the open list pushes the
+                      rows below down instead of covering their inputs. */}
+                  {canEdit && people && people.length > 0 && openAssigneeId === s.id && (
+                    <div className="basis-full">
+                      <div className="w-56">
+                        <AssigneeSelector
+                          value={s.assigneeIds ?? []}
+                          onChange={(ids) => handleAssigneesChange(s.id, ids)}
+                          admins={people}
+                          variant="compact"
+                          inline
+                        />
+                      </div>
+                    </div>
                   )}
                 </div>
               )}
