@@ -25,6 +25,8 @@ const {
   REGION,
   APP_URL,
   getAssigneeIds,
+  departmentMemberIds,
+  ticketParticipants,
   escapeHtml,
   emailsForAssignees,
   sendMail,
@@ -33,6 +35,30 @@ const {
 /** Absolute URL to a ticket detail page. */
 function ticketLink(ticketId) {
   return `${APP_URL}/tickets/${ticketId}`;
+}
+
+/**
+ * Tell the members of the ticket's department it has landed in their queue.
+ * `alreadyMailed` is the set of addresses the caller has just written to as
+ * assignees, so nobody gets the same ticket twice in one change.
+ */
+async function notifyDepartment(ticket, ticketId, alreadyMailed = []) {
+  const departmentId = ticket.departmentId;
+  if (!departmentId) return;
+  const deptSnap = await db.collection('departments').doc(departmentId).get();
+  if (!deptSnap.exists) return;
+  const dept = deptSnap.data();
+  const memberIds = Array.isArray(dept.memberIds) ? dept.memberIds.filter(Boolean) : [];
+  const emails = (await emailsForAssignees(memberIds)).filter((e) => !alreadyMailed.includes(e));
+  const safeTitle = escapeHtml(ticket.title);
+  const safeDept = escapeHtml(dept.name || 'your department');
+  for (const email of emails) {
+    await sendMail(
+      email,
+      `${ticketId} routed to ${dept.name || 'your department'}: ${ticket.title}`,
+      `<p>Ticket <strong>${ticketId}</strong> — ${safeTitle} — has been routed to <strong>${safeDept}</strong>. Anyone in the department can pick it up.</p><p><a href="${ticketLink(ticketId)}">View ticket →</a></p>`,
+    );
+  }
 }
 
 exports.sendTicketReminders = onSchedule(
@@ -140,8 +166,11 @@ exports.activateScheduledTickets = onSchedule(
       try {
         const ticket = ticketDoc.data();
         const assigneeIds = getAssigneeIds(ticket);
-        const participants = [...new Set([ticket.submitterId, ...assigneeIds].filter(Boolean))];
-        const emails = await emailsForAssignees(assigneeIds);
+        // Department members come onto the ticket now too, exactly as
+        // assignees do — they were kept off it while it was scheduled.
+        const memberIds = await departmentMemberIds(ticket.departmentId);
+        const participants = ticketParticipants({ ...ticket, status: 'Open' }, memberIds);
+        const emails = await emailsForAssignees([...new Set([...assigneeIds, ...memberIds])]);
         const title = escapeHtml(ticket.title);
 
         // One atomic batch: status flip + audit event + every assignee email.
@@ -242,6 +271,9 @@ exports.onTicketCreated = onDocumentCreated(
           `<p>A new support request has been assigned to you.</p><p><strong>${ticketId}</strong> — ${safeTitle}</p><p><a href="${link}">View ticket →</a></p>`,
         );
       }
+      // Routed to a department on submission (a request type's default): tell
+      // its members, minus anyone already mailed above as an assignee.
+      await notifyDepartment(ticket, ticketId, emails);
     } catch (err) {
       logger.error(`onTicketCreated mail failed for ${ticketId}`, err);
     }
@@ -285,6 +317,14 @@ exports.onTicketUpdated = onDocumentUpdated(
             `${ticketId} has been assigned to you`,
             `<p>Ticket <strong>${ticketId}</strong> — ${safeTitle} — has been assigned to you.</p><p><a href="${link}">View ticket →</a></p>`,
           );
+        }
+
+        // Routed to a (different) department → notify its members, minus
+        // anyone just mailed as a new assignee.
+        const beforeDept = before.departmentId || null;
+        const afterDept = after.departmentId || null;
+        if (afterDept && afterDept !== beforeDept) {
+          await notifyDepartment(after, ticketId, emails);
         }
       }
     } catch (err) {

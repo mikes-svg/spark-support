@@ -44,11 +44,30 @@ export interface Ticket {
   priority: TicketPriority;
   assigneeIds?: string[];
   assigneeId?: string | null;
+  /**
+   * The department this ticket is routed to, if any. Routing to a department
+   * puts every member on the ticket (see `ticketParticipants`) so any of them
+   * can pick it up, instead of one named person owning it from the start.
+   */
+  departmentId?: string | null;
   submitterId: string;
   participants?: string[];
   createdAt: FsTimestamp;
   updatedAt?: FsTimestamp;
   scheduledFor?: FsTimestamp | null;
+}
+
+/**
+ * A department: a named group of people a ticket can be routed to. Managed
+ * from the Team page by Administrators. Membership is the only thing that
+ * matters about it — a ticket routed here is visible to, and workable by,
+ * every member.
+ */
+export interface Department {
+  id: string;
+  name: string;
+  memberIds: string[];
+  createdAt?: FsTimestamp;
 }
 
 /**
@@ -229,6 +248,31 @@ export function getAssigneeIds(ticket: { assigneeIds?: string[] | null; assignee
   if (Array.isArray(ticket.assigneeIds)) return ticket.assigneeIds.filter(Boolean);
   if (ticket.assigneeId) return [ticket.assigneeId];
   return [];
+}
+
+/** The department a ticket is routed to, or null. Tolerates the field being absent on old tickets. */
+export function getDepartmentId(ticket: { departmentId?: string | null }): string | null {
+  return ticket.departmentId || null;
+}
+
+/**
+ * Who can see a ticket: the submitter, every individual assignee, and every
+ * member of the department it is routed to.
+ *
+ * The participants array is what firestore.rules and the My Tickets query
+ * read, so department routing works by denormalising the members into it.
+ * The departments Cloud Function re-runs this whenever membership changes.
+ *
+ * A Scheduled ticket keeps everyone but the submitter OUT until it goes live —
+ * the activation function adds (and notifies) them on the go-live date.
+ */
+export function ticketParticipants(
+  ticket: { submitterId: string; status?: string | null },
+  assigneeIds: string[],
+  departmentMemberIds: string[] = [],
+): string[] {
+  if (isScheduled(ticket)) return [ticket.submitterId];
+  return [...new Set([ticket.submitterId, ...assigneeIds, ...departmentMemberIds].filter(Boolean))];
 }
 
 /** Backward-compat: read default assignees as an array, supporting old `defaultAssigneeId` string field. */

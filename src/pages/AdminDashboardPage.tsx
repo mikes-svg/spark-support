@@ -19,18 +19,25 @@ import { useAuth } from '../context/AuthContext';
 import { Filter, AlertCircle, CheckCircle2, Clock, RefreshCw, Search, X } from 'lucide-react';
 import { ConfirmModal } from '../components/ConfirmModal';
 import { AssigneeSelector } from '../components/AssigneeSelector';
+import { DepartmentSelect } from '../components/DepartmentSelect';
 import { StatusBadge } from '../components/Badges';
 import { Avatar } from '../components/Avatar';
-import { getAssigneeIds, isSuperadminRole } from '../types';
-import type { TicketStatus, TicketPriority, Ticket, Profile } from '../types';
+import { getAssigneeIds, getDepartmentId, isSuperadminRole, ticketParticipants } from '../types';
+import type { TicketStatus, TicketPriority, Ticket, Profile, Department } from '../types';
 import { formatDate, formatDateTime } from '../lib/dates';
 import { makeTicketMatcher } from '../lib/ticketSearch';
 import { lockedAssigneeIds, LAST_MANAGER_MESSAGE } from '../lib/ticketAssignees';
+import { loadDepartments, departmentMemberIds } from '../lib/departments';
 import {
   updateTicketStatus,
   updateTicketPriority,
   updateTicketAssignees,
+  updateTicketDepartment,
 } from '../lib/ticketEvents';
+
+// Prefix for a department choice in the assignee filter, which otherwise holds
+// people's ids. A department is a queue of its own, so it filters the same way.
+const DEPT_FILTER = 'dept:';
 
 const STATUSES: TicketStatus[] = ['Open', 'In Progress', 'On Hold', 'Resolved'];
 const PRIORITIES: TicketPriority[] = ['Low', 'Medium', 'High', 'Urgent'];
@@ -59,6 +66,7 @@ export function AdminDashboardPage() {
   // Tickets can be delegated to a User now; the accountability guard is that a
   // Manager must remain assigned, not that only Managers can be.
   const [assignableProfiles, setAssignableProfiles] = useState<Profile[]>([]);
+  const [departments, setDepartments] = useState<Department[]>([]);
   const [requestTypes, setRequestTypes] = useState<string[]>([]);
   const [counts, setCounts] = useState<Counts | null>(null);
   const [loading, setLoading] = useState(true);
@@ -239,6 +247,7 @@ export function AdminDashboardPage() {
         setRequestTypes(rtSnap.docs.map((d) => d.data().name as string).sort());
         const peopleSnap = await getDocs(collection(database, 'profiles'));
         setAssignableProfiles(peopleSnap.docs.map((d) => ({ id: d.id, ...d.data() } as Profile)));
+        setDepartments(await loadDepartments());
       } catch (err) {
         console.error('Failed to load admin directory/types:', err);
       }
@@ -266,6 +275,7 @@ export function AdminDashboardPage() {
     | { type: 'status'; ticket: Ticket; value: TicketStatus }
     | { type: 'priority'; ticket: Ticket; value: TicketPriority }
     | { type: 'assignees'; ticket: Ticket; value: string[] }
+    | { type: 'department'; ticket: Ticket; value: string | null }
     | null
   >(null);
 
@@ -279,6 +289,13 @@ export function AdminDashboardPage() {
       const names = value.map((id) => assignableProfiles.find((a) => a.id === id)?.name || 'Unknown').join(', ');
       return `Set assignees for ${ticket.id} to: ${names}?`;
     }
+    if (pendingChange.type === 'department') {
+      const { ticket, value } = pendingChange;
+      if (!value) return `Take ${ticket.id} off its department? Its members will stop seeing it unless assigned individually.`;
+      const dept = departments.find((d) => d.id === value);
+      const count = dept?.memberIds.length ?? 0;
+      return `Route ${ticket.id} to ${dept?.name ?? 'this department'}? ${count === 0 ? 'It has no members yet, so nobody will see it until some are added.' : `All ${count} member${count === 1 ? '' : 's'} will see it and any of them can pick it up.`}`;
+    }
     const { ticket, value } = pendingChange;
     return `Change ${pendingChange.type} for ${ticket.id} to "${value}"?`;
   })();
@@ -291,7 +308,7 @@ export function AdminDashboardPage() {
     if (change.type === 'assignees') {
       const { ticket, value: newAssigneeIds } = change;
       const oldAssigneeIds = getAssigneeIds(ticket);
-      const participants = [...new Set([ticket.submitterId, ...newAssigneeIds])];
+      const participants = ticketParticipants(ticket, newAssigneeIds, departmentMemberIds(departments, getDepartmentId(ticket)));
       setTickets((prev) => prev.map((t) => t.id === ticket.id ? { ...t, assigneeIds: newAssigneeIds, assigneeId: null, participants } : t));
       try {
         await updateTicketAssignees(ticket.id, oldAssigneeIds, newAssigneeIds, participants, user.id);
@@ -302,6 +319,20 @@ export function AdminDashboardPage() {
         return;
       }
       // Assignee notification emails are sent server-side by onTicketUpdated.
+    } else if (change.type === 'department') {
+      const { ticket, value: newDeptId } = change;
+      const oldDeptId = getDepartmentId(ticket);
+      const participants = ticketParticipants(ticket, getAssigneeIds(ticket), departmentMemberIds(departments, newDeptId));
+      setTickets((prev) => prev.map((t) => t.id === ticket.id ? { ...t, departmentId: newDeptId, participants } : t));
+      try {
+        await updateTicketDepartment(ticket.id, oldDeptId, newDeptId, participants, user.id);
+      } catch (err) {
+        console.error('Failed to update department:', err);
+        setTickets((prev) => prev.map((t) => t.id === ticket.id ? ticket : t));
+        alert('Failed to update the department. Please try again.');
+        return;
+      }
+      // Department members are emailed server-side by onTicketUpdated.
     } else if (change.type === 'status') {
       const { ticket, value } = change;
       setTickets((prev) => prev.map((t) => t.id === ticket.id ? { ...t, status: value } : t));
@@ -343,7 +374,9 @@ export function AdminDashboardPage() {
   const visibleTickets = tickets.filter((t) => {
     if (!activeStatuses.includes(t.status)) return false;
     if (typeFilter && t.type !== typeFilter) return false;
-    if (assigneeFilter && !getAssigneeIds(t).includes(assigneeFilter)) return false;
+    if (assigneeFilter.startsWith(DEPT_FILTER)) {
+      if (getDepartmentId(t) !== assigneeFilter.slice(DEPT_FILTER.length)) return false;
+    } else if (assigneeFilter && !getAssigneeIds(t).includes(assigneeFilter)) return false;
     if (!matchesSearch(t)) return false;
     return true;
   });
@@ -419,7 +452,18 @@ export function AdminDashboardPage() {
         </select>
         <select value={assigneeFilter} onChange={(e) => setAssigneeFilter(e.target.value)} className="block pl-3 pr-10 py-2 text-sm border-gray-300 focus:outline-none focus:ring-brand-dark focus:border-brand-dark rounded-md border">
           <option value="">All Assignees</option>
-          {assignableProfiles.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
+          {departments.length > 0 && (
+            <optgroup label="Departments">
+              {departments.map((d) => <option key={d.id} value={`${DEPT_FILTER}${d.id}`}>{d.name}</option>)}
+            </optgroup>
+          )}
+          {departments.length > 0 ? (
+            <optgroup label="People">
+              {assignableProfiles.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
+            </optgroup>
+          ) : (
+            assignableProfiles.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)
+          )}
         </select>
         {isSuperadmin && (
           <button
@@ -440,16 +484,16 @@ export function AdminDashboardPage() {
           <table className="min-w-full divide-y divide-gray-200">
             <thead className="bg-gray-50">
               <tr>
-                {['Ticket #', 'Submitter', 'Details', 'Status', 'Priority', 'Assignees'].map((h) => (
+                {['Ticket #', 'Submitter', 'Details', 'Status', 'Priority', 'Department', 'Assignees'].map((h) => (
                   <th key={h} scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">{h}</th>
                 ))}
               </tr>
             </thead>
             <tbody className="bg-white divide-y divide-gray-200">
               {loading ? (
-                <tr><td colSpan={6} className="px-6 py-12 text-center text-sm text-gray-400">Loading…</td></tr>
+                <tr><td colSpan={7} className="px-6 py-12 text-center text-sm text-gray-400">Loading…</td></tr>
               ) : error ? (
-                <tr><td colSpan={6} className="px-6 py-12 text-center text-sm text-red-600">Couldn't load tickets. Check your connection and refresh.</td></tr>
+                <tr><td colSpan={7} className="px-6 py-12 text-center text-sm text-red-600">Couldn't load tickets. Check your connection and refresh.</td></tr>
               ) : visibleTickets.length > 0 ? (
                 visibleTickets.map((ticket) => {
                   const submitter = profiles[ticket.submitterId];
@@ -494,12 +538,21 @@ export function AdminDashboardPage() {
                           {PRIORITIES.map((p) => <option key={p} value={p}>{p}</option>)}
                         </select>
                       </td>
+                      <td className="px-6 py-4 whitespace-nowrap min-w-[180px]" onClick={(e) => e.stopPropagation()}>
+                        <DepartmentSelect
+                          value={getDepartmentId(ticket)}
+                          onChange={(deptId) => setPendingChange({ type: 'department', ticket, value: deptId })}
+                          departments={departments}
+                          noneLabel="None"
+                          aria-label={`Department for ${ticket.id}`}
+                        />
+                      </td>
                       <td className="px-6 py-4 whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
                         <AssigneeSelector
                           value={ticketAssigneeIds}
                           onChange={(ids) => setPendingChange({ type: 'assignees', ticket, value: ids })}
                           admins={assignableProfiles}
-                          lockedIds={lockedAssigneeIds(ticketAssigneeIds, profilesById)}
+                          lockedIds={lockedAssigneeIds(ticketAssigneeIds, profilesById, !!getDepartmentId(ticket))}
                           lockedReason={LAST_MANAGER_MESSAGE}
                           variant="compact"
                         />
@@ -508,7 +561,7 @@ export function AdminDashboardPage() {
                   );
                 })
               ) : (
-                <tr><td colSpan={6} className="px-6 py-12 text-center text-sm text-gray-500">
+                <tr><td colSpan={7} className="px-6 py-12 text-center text-sm text-gray-500">
                   {searchLoading
                     ? 'Searching every ticket…'
                     : !matcher.isEmpty

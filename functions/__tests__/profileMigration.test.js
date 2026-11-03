@@ -27,6 +27,25 @@ describe('rewriteReferences', () => {
     });
   });
 
+  it('moves department membership, so an invited person stays in their department after sign-in', () => {
+    const data = { name: 'Accounting', memberIds: ['acc1_sparkmanage_com', 'uid_greg'] };
+    expect(rewriteReferences(spec('departments'), data, FROM, TO)).toEqual({
+      memberIds: ['uid_adrian', 'uid_greg'],
+    });
+  });
+
+  it('rewrites a ticket’s participants as well as its assignees, or the person loses the ticket from My Tickets', () => {
+    const data = {
+      assigneeIds: ['acc1_sparkmanage_com'],
+      participants: ['uid_sub', 'acc1_sparkmanage_com'],
+      submitterId: 'uid_sub',
+    };
+    expect(rewriteReferences(spec('tickets'), data, FROM, TO)).toEqual({
+      assigneeIds: ['uid_adrian'],
+      participants: ['uid_sub', 'uid_adrian'],
+    });
+  });
+
   it('returns null when nothing references the old id', () => {
     const data = { assigneeIds: ['uid_greg'], watcherIds: [], participants: ['uid_greg'], creatorId: 'uid_greg' };
     expect(rewriteReferences(spec('tasks'), data, FROM, TO)).toBeNull();

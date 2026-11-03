@@ -25,6 +25,28 @@ function getAssigneeIds(ticket) {
 }
 
 /**
+ * The member ids of a department, or none when the ticket has no department
+ * or it was deleted. Resolved server-side so a trigger can notify, and the
+ * resync can rebuild participants, without trusting what the client wrote.
+ */
+async function departmentMemberIds(departmentId) {
+  if (!departmentId || typeof departmentId !== 'string') return [];
+  const snap = await db.collection('departments').doc(departmentId).get();
+  const ids = snap.exists ? snap.data().memberIds : null;
+  return Array.isArray(ids) ? ids.filter(Boolean) : [];
+}
+
+/**
+ * Who can see a ticket: submitter + assignees + department members, deduped.
+ * Mirrors ticketParticipants() in src/types.ts; a Scheduled ticket keeps only
+ * its submitter until activation adds the rest.
+ */
+function ticketParticipants(ticket, memberIds) {
+  if (ticket.status === 'Scheduled') return [ticket.submitterId].filter(Boolean);
+  return [...new Set([ticket.submitterId, ...getAssigneeIds(ticket), ...(memberIds || [])].filter(Boolean))];
+}
+
+/**
  * Escape values interpolated into email HTML so a crafted ticket title (free
  * text from the submitter) can't inject markup or links into mail sent to staff.
  */
@@ -79,6 +101,8 @@ module.exports = {
   REGION,
   APP_URL,
   getAssigneeIds,
+  departmentMemberIds,
+  ticketParticipants,
   escapeHtml,
   emailsForAssignees,
   sendMail,
