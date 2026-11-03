@@ -8,7 +8,7 @@ import { ConfirmModal } from '../components/ConfirmModal';
 import { Modal } from '../components/Modal';
 import { getOrSeedRequestTypes } from '../lib/seedRequestTypes';
 import { loadDepartments } from '../lib/departments';
-import { getDefaultAssigneeIds, isAdminRole } from '../types';
+import { getDefaultAssigneeIds } from '../types';
 import type { Department } from '../types';
 import { PageSpinner } from '../components/PageSpinner';
 
@@ -161,7 +161,11 @@ export function AdminSettingsPage() {
 
   if (loading) return <PageSpinner />;
 
-  const admins = profiles.filter((p) => isAdminRole(p.role));
+  // Everyone, not just Managers/Administrators. Tickets can be assigned to any
+  // role now, so a request type that can only DEFAULT to a Manager is an
+  // arbitrary difference between what you can set up front and what you can set
+  // afterwards. Sorted, because the directory arrives in document-id order.
+  const assignable = [...profiles].sort((a, b) => (a.name || '').localeCompare(b.name || ''));
 
   return (
     <div className="space-y-8 max-w-5xl mx-auto">
@@ -211,7 +215,7 @@ export function AdminSettingsPage() {
                     <AssigneeSelector
                       value={getDefaultAssigneeIds(type)}
                       onChange={(ids) => updateDefaultAssignees(type, ids)}
-                      admins={admins}
+                      admins={assignable}
                     />
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap">
