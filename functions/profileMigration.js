@@ -45,8 +45,7 @@ const REFERENCES = [
   },
   { collection: 'taskComments', arrays: ['mentionedIds'], scalars: ['userId'], nested: [] },
   { collection: 'taskEvents', arrays: ['fromAssigneeIds', 'toAssigneeIds'], scalars: ['actorId'], nested: [] },
-  { collection: 'tickets', arrays: ['assigneeIds', 'participants'], scalars: ['assigneeId', 'submitterId'], nested: [] },
-  { collection: 'departments', arrays: ['memberIds'], scalars: [], nested: [] },
+  { collection: 'tickets', arrays: ['assigneeIds'], scalars: ['assigneeId', 'submitterId'], nested: [] },
   { collection: 'requestTypes', arrays: ['defaultAssigneeIds'], scalars: ['defaultAssigneeId'], nested: [] },
 ];
 

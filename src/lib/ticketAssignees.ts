@@ -37,12 +37,8 @@ export function managerIdsAmong(ids: string[], profiles: Record<string, Profile>
  * An empty list passes: an unassigned ticket is a normal state, and the triage
  * queue depends on it. The rule only bites once somebody is assigned.
  */
-export function assigneesAreValid(
-  ids: string[],
-  profiles: Record<string, Profile>,
-  hasDepartment = false,
-): boolean {
-  if (ids.length === 0 || hasDepartment) return true;
+export function assigneesAreValid(ids: string[], profiles: Record<string, Profile>): boolean {
+  if (ids.length === 0) return true;
   return managerIdsAmong(ids, profiles).length > 0;
 }
 
@@ -50,27 +46,42 @@ export function assigneesAreValid(
  * Ids that must not be removable from the current selection — i.e. the sole
  * remaining Manager. Returns an empty array when removal is unconstrained, so
  * callers can spread it straight into a `lockedIds` prop.
- *
- * `hasDepartment`: a ticket routed to a department is accountable to that
- * department, so the individual-Manager rule is waived (and the rules copy
- * waives it the same way). Without this, a department member who is a User
- * could never pick a ticket up — adding themselves as its only assignee would
- * be refused for lacking a Manager.
  */
-export function lockedAssigneeIds(
-  ids: string[],
-  profiles: Record<string, Profile>,
-  hasDepartment = false,
-): string[] {
-  if (ids.length === 0 || hasDepartment) return [];
+export function lockedAssigneeIds(ids: string[], profiles: Record<string, Profile>): string[] {
+  if (ids.length === 0) return [];
   const managers = managerIdsAmong(ids, profiles);
   return managers.length === 1 ? managers : [];
 }
 
-/** Convenience for a loaded ticket. */
-export function lockedAssigneeIdsForTicket(
-  ticket: Pick<Ticket, 'assigneeIds' | 'assigneeId' | 'departmentId'>,
+/**
+ * Who a ticket goes to when its request type changes: the new type's default
+ * assignees, replacing whoever had it — the point of changing the type is to
+ * hand the ticket to the people who work that kind of request. A type with no
+ * defaults leaves the ticket unassigned, exactly as if it had been submitted
+ * under that type.
+ *
+ * The one exception is the accountability invariant above. If the type's
+ * defaults hold no Manager, the ticket's current Managers stay on it alongside
+ * the defaults, so the write is not refused (by this module's check or by the
+ * rules). If the ticket has no Manager to keep either, the result is still
+ * invalid; callers should check it with assigneesAreValid() and refuse the
+ * change with an explanation rather than let the rules reject it.
+ */
+export function assigneeIdsForTypeChange(
+  currentIds: string[],
+  defaultIds: string[],
   profiles: Record<string, Profile>,
 ): string[] {
-  return lockedAssigneeIds(getAssigneeIds(ticket), profiles, !!ticket.departmentId);
+  const defaults = [...new Set(defaultIds.filter(Boolean))];
+  if (defaults.length === 0) return [];
+  if (assigneesAreValid(defaults, profiles)) return defaults;
+  return [...new Set([...managerIdsAmong(currentIds, profiles), ...defaults])];
+}
+
+/** Convenience for a loaded ticket. */
+export function lockedAssigneeIdsForTicket(
+  ticket: Pick<Ticket, 'assigneeIds' | 'assigneeId'>,
+  profiles: Record<string, Profile>,
+): string[] {
+  return lockedAssigneeIds(getAssigneeIds(ticket), profiles);
 }

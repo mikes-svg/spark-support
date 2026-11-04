@@ -1,16 +1,13 @@
 import React, { useState, useEffect } from 'react';
-import { collection, getDocs, doc, updateDoc, deleteDoc, setDoc, addDoc, writeBatch, serverTimestamp } from 'firebase/firestore';
+import { collection, getDocs, doc, updateDoc, deleteDoc, setDoc, serverTimestamp } from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
 import { db, functions } from '../lib/firebase';
-import { Trash2, Edit2, Check, X, UserPlus, Users, RefreshCw, Building2, Plus } from 'lucide-react';
+import { Trash2, Edit2, Check, X, UserPlus, Users, RefreshCw } from 'lucide-react';
 import { ConfirmModal } from '../components/ConfirmModal';
 import { Modal } from '../components/Modal';
 import { PageSpinner } from '../components/PageSpinner';
 import { Avatar } from '../components/Avatar';
-import { AssigneeSelector } from '../components/AssigneeSelector';
 import { roleLabel, isSuperadminRole } from '../types';
-import type { Department } from '../types';
-import { loadDepartments } from '../lib/departments';
 
 interface Profile { id: string; name: string; email: string; photoURL: string; role: 'superadmin' | 'admin' | 'user'; onboardingAccess?: boolean; tasksAccess?: boolean; }
 
@@ -37,7 +34,6 @@ const PERMISSIONS: PermissionSection[] = [
       { label: 'View all tickets in organization', super: true, admin: true, user: false },
       { label: 'Change ticket status & priority', super: true, admin: true, user: false },
       { label: 'Reassign tickets', super: true, admin: true, user: false },
-      { label: 'Work tickets routed to your department', super: true, admin: true, user: true },
       { label: 'Delete tickets', super: true, admin: false, user: false },
     ],
   },
@@ -49,7 +45,6 @@ const PERMISSIONS: PermissionSection[] = [
       { label: 'Bulk invite users', super: true, admin: false, user: false },
       { label: 'Change user roles', super: true, admin: false, user: false },
       { label: 'Delete users', super: true, admin: false, user: false },
-      { label: 'Create departments & manage their members', super: true, admin: false, user: false },
     ],
   },
   {
@@ -128,27 +123,12 @@ export function TeamPage() {
   const [bulkImporting, setBulkImporting] = useState(false);
   const [bulkResult, setBulkResult] = useState<{ created: number; skipped: number; errors: string[] } | null>(null);
 
-  // Departments: the groups a ticket can be routed to instead of a person.
-  // Managed here, next to the people who make them up.
-  const [departments, setDepartments] = useState<Department[]>([]);
-  const [showDeptModal, setShowDeptModal] = useState(false);
-  const [newDeptName, setNewDeptName] = useState('');
-  const [addingDept, setAddingDept] = useState(false);
-  const [deptError, setDeptError] = useState('');
-  const [editingDept, setEditingDept] = useState<string | null>(null);
-  const [editDeptName, setEditDeptName] = useState('');
-  const [deleteDeptTarget, setDeleteDeptTarget] = useState<Department | null>(null);
-
   useEffect(() => {
     if (!db) { setLoading(false); return; }
     (async () => {
       try {
-        const [snap, depts] = await Promise.all([
-          getDocs(collection(db!, 'profiles')),
-          loadDepartments(),
-        ]);
+        const snap = await getDocs(collection(db!, 'profiles'));
         setProfiles(snap.docs.map((d) => ({ id: d.id, ...d.data() } as Profile)));
-        setDepartments(depts);
       } catch (err) {
         console.error('Failed to fetch team:', err);
         setLoadError(true);
@@ -157,77 +137,6 @@ export function TeamPage() {
       }
     })();
   }, []);
-
-  const sortDepts = (list: Department[]) => [...list].sort((a, b) => a.name.localeCompare(b.name));
-
-  const handleAddDepartment = async () => {
-    const name = newDeptName.trim();
-    if (!name || !db) return;
-    // Names are what people pick from in the routing dropdown; two alike
-    // would be indistinguishable there.
-    if (departments.some((d) => d.name.toLowerCase() === name.toLowerCase())) {
-      setDeptError(`A department named "${name}" already exists.`);
-      return;
-    }
-    setAddingDept(true);
-    setDeptError('');
-    try {
-      const ref = await addDoc(collection(db, 'departments'), { name, memberIds: [], createdAt: serverTimestamp() });
-      setDepartments((prev) => sortDepts([...prev, { id: ref.id, name, memberIds: [] }]));
-      setShowDeptModal(false);
-      setNewDeptName('');
-    } catch (err) {
-      console.error('Failed to add department:', err);
-      setDeptError('Could not add the department. Please try again.');
-    } finally {
-      setAddingDept(false);
-    }
-  };
-
-  const saveDepartmentName = async (dept: Department) => {
-    const name = editDeptName.trim();
-    setEditingDept(null);
-    if (!name || name === dept.name || !db) return;
-    setActionError('');
-    setDepartments((prev) => sortDepts(prev.map((d) => d.id === dept.id ? { ...d, name } : d)));
-    try {
-      await updateDoc(doc(db, 'departments', dept.id), { name });
-    } catch (err) {
-      console.error('Failed to rename department:', err);
-      setDepartments((prev) => sortDepts(prev.map((d) => d.id === dept.id ? { ...d, name: dept.name } : d)));
-      setActionError('Could not rename the department. Please try again.');
-    }
-  };
-
-  const updateDepartmentMembers = async (dept: Department, memberIds: string[]) => {
-    if (!db) return;
-    setActionError('');
-    setDepartments((prev) => prev.map((d) => d.id === dept.id ? { ...d, memberIds } : d));
-    try {
-      // The onDepartmentWritten function re-syncs the department's tickets so
-      // the new members see them (and removed members stop seeing them).
-      await updateDoc(doc(db, 'departments', dept.id), { memberIds });
-    } catch (err) {
-      console.error('Failed to update department members:', err);
-      setDepartments((prev) => prev.map((d) => d.id === dept.id ? { ...d, memberIds: dept.memberIds } : d));
-      setActionError('Could not update the department\u2019s members. Please try again.');
-    }
-  };
-
-  const confirmDeleteDepartment = async () => {
-    const target = deleteDeptTarget;
-    setDeleteDeptTarget(null);
-    if (!target || !db) return;
-    setActionError('');
-    setDepartments((prev) => prev.filter((d) => d.id !== target.id));
-    try {
-      await deleteDoc(doc(db, 'departments', target.id));
-    } catch (err) {
-      console.error('Failed to delete department:', err);
-      setDepartments((prev) => sortDepts([...prev, target]));
-      setActionError('Could not delete the department. Please try again.');
-    }
-  };
 
   // Guard against locking everyone out: the last Administrator can't be demoted
   // or deleted (Firestore admin access keys off the profile role).
@@ -273,15 +182,6 @@ export function TeamPage() {
     if (!db) return;
     try {
       await deleteDoc(doc(db, 'profiles', target.id));
-      // Take them out of any department too, so a deleted account does not
-      // linger in a member list (or in the participants of its tickets).
-      const theirDepts = departments.filter((d) => d.memberIds.includes(target.id));
-      if (theirDepts.length > 0) {
-        const batch = writeBatch(db);
-        theirDepts.forEach((d) => batch.update(doc(db!, 'departments', d.id), { memberIds: d.memberIds.filter((id) => id !== target.id) }));
-        await batch.commit();
-        setDepartments((prev) => prev.map((d) => ({ ...d, memberIds: d.memberIds.filter((id) => id !== target.id) })));
-      }
     } catch (err) {
       console.error('Failed to delete user:', err);
       setProfiles((prev) => [...prev, target].sort((a, b) => a.name.localeCompare(b.name)));
@@ -572,70 +472,6 @@ export function TeamPage() {
         </div>
       </div>
 
-      {/* Departments. No overflow-hidden here: the member picker's dropdown must be able to hang below the card. */}
-      <div className="bg-white shadow-sm rounded-xl border border-gray-200">
-        <div className="px-6 py-5 border-b border-gray-200 bg-gray-50/50 rounded-t-xl flex justify-between items-center gap-4">
-          <div>
-            <h2 className="text-lg font-serif font-semibold text-gray-900">Departments</h2>
-            <p className="mt-1 text-sm text-gray-500">
-              Route a ticket to a department instead of a person: every member sees it on My Tickets and any of them can pick it up.
-            </p>
-          </div>
-          <button onClick={() => { setNewDeptName(''); setDeptError(''); setShowDeptModal(true); }} className="inline-flex items-center justify-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 shadow-sm transition-colors whitespace-nowrap">
-            <Plus className="h-4 w-4 mr-2" />Add Department
-          </button>
-        </div>
-        {departments.length === 0 ? (
-          <div className="px-6 py-12 text-center text-sm text-gray-500">
-            <Building2 className="h-8 w-8 mx-auto mb-2 text-gray-300" aria-hidden="true" />
-            No departments yet. Add one, then pick its members.
-          </div>
-        ) : (
-          <ul className="divide-y divide-gray-200">
-            {departments.map((dept) => (
-              <li key={dept.id} className="px-6 py-4 flex flex-col gap-3 sm:flex-row sm:items-start">
-                <div className="sm:w-56 flex-shrink-0 flex items-center gap-2 min-h-[34px]">
-                  <Building2 className="h-4 w-4 text-gray-400 flex-shrink-0" aria-hidden="true" />
-                  {editingDept === dept.id ? (
-                    <div className="flex items-center gap-1">
-                      <input
-                        type="text"
-                        value={editDeptName}
-                        onChange={(e) => setEditDeptName(e.target.value)}
-                        onKeyDown={(e) => { if (e.key === 'Enter') saveDepartmentName(dept); if (e.key === 'Escape') setEditingDept(null); }}
-                        aria-label="Department name"
-                        className="border border-gray-300 rounded px-2 py-1 text-sm w-36 focus:outline-none focus:ring-2 focus:ring-brand-dark"
-                        autoFocus
-                      />
-                      <button onClick={() => saveDepartmentName(dept)} aria-label="Save name" className="text-green-600 hover:text-green-700"><Check className="h-4 w-4" /></button>
-                      <button onClick={() => setEditingDept(null)} aria-label="Cancel rename" className="text-gray-400 hover:text-gray-600"><X className="h-4 w-4" /></button>
-                    </div>
-                  ) : (
-                    <span className="text-sm font-medium text-gray-900">{dept.name}</span>
-                  )}
-                </div>
-                <div className="flex-1 min-w-0">
-                  <AssigneeSelector
-                    value={dept.memberIds}
-                    onChange={(ids) => updateDepartmentMembers(dept, ids)}
-                    admins={profiles}
-                    placeholder="No members yet"
-                    emptyLabel="No users to add"
-                  />
-                  <p className="mt-1 text-xs text-gray-500">
-                    {dept.memberIds.length === 0 ? 'Tickets routed here will have nobody to see them until you add members.' : `${dept.memberIds.length} member${dept.memberIds.length === 1 ? '' : 's'}`}
-                  </p>
-                </div>
-                <div className="flex items-center gap-3 sm:pt-1.5">
-                  <button onClick={() => { setEditingDept(dept.id); setEditDeptName(dept.name); }} aria-label={`Rename ${dept.name}`} className="text-gray-400 hover:text-brand-dark transition-colors"><Edit2 className="h-4 w-4" /></button>
-                  <button onClick={() => setDeleteDeptTarget(dept)} aria-label={`Delete ${dept.name}`} className="text-red-400 hover:text-red-600 transition-colors"><Trash2 className="h-4 w-4" /></button>
-                </div>
-              </li>
-            ))}
-          </ul>
-        )}
-      </div>
-
       {/* Role Permissions Matrix */}
       <div className="bg-white shadow-sm rounded-xl border border-gray-200 overflow-hidden">
         <div className="px-6 py-5 border-b border-gray-200 bg-gray-50/50">
@@ -763,41 +599,6 @@ export function TeamPage() {
             </div>
       </Modal>
 
-      <Modal open={showDeptModal} onClose={() => setShowDeptModal(false)} labelledBy="add-dept-title" widthClass="max-w-sm">
-        <div className="px-6 py-5 border-b border-gray-200">
-          <h3 id="add-dept-title" className="text-lg font-serif font-semibold text-gray-900">Add Department</h3>
-        </div>
-        <div className="p-6 space-y-2">
-          <label htmlFor="new-dept-name" className="block text-sm font-medium text-gray-700">Department name</label>
-          <input
-            id="new-dept-name"
-            value={newDeptName}
-            onChange={(e) => setNewDeptName(e.target.value)}
-            onKeyDown={(e) => { if (e.key === 'Enter') handleAddDepartment(); }}
-            autoFocus
-            placeholder="e.g. Maintenance"
-            className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-dark"
-          />
-          {deptError && <p className="text-sm text-red-600" role="alert">{deptError}</p>}
-          <p className="text-xs text-gray-500">You can add members once it exists.</p>
-        </div>
-        <div className="px-6 py-4 border-t border-gray-200 flex justify-end gap-3 bg-gray-50/50">
-          <button onClick={() => setShowDeptModal(false)} className="px-4 py-2 text-sm font-medium text-gray-700 hover:text-gray-900">Cancel</button>
-          <button onClick={handleAddDepartment} disabled={addingDept || !newDeptName.trim()} className="px-5 py-2 text-sm font-medium rounded-lg bg-brand-dark text-white hover:bg-[#05391B] disabled:opacity-50 transition-colors">
-            {addingDept ? 'Adding…' : 'Add Department'}
-          </button>
-        </div>
-      </Modal>
-
-      <ConfirmModal
-        open={!!deleteDeptTarget}
-        title="Delete Department"
-        message={deleteDeptTarget ? `Delete "${deleteDeptTarget.name}"? Tickets routed to it will be left with no department, and its members will stop seeing them unless they are assigned individually. This cannot be undone.` : ''}
-        confirmLabel="Delete"
-        danger
-        onConfirm={confirmDeleteDepartment}
-        onCancel={() => setDeleteDeptTarget(null)}
-      />
       <ConfirmModal
         open={!!deleteTarget}
         title="Delete User"

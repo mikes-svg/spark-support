@@ -64,19 +64,11 @@ async function buildTicketSections() {
     .where('status', 'in', ['Open', 'In Progress'])
     .get();
 
-  // Department membership, read once: a ticket routed to a department is in
-  // every member's queue, so it belongs in every member's brief.
-  const deptSnap = await db.collection('departments').get();
-  const membersByDept = new Map(deptSnap.docs.map((d) => [d.id, (d.data().memberIds || []).filter(Boolean)]));
-
   const PRIORITY_RANK = { Urgent: 0, High: 1, Medium: 2, Low: 3 };
   const raw = new Map();
   for (const doc of ticketsSnap.docs) {
     const ticket = doc.data();
-    const assigneeIds = [...new Set([
-      ...getAssigneeIds(ticket),
-      ...(membersByDept.get(ticket.departmentId) || []),
-    ])];
+    const assigneeIds = getAssigneeIds(ticket);
     if (assigneeIds.length === 0) continue;
     const entry = {
       id: doc.id,

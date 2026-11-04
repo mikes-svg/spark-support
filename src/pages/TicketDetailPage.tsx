@@ -9,21 +9,20 @@ import { useAuth } from '../context/AuthContext';
 import { Send, ArrowLeft, Clock, Trash2, UploadCloud, FileText, CalendarClock, Pencil, X, Check } from 'lucide-react';
 import { ConfirmModal } from '../components/ConfirmModal';
 import { AssigneeChips } from '../components/AssigneeChips';
-import { DepartmentSelect } from '../components/DepartmentSelect';
 import { MentionTextarea, renderCommentBody } from '../components/MentionTextarea';
 import { PageSpinner } from '../components/PageSpinner';
 import { Avatar } from '../components/Avatar';
-import { getAssigneeIds, getDepartmentId, isScheduled, isAdminRole, isSuperadminRole, ticketParticipants } from '../types';
-import type { TicketStatus, TicketPriority, Ticket, Profile, Department } from '../types';
+import { getAssigneeIds, getDefaultAssigneeIds, isScheduled, isAdminRole, isSuperadminRole, ticketParticipants } from '../types';
+import type { TicketStatus, TicketPriority, Ticket, Profile, RequestType } from '../types';
 import { toDate, localDateTimeMin } from '../lib/dates';
-import { lockedAssigneeIds, LAST_MANAGER_MESSAGE } from '../lib/ticketAssignees';
-import { loadDepartments, departmentMemberIds, departmentName } from '../lib/departments';
+import { lockedAssigneeIds, assigneeIdsForTypeChange, assigneesAreValid, LAST_MANAGER_MESSAGE } from '../lib/ticketAssignees';
+import { loadRequestTypes, requestTypeNamed, requestTypeChoices } from '../lib/requestTypes';
 import { partitionFiles, ATTACHMENT_HINT } from '../lib/attachments';
 import {
   updateTicketStatus,
   updateTicketPriority,
   updateTicketAssignees,
-  updateTicketDepartment,
+  updateTicketType,
   logTicketComment,
 } from '../lib/ticketEvents';
 
@@ -69,7 +68,9 @@ export function TicketDetailPage() {
   const [rescheduleValue, setRescheduleValue] = useState('');
   const [adminProfiles, setAdminProfiles] = useState<Profile[]>([]);
   const [allProfiles, setAllProfiles] = useState<Profile[]>([]);
-  const [departments, setDepartments] = useState<Department[]>([]);
+  const [requestTypes, setRequestTypes] = useState<RequestType[]>([]);
+  // A request-type change waiting for confirmation: it reassigns the ticket.
+  const [pendingType, setPendingType] = useState<string | null>(null);
   const [pendingMentionIds, setPendingMentionIds] = useState<string[]>([]);
 
   // Mirror `profiles` into a ref so the comments listener (whose effect only
@@ -127,8 +128,8 @@ export function TicketDetailPage() {
       .then((snap) => setAllProfiles(snap.docs.map((d) => ({ id: d.id, ...d.data() } as Profile))))
       .catch(() => {});
 
-    // Departments, for the routing control and to name the current one.
-    loadDepartments().then(setDepartments).catch(() => {});
+    // Request types, for changing the ticket's type (which re-routes it).
+    loadRequestTypes().then(setRequestTypes).catch(() => {});
 
     let unsubscribe: (() => void) | undefined;
     try {
@@ -333,11 +334,11 @@ export function TicketDetailPage() {
     if (!ticket || !db || !user) return;
     const oldAssigneeIds = getAssigneeIds(ticket);
     const added = newAssigneeIds.filter((id) => !oldAssigneeIds.includes(id));
-    // While scheduled, ticketParticipants keeps assignees (and department
-    // members) out of participants, and nobody is emailed; the activation
-    // function adds + notifies them on the go-live date.
+    // While scheduled, ticketParticipants keeps assignees out of participants,
+    // and nobody is emailed; the activation function adds + notifies them on
+    // the go-live date.
     const scheduled = isScheduled(ticket);
-    const participants = ticketParticipants(ticket, newAssigneeIds, departmentMemberIds(departments, getDepartmentId(ticket)));
+    const participants = ticketParticipants(ticket, newAssigneeIds);
 
     const prev = ticket;
     setTicket({ ...ticket, assigneeIds: newAssigneeIds, assigneeId: null, participants } as Ticket);
@@ -364,21 +365,54 @@ export function TicketDetailPage() {
     }
   };
 
-  const handleDepartmentChange = async (newDeptId: string | null) => {
-    if (!ticket || !db || !user) return;
-    const oldDeptId = getDepartmentId(ticket);
-    if (oldDeptId === newDeptId) return;
-    const participants = ticketParticipants(ticket, getAssigneeIds(ticket), departmentMemberIds(departments, newDeptId));
+  /**
+   * What changing the type to `newType` would do: the people the ticket would
+   * go to, or why it can't. Used for the confirmation text and then applied by
+   * handleTypeChange.
+   */
+  const planTypeChange = (newType: string) => {
+    if (!ticket) return null;
+    const profilesById = Object.fromEntries(allProfiles.map((p) => [p.id, p]));
+    const rt = requestTypeNamed(requestTypes, newType);
+    const assigneeIds = assigneeIdsForTypeChange(getAssigneeIds(ticket), rt ? getDefaultAssigneeIds(rt) : [], profilesById);
+    const valid = assigneesAreValid(assigneeIds, profilesById);
+    return { assigneeIds, valid };
+  };
+
+  const handleTypeChange = async () => {
+    const newType = pendingType;
+    setPendingType(null);
+    if (!ticket || !db || !user || !newType || newType === ticket.type) return;
+    const plan = planTypeChange(newType);
+    if (!plan || !plan.valid) return; // the confirm text already explained why
+    const oldAssigneeIds = getAssigneeIds(ticket);
+    const participants = ticketParticipants(ticket, plan.assigneeIds);
     const prev = ticket;
-    setTicket({ ...ticket, departmentId: newDeptId, participants } as Ticket);
+    setTicket({ ...ticket, type: newType, assigneeIds: plan.assigneeIds, assigneeId: null, participants } as Ticket);
     try {
-      await updateTicketDepartment(ticket.id, oldDeptId, newDeptId, participants, user.id);
+      await updateTicketType(ticket.id, {
+        fromType: ticket.type,
+        toType: newType,
+        fromAssigneeIds: oldAssigneeIds,
+        toAssigneeIds: plan.assigneeIds,
+        participants,
+      }, user.id);
     } catch (err) {
-      console.error('Failed to update department:', err);
+      console.error('Failed to change the request type:', err);
       setTicket(prev);
-      alert('Failed to update the department. Please try again.');
+      alert('Failed to change the request type. Please try again.');
+      return;
     }
-    // Department members are emailed server-side by onTicketUpdated.
+    // New assignees are emailed server-side by onTicketUpdated. Make sure
+    // their chips can render.
+    for (const addedId of plan.assigneeIds) {
+      if (profiles[addedId]) continue;
+      const assigneeDoc = await getDoc(doc(db, 'profiles', addedId));
+      const assigneeData = assigneeDoc.data();
+      if (assigneeData) {
+        setProfiles((p) => ({ ...p, [addedId]: { id: addedId, name: assigneeData.name, photoURL: assigneeData.photoURL, email: assigneeData.email } }));
+      }
+    }
   };
 
   const handleDeleteTicket = async () => {
@@ -438,20 +472,29 @@ export function TicketDetailPage() {
   // the point of being able to assign a User. firestore.rules grants the same
   // pair (admin OR assignee), so the UI is not the thing holding the line.
   const isAssignee = !!user && assigneeIds.includes(user.id);
-  // So may anyone in the department the ticket is routed to — being able to
-  // pick it up is what routing to a department means. The rules grant the
-  // same (admin OR assignee OR department member).
-  const departmentId = getDepartmentId(ticket);
-  const isDepartmentMember = !!user && departmentMemberIds(departments, departmentId).includes(user.id);
-  const canEditTicket = isAdmin || isAssignee || isDepartmentMember;
+  const canEditTicket = isAdmin || isAssignee;
 
   // Every ticket must keep a Manager/Administrator on it, so the sole remaining
-  // one cannot be removed here. The same invariant is enforced in the rules —
-  // and, like the rules, waived once a department is accountable for it.
+  // one cannot be removed here. The same invariant is enforced in the rules.
   const profilesById = Object.fromEntries(allProfiles.map((p) => [p.id, p]));
-  const lockedIds = lockedAssigneeIds(assigneeIds, profilesById, !!departmentId);
+  const lockedIds = lockedAssigneeIds(assigneeIds, profilesById);
   const isSuperadmin = isSuperadminRole(user?.role);
   const scheduled = isScheduled(ticket);
+
+  // Confirmation text for a pending type change: who the ticket will go to.
+  const typeChangeMessage = (() => {
+    if (!pendingType) return '';
+    const plan = planTypeChange(pendingType);
+    if (!plan) return '';
+    const names = plan.assigneeIds.map((pid) => profilesById[pid]?.name || 'Unknown');
+    if (!plan.valid) {
+      return `${pendingType}'s default assignees don't include a Manager or Administrator, so ${ticket.id} can't be handed to them. Add one to the type's defaults in Settings → Request Types first.`;
+    }
+    const who = names.length > 0
+      ? `It will be reassigned to ${names.join(', ')}`
+      : `${pendingType} has no default assignees, so it will be left unassigned`;
+    return `Change ${ticket.id} to ${pendingType}? ${who}.`;
+  })();
   const nowLocalMin = localDateTimeMin();
 
   // Only allow @mentioning people who can actually read this ticket — admins
@@ -665,7 +708,24 @@ export function TicketDetailPage() {
               <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-widest">Details</h3>
             </div>
             <div className="p-6 space-y-5">
-              <div><span className="block text-xs font-medium text-gray-500 uppercase mb-1">Type</span><span className="text-sm text-gray-900 font-medium">{ticket.type}</span></div>
+              <div>
+                <span className="block text-xs font-medium text-gray-500 uppercase mb-1">Type</span>
+                {canEditTicket ? (
+                  <>
+                    <select
+                      value={ticket.type}
+                      onChange={(e) => { if (e.target.value !== ticket.type) setPendingType(e.target.value); }}
+                      aria-label="Request type"
+                      className="block w-full pl-3 pr-8 py-1.5 text-sm border-gray-300 focus:outline-none focus:ring-brand-dark focus:border-brand-dark rounded-md border bg-gray-50"
+                    >
+                      {requestTypeChoices(requestTypes, ticket.type).map((name) => <option key={name} value={name}>{name}</option>)}
+                    </select>
+                    <p className="mt-1 text-xs text-gray-500">Changing the type hands the ticket to that type's assignees.</p>
+                  </>
+                ) : (
+                  <span className="text-sm text-gray-900 font-medium">{ticket.type}</span>
+                )}
+              </div>
               <div>
                 <span className="block text-xs font-medium text-gray-500 uppercase mb-1">Status</span>
                 {canEditTicket && !scheduled ? (
@@ -692,26 +752,6 @@ export function TicketDetailPage() {
                   {submitter && <Avatar src={submitter.photoURL} name={submitter.name} className="w-6 h-6 rounded-full" />}
                   <span className="text-sm text-gray-900">{submitter?.name || '—'}</span>
                 </div>
-              </div>
-              <div>
-                <span className="block text-xs font-medium text-gray-500 uppercase mb-1">Department</span>
-                {canEditTicket ? (
-                  <DepartmentSelect
-                    value={departmentId}
-                    onChange={handleDepartmentChange}
-                    departments={departments}
-                    noneLabel="Not routed to a department"
-                  />
-                ) : departmentId ? (
-                  <span className="text-sm text-gray-900">{departmentName(departments, departmentId)}</span>
-                ) : (
-                  <span className="text-sm text-gray-500 italic">None</span>
-                )}
-                {departmentId && (
-                  <p className="mt-1 text-xs text-gray-500">
-                    Everyone in this department can see the ticket and pick it up.
-                  </p>
-                )}
               </div>
               <div>
                 <span className="block text-xs font-medium text-gray-500 uppercase mb-1">Assignees</span>
@@ -761,6 +801,14 @@ export function TicketDetailPage() {
           </div>
         </div>
       </div>
+      <ConfirmModal
+        open={!!pendingType}
+        title="Change Request Type"
+        message={typeChangeMessage}
+        confirmLabel="Change Type"
+        onConfirm={handleTypeChange}
+        onCancel={() => setPendingType(null)}
+      />
       <ConfirmModal
         open={showDeleteConfirm}
         title="Delete Ticket"

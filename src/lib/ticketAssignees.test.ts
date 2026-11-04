@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { assigneesAreValid, lockedAssigneeIds } from './ticketAssignees';
+import { assigneesAreValid, lockedAssigneeIds, assigneeIdsForTypeChange } from './ticketAssignees';
 import { ticketParticipants } from '../types';
 import type { Profile } from '../types';
 
@@ -13,26 +13,51 @@ describe('the last-Manager guard', () => {
     expect(lockedAssigneeIds(['mgr', 'usr'], profiles)).toEqual(['mgr']);
     expect(assigneesAreValid(['usr'], profiles)).toBe(false);
   });
-
-  it('is waived once a department is accountable for the ticket', () => {
-    // A User in the department must be able to pick the ticket up as its only
-    // assignee — the department, not a named Manager, is the accountable party.
-    expect(lockedAssigneeIds(['mgr', 'usr'], profiles, true)).toEqual([]);
-    expect(assigneesAreValid(['usr'], profiles, true)).toBe(true);
-  });
 });
 
 describe('ticketParticipants', () => {
-  it('is submitter + assignees + department members, deduped', () => {
-    expect(ticketParticipants({ submitterId: 'sub', status: 'Open' }, ['mgr', 'usr'], ['usr', 'dep']))
-      .toEqual(['sub', 'mgr', 'usr', 'dep']);
+  it('is submitter + assignees, deduped', () => {
+    expect(ticketParticipants({ submitterId: 'sub', status: 'Open' }, ['mgr', 'usr', 'sub']))
+      .toEqual(['sub', 'mgr', 'usr']);
   });
 
   it('keeps everyone but the submitter off a Scheduled ticket until it goes live', () => {
-    expect(ticketParticipants({ submitterId: 'sub', status: 'Scheduled' }, ['mgr'], ['dep'])).toEqual(['sub']);
+    expect(ticketParticipants({ submitterId: 'sub', status: 'Scheduled' }, ['mgr'])).toEqual(['sub']);
   });
 
   it('drops empty ids rather than writing them into the array', () => {
-    expect(ticketParticipants({ submitterId: 'sub' }, ['', 'mgr'], [])).toEqual(['sub', 'mgr']);
+    expect(ticketParticipants({ submitterId: 'sub' }, ['', 'mgr'])).toEqual(['sub', 'mgr']);
+  });
+});
+
+describe('assigneeIdsForTypeChange', () => {
+  const profiles2: Record<string, Profile> = {
+    ...profiles,
+    mgr2: { id: 'mgr2', name: 'Manager 2', photoURL: '', role: 'superadmin' },
+    usr2: { id: 'usr2', name: 'User 2', photoURL: '', role: 'user' },
+  };
+
+  it("hands the ticket to the new type's default assignees, dropping the old ones", () => {
+    expect(assigneeIdsForTypeChange(['mgr', 'usr'], ['mgr2', 'usr2'], profiles2)).toEqual(['mgr2', 'usr2']);
+  });
+
+  it('leaves the ticket unassigned when the type has no defaults', () => {
+    expect(assigneeIdsForTypeChange(['mgr', 'usr'], [], profiles2)).toEqual([]);
+  });
+
+  it("keeps the ticket's Managers when the defaults hold none", () => {
+    // Otherwise the write would be refused for lacking a Manager.
+    expect(assigneeIdsForTypeChange(['mgr', 'usr'], ['usr2'], profiles2)).toEqual(['mgr', 'usr2']);
+    expect(assigneeIdsForTypeChange(['mgr', 'mgr2'], ['usr2'], profiles2)).toEqual(['mgr', 'mgr2', 'usr2']);
+  });
+
+  it('is still invalid when neither side has a Manager, for the caller to refuse', () => {
+    const ids = assigneeIdsForTypeChange(['usr'], ['usr2'], profiles2);
+    expect(ids).toEqual(['usr2']);
+    expect(assigneesAreValid(ids, profiles2)).toBe(false);
+  });
+
+  it('dedupes defaults', () => {
+    expect(assigneeIdsForTypeChange([], ['mgr2', 'mgr2', ''], profiles2)).toEqual(['mgr2']);
   });
 });

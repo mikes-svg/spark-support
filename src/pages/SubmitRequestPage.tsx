@@ -6,22 +6,11 @@ import { db, storage } from '../lib/firebase';
 import { useAuth } from '../context/AuthContext';
 import { UploadCloud, X } from 'lucide-react';
 import { getOrSeedRequestTypes } from '../lib/seedRequestTypes';
-import { loadDepartments, departmentMemberIds } from '../lib/departments';
-import { getDefaultAssigneeIds, isSuperadminRole, ticketParticipants } from '../types';
-import type { Department } from '../types';
+import { getDefaultAssigneeIds, isSuperadminRole } from '../types';
+import type { RequestType } from '../types';
 import { logTicketCreated } from '../lib/ticketEvents';
 import { localDateTimeMin } from '../lib/dates';
 import { partitionFiles, ATTACHMENT_HINT } from '../lib/attachments';
-
-interface RequestType {
-  id: string;
-  name: string;
-  defaultAssigneeIds?: string[];
-  defaultAssigneeId?: string | null;
-  /** New tickets of this type are routed here (Settings → Request Types). */
-  defaultDepartmentId?: string | null;
-  active: boolean;
-}
 
 export function SubmitRequestPage() {
   const navigate = useNavigate();
@@ -29,7 +18,6 @@ export function SubmitRequestPage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [files, setFiles] = useState<File[]>([]);
   const [requestTypes, setRequestTypes] = useState<RequestType[]>([]);
-  const [departments, setDepartments] = useState<Department[]>([]);
   const [submitError, setSubmitError] = useState('');
   const [fileError, setFileError] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -38,9 +26,6 @@ export function SubmitRequestPage() {
     getOrSeedRequestTypes()
       .then((types) => setRequestTypes((types as RequestType[]).filter((t) => t.active)))
       .catch((err) => console.error('Failed to fetch request types:', err));
-    loadDepartments()
-      .then(setDepartments)
-      .catch((err) => console.error('Failed to fetch departments:', err));
   }, []);
 
   const addFiles = (newFiles: FileList | File[]) => {
@@ -73,11 +58,6 @@ export function SubmitRequestPage() {
 
     const selectedType = requestTypes.find((rt) => rt.name === type);
     const assigneeIds = selectedType ? getDefaultAssigneeIds(selectedType) : [];
-    // Route to the type's department, if it still exists: a type pointing at a
-    // deleted department submits as unrouted rather than referencing a ghost.
-    const departmentId = selectedType?.defaultDepartmentId && departments.some((d) => d.id === selectedType.defaultDepartmentId)
-      ? selectedType.defaultDepartmentId
-      : null;
 
     // Admins may future-date a ticket so it goes live (and notifies assignees)
     // on the chosen date, exactly as if submitted then. A scheduled-date in the
@@ -99,21 +79,17 @@ export function SubmitRequestPage() {
         return `TKT-${String(count).padStart(4, '0')}`;
       });
 
-      // While scheduled, keep assignees and department members OUT of
-      // participants so they don't see (or get notified about) the ticket until
-      // it goes live. The activation Cloud Function adds them back and emails
-      // them on the go-live date.
-      const status = isFutureScheduled ? 'Scheduled' : 'Open';
-      const participants = ticketParticipants(
-        { submitterId: user.id, status },
-        assigneeIds,
-        departmentMemberIds(departments, departmentId),
-      );
+      // While scheduled, keep assignees OUT of participants so they don't see
+      // (or get notified about) the ticket until it goes live. The activation
+      // Cloud Function adds them back and emails them on the go-live date.
+      const participants = isFutureScheduled
+        ? [user.id]
+        : [...new Set([user.id, ...assigneeIds])];
 
       await setDoc(doc(db, 'tickets', ticketId), {
         type, title, description, priority,
-        status,
-        assigneeIds, departmentId, submitterId: user.id, participants,
+        status: isFutureScheduled ? 'Scheduled' : 'Open',
+        assigneeIds, submitterId: user.id, participants,
         ...(isFutureScheduled ? { scheduledFor: Timestamp.fromDate(scheduledDate!) } : {}),
         createdAt: serverTimestamp(), updatedAt: serverTimestamp(),
       });

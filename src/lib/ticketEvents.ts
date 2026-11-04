@@ -22,7 +22,7 @@ export type TicketEventType =
   | 'status_changed'
   | 'priority_changed'
   | 'assignees_changed'
-  | 'department_changed'
+  | 'type_changed'
   | 'commented';
 
 export interface TicketEvent {
@@ -36,8 +36,9 @@ export interface TicketEvent {
   toPriority?: TicketPriority;
   fromAssigneeIds?: string[];
   toAssigneeIds?: string[];
-  fromDepartmentId?: string | null;
-  toDepartmentId?: string | null;
+  /** Request type names (a ticket stores the type's name, not its id). */
+  fromType?: string;
+  toType?: string;
   /** First commenter on a ticket — used to compute time-to-first-response. */
   isFirstResponse?: boolean;
   createdAt: ReturnType<typeof serverTimestamp>;
@@ -141,30 +142,44 @@ export async function updateTicketAssignees(
 }
 
 /**
- * Route a ticket to a department (or take it off one). `participants` is the
- * caller's recomputed list — see ticketParticipants() in src/types.ts — so the
- * department's members gain (or lose) visibility in the same write.
+ * Change a ticket's request type and hand it to that type's people in the same
+ * write: `assigneeIds` is the new type's routing (see assigneeIdsForTypeChange())
+ * and `participants` is recomputed for it. One audit event per thing that
+ * changed, so the analytics page sees the reassignment exactly as it would a
+ * manual one.
  */
-export async function updateTicketDepartment(
+export async function updateTicketType(
   ticketId: string,
-  fromDepartmentId: string | null,
-  toDepartmentId: string | null,
-  participants: string[],
+  change: {
+    fromType: string;
+    toType: string;
+    fromAssigneeIds: string[];
+    toAssigneeIds: string[];
+    participants: string[];
+  },
   actorId: string,
 ): Promise<void> {
   const database = getDb();
   await updateDoc(doc(database, 'tickets', ticketId), {
-    departmentId: toDepartmentId,
-    participants,
+    type: change.toType,
+    assigneeIds: change.toAssigneeIds,
+    assigneeId: null,
+    participants: change.participants,
     updatedAt: serverTimestamp(),
   });
-  if (fromDepartmentId !== toDepartmentId) {
+  if (change.fromType !== change.toType) {
+    await logTicketEvent({ ticketId, type: 'type_changed', actorId, fromType: change.fromType, toType: change.toType });
+  }
+  const sameAssignees =
+    change.fromAssigneeIds.length === change.toAssigneeIds.length &&
+    change.fromAssigneeIds.every((id) => change.toAssigneeIds.includes(id));
+  if (!sameAssignees) {
     await logTicketEvent({
       ticketId,
-      type: 'department_changed',
+      type: 'assignees_changed',
       actorId,
-      fromDepartmentId,
-      toDepartmentId,
+      fromAssigneeIds: change.fromAssigneeIds,
+      toAssigneeIds: change.toAssigneeIds,
     });
   }
 }
