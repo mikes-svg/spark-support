@@ -24,6 +24,7 @@
     "@tiptap/pm": "^2.27.2",
     "@tiptap/react": "^2.27.2",
     "@tiptap/starter-kit": "^2.27.2",
+    "fflate": "^0.8.3",
     "firebase": "^10.14.1",
     "firebase-admin": "^13.10.0",
     "lucide-react": "0.522.0",

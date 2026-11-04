@@ -173,6 +173,13 @@ exports.getTicketAttachments = onCall({ region: REGION }, async (request) => {
   }
 
   const bucket = admin.storage().bucket();
+  // Under the emulator suite the Admin SDK talks to the local Storage emulator,
+  // so the URLs handed back must point there too or the client would be sent
+  // to production for files that only exist locally. The env var is set only
+  // by the emulator; it is never present in a deployed function.
+  const storageHost = process.env.FIREBASE_STORAGE_EMULATOR_HOST
+    ? `http://${process.env.FIREBASE_STORAGE_EMULATOR_HOST}`
+    : 'https://firebasestorage.googleapis.com';
   const [files] = await bucket.getFiles({ prefix: `attachments/${ticketId}/` });
   const attachments = [];
   for (const file of files) {
@@ -183,7 +190,7 @@ exports.getTicketAttachments = onCall({ region: REGION }, async (request) => {
     const encodedPath = encodeURIComponent(file.name);
     attachments.push({
       name: file.name.split('/').pop(),
-      url: `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/${encodedPath}?alt=media&token=${token}`,
+      url: `${storageHost}/v0/b/${bucket.name}/o/${encodedPath}?alt=media&token=${token}`,
     });
   }
   return attachments;

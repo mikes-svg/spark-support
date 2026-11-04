@@ -6,7 +6,7 @@ import { httpsCallable } from 'firebase/functions';
 import { db, storage, functions } from '../lib/firebase';
 import { StatusBadge, PriorityBadge } from '../components/Badges';
 import { useAuth } from '../context/AuthContext';
-import { Send, ArrowLeft, Clock, Trash2, UploadCloud, FileText, CalendarClock, Pencil, X, Check } from 'lucide-react';
+import { Send, ArrowLeft, Clock, Trash2, UploadCloud, FileText, CalendarClock, Pencil, X, Check, ExternalLink, Download } from 'lucide-react';
 import { ConfirmModal } from '../components/ConfirmModal';
 import { AssigneeChips } from '../components/AssigneeChips';
 import { MentionTextarea, renderCommentBody } from '../components/MentionTextarea';
@@ -17,7 +17,7 @@ import type { TicketStatus, TicketPriority, Ticket, Profile, RequestType } from 
 import { toDate, localDateTimeMin } from '../lib/dates';
 import { lockedAssigneeIds, assigneeIdsForTypeChange, assigneesAreValid, LAST_MANAGER_MESSAGE } from '../lib/ticketAssignees';
 import { loadRequestTypes, requestTypeNamed, requestTypeChoices } from '../lib/requestTypes';
-import { partitionFiles, ATTACHMENT_HINT } from '../lib/attachments';
+import { partitionFiles, ATTACHMENT_HINT, downloadAttachment, downloadAllAttachments } from '../lib/attachments';
 import {
   updateTicketStatus,
   updateTicketPriority,
@@ -57,6 +57,10 @@ export function TicketDetailPage() {
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState('');
+  // Which download is in flight: an attachment's URL, 'all' for the zip, or
+  // null. Disables the matching button and swaps its icon for a spinner.
+  const [downloading, setDownloading] = useState<string | null>(null);
+  const [downloadError, setDownloadError] = useState('');
   // True while files are being dragged over the Attachments card, so it can
   // light up as the drop target. Counted rather than toggled: dragenter and
   // dragleave fire for every child element crossed, and a plain boolean
@@ -275,6 +279,33 @@ export function TicketDetailPage() {
     e.preventDefault();
     setDragDepth(0);
     if (e.dataTransfer.files.length > 0) handleUploadFiles(e.dataTransfer.files);
+  };
+
+  const handleDownload = async (att: Attachment) => {
+    setDownloadError('');
+    setDownloading(att.url);
+    try {
+      await downloadAttachment(att);
+    } catch (err) {
+      console.error('Failed to download attachment:', err);
+      setDownloadError(`Could not download ${att.name}. Try Open instead.`);
+    } finally {
+      setDownloading(null);
+    }
+  };
+
+  const handleDownloadAll = async () => {
+    if (!ticket) return;
+    setDownloadError('');
+    setDownloading('all');
+    try {
+      await downloadAllAttachments(attachments, ticket.id);
+    } catch (err) {
+      console.error('Failed to download attachments:', err);
+      setDownloadError('Could not download the attachments. Try them one at a time.');
+    } finally {
+      setDownloading(null);
+    }
   };
 
   const handleUploadFiles = async (files: FileList) => {
@@ -584,20 +615,39 @@ export function TicketDetailPage() {
             onDrop={onDrop}
             className={`bg-white shadow-sm rounded-xl border overflow-hidden transition-colors ${dragDepth > 0 ? 'border-brand-dark ring-2 ring-brand-dark/20 bg-brand-dark/5' : 'border-gray-200'}`}
           >
-            <div className="px-6 py-4 border-b border-gray-200 bg-gray-50/50 flex items-center justify-between">
+            <div className="px-6 py-4 border-b border-gray-200 bg-gray-50/50 flex flex-wrap items-center justify-between gap-2">
               <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-widest">Attachments</h3>
-              <label className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-gray-600 bg-white border border-gray-200 rounded-md hover:bg-gray-50 cursor-pointer transition-colors">
-                {uploading ? (
-                  <div className="h-3.5 w-3.5 border-2 border-gray-300 border-t-gray-600 rounded-full animate-spin" />
-                ) : (
-                  <UploadCloud className="h-3.5 w-3.5" />
+              <div className="flex items-center gap-2">
+                {attachments.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={handleDownloadAll}
+                    disabled={downloading !== null}
+                    className="inline-flex items-center gap-1.5 whitespace-nowrap px-3 py-1.5 text-xs font-medium text-gray-600 bg-white border border-gray-200 rounded-md hover:bg-gray-50 disabled:opacity-60 disabled:cursor-wait transition-colors"
+                    title={attachments.length > 1 ? `Save all ${attachments.length} files as one zip` : 'Save the file'}
+                  >
+                    {downloading === 'all' ? (
+                      <div className="h-3.5 w-3.5 border-2 border-gray-300 border-t-gray-600 rounded-full animate-spin" />
+                    ) : (
+                      <Download className="h-3.5 w-3.5" />
+                    )}
+                    Download All
+                  </button>
                 )}
-                Add Files
-                <input type="file" multiple className="sr-only" onChange={(e) => { if (e.target.files) { handleUploadFiles(e.target.files); e.target.value = ''; } }} />
-              </label>
+                <label className="inline-flex items-center gap-1.5 whitespace-nowrap px-3 py-1.5 text-xs font-medium text-gray-600 bg-white border border-gray-200 rounded-md hover:bg-gray-50 cursor-pointer transition-colors">
+                  {uploading ? (
+                    <div className="h-3.5 w-3.5 border-2 border-gray-300 border-t-gray-600 rounded-full animate-spin" />
+                  ) : (
+                    <UploadCloud className="h-3.5 w-3.5" />
+                  )}
+                  Add Files
+                  <input type="file" multiple className="sr-only" onChange={(e) => { if (e.target.files) { handleUploadFiles(e.target.files); e.target.value = ''; } }} />
+                </label>
+              </div>
             </div>
             <div className="p-4">
               {uploadError && <p className="text-xs text-red-600 mb-2" role="alert">{uploadError}</p>}
+              {downloadError && <p className="text-xs text-red-600 mb-2" role="alert">{downloadError}</p>}
               {dragDepth > 0 ? (
                 <p className="text-sm font-medium text-brand-dark text-center py-4 border-2 border-dashed border-brand-dark/40 rounded-lg">
                   Drop to attach to {ticket.id}
@@ -606,12 +656,36 @@ export function TicketDetailPage() {
                 <p className="text-sm text-gray-400 text-center py-2">No attachments. Drag files here or click Add Files.</p>
               ) : (
                 <ul className="space-y-2">
-                  {attachments.map((att, idx) => (
-                    <li key={idx}>
-                      <a href={att.url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 text-sm text-brand-dark hover:text-brand-gold transition-colors">
+                  {attachments.map((att) => (
+                    <li key={att.url} className="flex items-center gap-2">
+                      <a href={att.url} target="_blank" rel="noopener noreferrer" title={att.name} className="min-w-0 flex-1 flex items-center gap-2 text-sm text-brand-dark hover:text-brand-gold transition-colors">
                         <FileText className="h-4 w-4 flex-shrink-0" />
-                        {att.name}
+                        <span className="truncate">{att.name}</span>
                       </a>
+                      <a
+                        href={att.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        aria-label={`Open ${att.name}`}
+                        className="flex-shrink-0 inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-gray-600 bg-white border border-gray-200 rounded-md hover:bg-gray-50 transition-colors"
+                      >
+                        <ExternalLink className="h-3.5 w-3.5" />
+                        Open
+                      </a>
+                      <button
+                        type="button"
+                        onClick={() => handleDownload(att)}
+                        disabled={downloading !== null}
+                        aria-label={`Download ${att.name}`}
+                        className="flex-shrink-0 inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-gray-600 bg-white border border-gray-200 rounded-md hover:bg-gray-50 disabled:opacity-60 disabled:cursor-wait transition-colors"
+                      >
+                        {downloading === att.url ? (
+                          <div className="h-3.5 w-3.5 border-2 border-gray-300 border-t-gray-600 rounded-full animate-spin" />
+                        ) : (
+                          <Download className="h-3.5 w-3.5" />
+                        )}
+                        Download
+                      </button>
                     </li>
                   ))}
                 </ul>
