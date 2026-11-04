@@ -572,9 +572,9 @@ export function TeamPage() {
         </div>
       </div>
 
-      {/* Departments */}
-      <div className="bg-white shadow-sm rounded-xl border border-gray-200 overflow-hidden">
-        <div className="px-6 py-5 border-b border-gray-200 bg-gray-50/50 flex justify-between items-center gap-4">
+      {/* Departments. No overflow-hidden here: the member picker's dropdown must be able to hang below the card. */}
+      <div className="bg-white shadow-sm rounded-xl border border-gray-200">
+        <div className="px-6 py-5 border-b border-gray-200 bg-gray-50/50 rounded-t-xl flex justify-between items-center gap-4">
           <div>
             <h2 className="text-lg font-serif font-semibold text-gray-900">Departments</h2>
             <p className="mt-1 text-sm text-gray-500">
