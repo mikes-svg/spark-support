@@ -3,10 +3,13 @@ import { collection, doc, updateDoc, deleteDoc, addDoc, serverTimestamp, getDocs
 import { db } from '../lib/firebase';
 import { Plus, Trash2, Edit2, Check, X } from 'lucide-react';
 import { AssigneeSelector } from '../components/AssigneeSelector';
+import { DepartmentSelect } from '../components/DepartmentSelect';
 import { ConfirmModal } from '../components/ConfirmModal';
 import { Modal } from '../components/Modal';
 import { getOrSeedRequestTypes } from '../lib/seedRequestTypes';
+import { loadDepartments } from '../lib/departments';
 import { getDefaultAssigneeIds } from '../types';
+import type { Department } from '../types';
 import { PageSpinner } from '../components/PageSpinner';
 
 interface Profile { id: string; name: string; email: string; photoURL: string; role: 'superadmin' | 'admin' | 'user'; }
@@ -15,11 +18,14 @@ interface RequestType {
   name: string;
   defaultAssigneeIds?: string[];
   defaultAssigneeId?: string | null;
+  /** New tickets of this type are routed to this department. */
+  defaultDepartmentId?: string | null;
   active: boolean;
 }
 
 export function AdminSettingsPage() {
   const [profiles, setProfiles] = useState<Profile[]>([]);
+  const [departments, setDepartments] = useState<Department[]>([]);
   const [requestTypes, setRequestTypes] = useState<RequestType[]>([]);
   const [loading, setLoading] = useState(true);
   const [editingType, setEditingType] = useState<string | null>(null);
@@ -39,6 +45,7 @@ export function AdminSettingsPage() {
         setProfiles(profilesSnap.docs.map((d) => ({ id: d.id, ...d.data() } as Profile)));
         const types = await getOrSeedRequestTypes();
         setRequestTypes(types as RequestType[]);
+        setDepartments(await loadDepartments());
       } catch (err) {
         console.error('Failed to fetch settings data:', err);
       } finally {
@@ -88,6 +95,20 @@ export function AdminSettingsPage() {
       console.error('Failed to update default assignees:', err);
       setRequestTypes((prev) => prev.map((t) => t.id === rt.id ? { ...t, defaultAssigneeIds: prevAssignees, defaultAssigneeId: null } : t));
       setActionError('Could not update default assignees. Please try again.');
+    }
+  };
+
+  const updateDefaultDepartment = async (rt: RequestType, departmentId: string | null) => {
+    if (!db) return;
+    const prevDept = rt.defaultDepartmentId ?? null;
+    setActionError('');
+    setRequestTypes((prev) => prev.map((t) => t.id === rt.id ? { ...t, defaultDepartmentId: departmentId } : t));
+    try {
+      await updateDoc(doc(db, 'requestTypes', rt.id), { defaultDepartmentId: departmentId });
+    } catch (err) {
+      console.error('Failed to update default department:', err);
+      setRequestTypes((prev) => prev.map((t) => t.id === rt.id ? { ...t, defaultDepartmentId: prevDept } : t));
+      setActionError('Could not update the default department. Please try again.');
     }
   };
 
@@ -155,7 +176,7 @@ export function AdminSettingsPage() {
         <div className="px-6 py-5 border-b border-gray-200 bg-gray-50/50 flex justify-between items-center">
           <div>
             <h2 className="text-lg font-serif font-semibold text-gray-900">Request Types & Routing</h2>
-            <p className="mt-1 text-sm text-gray-500">Configure categories and default assignees for new tickets.</p>
+            <p className="mt-1 text-sm text-gray-500">Configure categories and where new tickets of each type go: a department (managed on the Team page), default assignees, or both.</p>
           </div>
           <button onClick={openAddModal} className="inline-flex items-center justify-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 shadow-sm transition-colors">
             <Plus className="h-4 w-4 mr-2" />Add Type
@@ -164,11 +185,11 @@ export function AdminSettingsPage() {
         <div className="overflow-x-auto">
           <table className="min-w-full divide-y divide-gray-200">
             <thead className="bg-white">
-              <tr>{['Type Name', 'Default Assignees', 'Status', 'Actions'].map((h) => <th key={h} scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">{h}</th>)}</tr>
+              <tr>{['Type Name', 'Default Department', 'Default Assignees', 'Status', 'Actions'].map((h) => <th key={h} scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">{h}</th>)}</tr>
             </thead>
             <tbody className="bg-white divide-y divide-gray-200">
               {requestTypes.length === 0 && (
-                <tr><td colSpan={4} className="px-6 py-12 text-center text-sm text-gray-500">No request types yet. Click “Add Type” to create one.</td></tr>
+                <tr><td colSpan={5} className="px-6 py-12 text-center text-sm text-gray-500">No request types yet. Click “Add Type” to create one.</td></tr>
               )}
               {requestTypes.map((type) => (
                 <tr key={type.id}>
@@ -180,6 +201,15 @@ export function AdminSettingsPage() {
                         <button onClick={() => setEditingType(null)} className="text-gray-400 hover:text-gray-600"><X className="h-4 w-4" /></button>
                       </div>
                     ) : type.name}
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 min-w-[200px]">
+                    <DepartmentSelect
+                      value={type.defaultDepartmentId ?? null}
+                      onChange={(id) => updateDefaultDepartment(type, id)}
+                      departments={departments}
+                      noneLabel="None"
+                      aria-label={`Default department for ${type.name}`}
+                    />
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 min-w-[200px]">
                     <AssigneeSelector

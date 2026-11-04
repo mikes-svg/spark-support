@@ -37,8 +37,12 @@ export function managerIdsAmong(ids: string[], profiles: Record<string, Profile>
  * An empty list passes: an unassigned ticket is a normal state, and the triage
  * queue depends on it. The rule only bites once somebody is assigned.
  */
-export function assigneesAreValid(ids: string[], profiles: Record<string, Profile>): boolean {
-  if (ids.length === 0) return true;
+export function assigneesAreValid(
+  ids: string[],
+  profiles: Record<string, Profile>,
+  hasDepartment = false,
+): boolean {
+  if (ids.length === 0 || hasDepartment) return true;
   return managerIdsAmong(ids, profiles).length > 0;
 }
 
@@ -46,17 +50,27 @@ export function assigneesAreValid(ids: string[], profiles: Record<string, Profil
  * Ids that must not be removable from the current selection — i.e. the sole
  * remaining Manager. Returns an empty array when removal is unconstrained, so
  * callers can spread it straight into a `lockedIds` prop.
+ *
+ * `hasDepartment`: a ticket routed to a department is accountable to that
+ * department, so the individual-Manager rule is waived (and the rules copy
+ * waives it the same way). Without this, a department member who is a User
+ * could never pick a ticket up — adding themselves as its only assignee would
+ * be refused for lacking a Manager.
  */
-export function lockedAssigneeIds(ids: string[], profiles: Record<string, Profile>): string[] {
-  if (ids.length === 0) return [];
+export function lockedAssigneeIds(
+  ids: string[],
+  profiles: Record<string, Profile>,
+  hasDepartment = false,
+): string[] {
+  if (ids.length === 0 || hasDepartment) return [];
   const managers = managerIdsAmong(ids, profiles);
   return managers.length === 1 ? managers : [];
 }
 
 /** Convenience for a loaded ticket. */
 export function lockedAssigneeIdsForTicket(
-  ticket: Pick<Ticket, 'assigneeIds' | 'assigneeId'>,
+  ticket: Pick<Ticket, 'assigneeIds' | 'assigneeId' | 'departmentId'>,
   profiles: Record<string, Profile>,
 ): string[] {
-  return lockedAssigneeIds(getAssigneeIds(ticket), profiles);
+  return lockedAssigneeIds(getAssigneeIds(ticket), profiles, !!ticket.departmentId);
 }

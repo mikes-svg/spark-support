@@ -42,6 +42,7 @@ const gcalWebhook = require('./gcalWebhook');
 const reassign = require('./reassign');
 const adminIds = require('./adminIds');
 const taskStages = require('./taskStages');
+const departments = require('./departments');
 
 // ─── profile.js ──────────────────────────────────────────────────────────────
 exports.ensureProfile = profile.ensureProfile;
@@ -97,3 +98,15 @@ exports.backfillAdminIds = adminIds.backfillAdminIds;
 // Sequential sign-off chains: advancing the baton and closing the task on the
 // final sign-off happen server-side so a closed laptop cannot strand a task.
 exports.onTaskStageAdvanced = taskStages.onTaskStageAdvanced;
+
+// ─── departments.js ──────────────────────────────────────────────────────────
+// Keeps tickets' participants in step with department membership, and clears
+// the routing of a department that is deleted.
+exports.onDepartmentWritten = departments.onDepartmentWritten;
+
+// Deploy stamp. Firebase skips a function whose source hash is unchanged, so a
+// redeploy aimed at replacing a wedged Cloud Run revision does nothing at all —
+// every function comes back "Skipped (No changes detected)". Bumping this forces
+// a fresh build and a new revision. Last forced: 2026-10-22, to recover from an
+// ingress outage where every request returned 500 in 0ms without reaching the
+// container.

@@ -5,21 +5,25 @@ import { db } from '../lib/firebase';
 import { useAuth } from '../context/AuthContext';
 import { StatusBadge } from '../components/Badges';
 import { Avatar } from '../components/Avatar';
-import { Plus, Users, Tag, Search, X } from 'lucide-react';
-import { getAssigneeIds } from '../types';
-import type { Ticket, Profile, TicketStatus } from '../types';
+import { Plus, Users, Tag, Search, X, Building2 } from 'lucide-react';
+import { getAssigneeIds, getDepartmentId } from '../types';
+import type { Ticket, Profile, TicketStatus, Department } from '../types';
 import { formatDate } from '../lib/dates';
 import { makeTicketMatcher } from '../lib/ticketSearch';
+import { loadDepartments, departmentName } from '../lib/departments';
 
 // Sentinel for the "Unassigned" choice in the assignee filter, kept distinct
 // from '' which means "all assignees".
 const UNASSIGNED = '__unassigned__';
+// Prefix for a department choice in the same filter.
+const DEPT_FILTER = 'dept:';
 
 export function DashboardPage() {
   const { user } = useAuth();
   const navigate = useNavigate();
   const [tickets, setTickets] = useState<Ticket[]>([]);
   const [profiles, setProfiles] = useState<Record<string, Profile>>({});
+  const [departments, setDepartments] = useState<Department[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
   // Clicking a stat tile filters the Recent Requests table to that status;
@@ -61,6 +65,7 @@ export function DashboardPage() {
       }
     }
     fetchTickets();
+    loadDepartments().then(setDepartments).catch(() => {});
   }, [user]);
 
   // The assignees actually present on the user's own tickets, plus whether any
@@ -69,22 +74,27 @@ export function DashboardPage() {
   // and every option matches something.
   const assigneeOptions = useMemo(() => {
     const ids = new Set<string>();
+    const deptIds = new Set<string>();
     let hasUnassigned = false;
     for (const t of tickets) {
       const a = getAssigneeIds(t);
-      if (a.length === 0) hasUnassigned = true;
+      const d = getDepartmentId(t);
+      if (d) deptIds.add(d);
+      // A ticket routed to a department is in someone's queue, not unassigned.
+      if (a.length === 0 && !d) hasUnassigned = true;
       else a.forEach((id) => ids.add(id));
     }
     const people = [...ids]
       .map((id) => profiles[id])
       .filter((p): p is Profile => Boolean(p))
       .sort((a, b) => a.name.localeCompare(b.name));
-    return { people, hasUnassigned };
-  }, [tickets, profiles]);
+    const depts = departments.filter((d) => deptIds.has(d.id));
+    return { people, depts, hasUnassigned };
+  }, [tickets, profiles, departments]);
 
   // Only worth showing the control when it can actually narrow anything — i.e.
   // there's more than one bucket to choose between.
-  const assigneeBucketCount = assigneeOptions.people.length + (assigneeOptions.hasUnassigned ? 1 : 0);
+  const assigneeBucketCount = assigneeOptions.people.length + assigneeOptions.depts.length + (assigneeOptions.hasUnassigned ? 1 : 0);
   const canFilterByAssignee = assigneeBucketCount > 1;
 
   // Request types present on the user's own tickets, for the type filter.
@@ -98,7 +108,8 @@ export function DashboardPage() {
   const matchesAssignee = (t: Ticket) => {
     if (!assigneeFilter) return true;
     const ids = getAssigneeIds(t);
-    if (assigneeFilter === UNASSIGNED) return ids.length === 0;
+    if (assigneeFilter === UNASSIGNED) return ids.length === 0 && !getDepartmentId(t);
+    if (assigneeFilter.startsWith(DEPT_FILTER)) return getDepartmentId(t) === assigneeFilter.slice(DEPT_FILTER.length);
     return ids.includes(assigneeFilter);
   };
   const matchesType = (t: Ticket) => !typeFilter || t.type === typeFilter;
@@ -127,6 +138,7 @@ export function DashboardPage() {
   const anyFilterActive = statusFilter !== null || assigneeFilter !== '' || typeFilter !== '' || !matcher.isEmpty;
   const selectedAssigneeLabel =
     assigneeFilter === UNASSIGNED ? 'Unassigned'
+    : assigneeFilter.startsWith(DEPT_FILTER) ? (departmentName(departments, assigneeFilter.slice(DEPT_FILTER.length)) ?? 'Department')
     : assigneeFilter ? (profiles[assigneeFilter]?.name ?? 'Assignee')
     : null;
   // Non-status facets shown after the table title (status is already the title).
@@ -165,6 +177,9 @@ export function DashboardPage() {
                 className="block w-full sm:w-52 pl-9 pr-10 py-2 text-sm border border-gray-300 rounded-md bg-white focus:outline-none focus:ring-brand-dark focus:border-brand-dark"
               >
                 <option value="">All assignees</option>
+                {assigneeOptions.depts.map((d) => (
+                  <option key={d.id} value={`${DEPT_FILTER}${d.id}`}>{d.name} (department)</option>
+                ))}
                 {assigneeOptions.people.map((p) => (
                   <option key={p.id} value={p.id}>{p.name}</option>
                 ))}
@@ -264,6 +279,7 @@ export function DashboardPage() {
               ) : visibleTickets.length > 0 ? (
                 visibleTickets.map((ticket) => {
                   const assignees = getAssigneeIds(ticket).map((id) => profiles[id]).filter(Boolean);
+                  const deptName = departmentName(departments, getDepartmentId(ticket));
                   return (
                     <tr key={ticket.id} onClick={() => navigate(`/tickets/${ticket.id}`)} className="hover:bg-gray-50 cursor-pointer transition-colors">
                       <td className="px-6 py-4 whitespace-nowrap text-sm font-mono text-gray-500">{ticket.id}</td>
@@ -271,18 +287,25 @@ export function DashboardPage() {
                       <td className="px-6 py-4 text-sm font-medium text-gray-900 max-w-xs truncate">{ticket.title}</td>
                       <td className="px-6 py-4 whitespace-nowrap"><StatusBadge status={ticket.status} /></td>
                       <td className="px-6 py-4 whitespace-nowrap">
-                        {assignees.length > 0 ? (
-                          <div className="flex items-center -space-x-2">
-                            {assignees.slice(0, 3).map((a) => (
-                              <Avatar key={a.id} className="h-6 w-6 rounded-full border-2 border-white" src={a.photoURL} name={a.name} />
-                            ))}
-                            {assignees.length > 3 && (
-                              <span className="flex items-center justify-center h-6 w-6 rounded-full bg-gray-200 text-[10px] font-medium text-gray-600 border-2 border-white">
-                                +{assignees.length - 3}
-                              </span>
-                            )}
-                          </div>
-                        ) : <span className="text-sm text-gray-400 italic">Unassigned</span>}
+                        <div className="flex items-center gap-2">
+                          {deptName && (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-brand-dark/10 text-brand-dark" title="Routed to this department">
+                              <Building2 className="h-3 w-3" aria-hidden="true" />{deptName}
+                            </span>
+                          )}
+                          {assignees.length > 0 ? (
+                            <div className="flex items-center -space-x-2">
+                              {assignees.slice(0, 3).map((a) => (
+                                <Avatar key={a.id} className="h-6 w-6 rounded-full border-2 border-white" src={a.photoURL} name={a.name} />
+                              ))}
+                              {assignees.length > 3 && (
+                                <span className="flex items-center justify-center h-6 w-6 rounded-full bg-gray-200 text-[10px] font-medium text-gray-600 border-2 border-white">
+                                  +{assignees.length - 3}
+                                </span>
+                              )}
+                            </div>
+                          ) : !deptName && <span className="text-sm text-gray-400 italic">Unassigned</span>}
+                        </div>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{formatDate(ticket.createdAt)}</td>
                     </tr>

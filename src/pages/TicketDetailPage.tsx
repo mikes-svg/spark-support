@@ -9,18 +9,21 @@ import { useAuth } from '../context/AuthContext';
 import { Send, ArrowLeft, Clock, Trash2, UploadCloud, FileText, CalendarClock, Pencil, X, Check } from 'lucide-react';
 import { ConfirmModal } from '../components/ConfirmModal';
 import { AssigneeChips } from '../components/AssigneeChips';
+import { DepartmentSelect } from '../components/DepartmentSelect';
 import { MentionTextarea, renderCommentBody } from '../components/MentionTextarea';
 import { PageSpinner } from '../components/PageSpinner';
 import { Avatar } from '../components/Avatar';
-import { getAssigneeIds, isScheduled, isAdminRole, isSuperadminRole } from '../types';
-import type { TicketStatus, TicketPriority, Ticket, Profile } from '../types';
+import { getAssigneeIds, getDepartmentId, isScheduled, isAdminRole, isSuperadminRole, ticketParticipants } from '../types';
+import type { TicketStatus, TicketPriority, Ticket, Profile, Department } from '../types';
 import { toDate, localDateTimeMin } from '../lib/dates';
 import { lockedAssigneeIds, LAST_MANAGER_MESSAGE } from '../lib/ticketAssignees';
+import { loadDepartments, departmentMemberIds, departmentName } from '../lib/departments';
 import { partitionFiles, ATTACHMENT_HINT } from '../lib/attachments';
 import {
   updateTicketStatus,
   updateTicketPriority,
   updateTicketAssignees,
+  updateTicketDepartment,
   logTicketComment,
 } from '../lib/ticketEvents';
 
@@ -55,12 +58,18 @@ export function TicketDetailPage() {
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState('');
+  // True while files are being dragged over the Attachments card, so it can
+  // light up as the drop target. Counted rather than toggled: dragenter and
+  // dragleave fire for every child element crossed, and a plain boolean
+  // flickers off as the pointer moves between them.
+  const [dragDepth, setDragDepth] = useState(0);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [showCancelConfirm, setShowCancelConfirm] = useState(false);
   const [rescheduling, setRescheduling] = useState(false);
   const [rescheduleValue, setRescheduleValue] = useState('');
   const [adminProfiles, setAdminProfiles] = useState<Profile[]>([]);
   const [allProfiles, setAllProfiles] = useState<Profile[]>([]);
+  const [departments, setDepartments] = useState<Department[]>([]);
   const [pendingMentionIds, setPendingMentionIds] = useState<string[]>([]);
 
   // Mirror `profiles` into a ref so the comments listener (whose effect only
@@ -117,6 +126,9 @@ export function TicketDetailPage() {
     getDocs(collection(db!, 'profiles'))
       .then((snap) => setAllProfiles(snap.docs.map((d) => ({ id: d.id, ...d.data() } as Profile))))
       .catch(() => {});
+
+    // Departments, for the routing control and to name the current one.
+    loadDepartments().then(setDepartments).catch(() => {});
 
     let unsubscribe: (() => void) | undefined;
     try {
@@ -242,6 +254,28 @@ export function TicketDetailPage() {
     }
   };
 
+  const hasFiles = (e: React.DragEvent) => Array.from(e.dataTransfer.types).includes('Files');
+  const onDragEnter = (e: React.DragEvent<HTMLDivElement>) => {
+    if (!hasFiles(e)) return;
+    e.preventDefault();
+    setDragDepth((d) => d + 1);
+  };
+  const onDragOver = (e: React.DragEvent<HTMLDivElement>) => {
+    if (!hasFiles(e)) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'copy';
+  };
+  const onDragLeave = (e: React.DragEvent<HTMLDivElement>) => {
+    if (!hasFiles(e)) return;
+    setDragDepth((d) => Math.max(0, d - 1));
+  };
+  const onDrop = (e: React.DragEvent<HTMLDivElement>) => {
+    if (!hasFiles(e)) return;
+    e.preventDefault();
+    setDragDepth(0);
+    if (e.dataTransfer.files.length > 0) handleUploadFiles(e.dataTransfer.files);
+  };
+
   const handleUploadFiles = async (files: FileList) => {
     if (!ticket || !storage || files.length === 0) return;
     const { accepted, rejected } = partitionFiles(Array.from(files));
@@ -299,12 +333,11 @@ export function TicketDetailPage() {
     if (!ticket || !db || !user) return;
     const oldAssigneeIds = getAssigneeIds(ticket);
     const added = newAssigneeIds.filter((id) => !oldAssigneeIds.includes(id));
-    // While scheduled, keep assignees out of participants (and don't email them);
-    // the activation function adds + notifies them on the go-live date.
+    // While scheduled, ticketParticipants keeps assignees (and department
+    // members) out of participants, and nobody is emailed; the activation
+    // function adds + notifies them on the go-live date.
     const scheduled = isScheduled(ticket);
-    const participants = scheduled
-      ? [ticket.submitterId]
-      : [...new Set([ticket.submitterId, ...newAssigneeIds])];
+    const participants = ticketParticipants(ticket, newAssigneeIds, departmentMemberIds(departments, getDepartmentId(ticket)));
 
     const prev = ticket;
     setTicket({ ...ticket, assigneeIds: newAssigneeIds, assigneeId: null, participants } as Ticket);
@@ -329,6 +362,23 @@ export function TicketDetailPage() {
         setProfiles((prev) => ({ ...prev, [addedId]: { id: addedId, name: assigneeData.name, photoURL: assigneeData.photoURL, email: assigneeData.email } }));
       }
     }
+  };
+
+  const handleDepartmentChange = async (newDeptId: string | null) => {
+    if (!ticket || !db || !user) return;
+    const oldDeptId = getDepartmentId(ticket);
+    if (oldDeptId === newDeptId) return;
+    const participants = ticketParticipants(ticket, getAssigneeIds(ticket), departmentMemberIds(departments, newDeptId));
+    const prev = ticket;
+    setTicket({ ...ticket, departmentId: newDeptId, participants } as Ticket);
+    try {
+      await updateTicketDepartment(ticket.id, oldDeptId, newDeptId, participants, user.id);
+    } catch (err) {
+      console.error('Failed to update department:', err);
+      setTicket(prev);
+      alert('Failed to update the department. Please try again.');
+    }
+    // Department members are emailed server-side by onTicketUpdated.
   };
 
   const handleDeleteTicket = async () => {
@@ -388,12 +438,18 @@ export function TicketDetailPage() {
   // the point of being able to assign a User. firestore.rules grants the same
   // pair (admin OR assignee), so the UI is not the thing holding the line.
   const isAssignee = !!user && assigneeIds.includes(user.id);
-  const canEditTicket = isAdmin || isAssignee;
+  // So may anyone in the department the ticket is routed to — being able to
+  // pick it up is what routing to a department means. The rules grant the
+  // same (admin OR assignee OR department member).
+  const departmentId = getDepartmentId(ticket);
+  const isDepartmentMember = !!user && departmentMemberIds(departments, departmentId).includes(user.id);
+  const canEditTicket = isAdmin || isAssignee || isDepartmentMember;
 
   // Every ticket must keep a Manager/Administrator on it, so the sole remaining
-  // one cannot be removed here. The same invariant is enforced in the rules.
+  // one cannot be removed here. The same invariant is enforced in the rules —
+  // and, like the rules, waived once a department is accountable for it.
   const profilesById = Object.fromEntries(allProfiles.map((p) => [p.id, p]));
-  const lockedIds = lockedAssigneeIds(assigneeIds, profilesById);
+  const lockedIds = lockedAssigneeIds(assigneeIds, profilesById, !!departmentId);
   const isSuperadmin = isSuperadminRole(user?.role);
   const scheduled = isScheduled(ticket);
   const nowLocalMin = localDateTimeMin();
@@ -476,7 +532,15 @@ export function TicketDetailPage() {
             </div>
           </div>
 
-          <div className="bg-white shadow-sm rounded-xl border border-gray-200 overflow-hidden">
+          {/* The whole card is a drop target, so files can be dragged straight
+              onto an open ticket instead of only attached at submission. */}
+          <div
+            onDragEnter={onDragEnter}
+            onDragOver={onDragOver}
+            onDragLeave={onDragLeave}
+            onDrop={onDrop}
+            className={`bg-white shadow-sm rounded-xl border overflow-hidden transition-colors ${dragDepth > 0 ? 'border-brand-dark ring-2 ring-brand-dark/20 bg-brand-dark/5' : 'border-gray-200'}`}
+          >
             <div className="px-6 py-4 border-b border-gray-200 bg-gray-50/50 flex items-center justify-between">
               <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-widest">Attachments</h3>
               <label className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-gray-600 bg-white border border-gray-200 rounded-md hover:bg-gray-50 cursor-pointer transition-colors">
@@ -491,8 +555,12 @@ export function TicketDetailPage() {
             </div>
             <div className="p-4">
               {uploadError && <p className="text-xs text-red-600 mb-2" role="alert">{uploadError}</p>}
-              {attachments.length === 0 ? (
-                <p className="text-sm text-gray-400 text-center py-2">No attachments.</p>
+              {dragDepth > 0 ? (
+                <p className="text-sm font-medium text-brand-dark text-center py-4 border-2 border-dashed border-brand-dark/40 rounded-lg">
+                  Drop to attach to {ticket.id}
+                </p>
+              ) : attachments.length === 0 ? (
+                <p className="text-sm text-gray-400 text-center py-2">No attachments. Drag files here or click Add Files.</p>
               ) : (
                 <ul className="space-y-2">
                   {attachments.map((att, idx) => (
@@ -504,6 +572,9 @@ export function TicketDetailPage() {
                     </li>
                   ))}
                 </ul>
+              )}
+              {dragDepth === 0 && attachments.length > 0 && (
+                <p className="mt-3 text-xs text-gray-400 text-center">Drag files here to add more.</p>
               )}
             </div>
           </div>
@@ -621,6 +692,26 @@ export function TicketDetailPage() {
                   {submitter && <Avatar src={submitter.photoURL} name={submitter.name} className="w-6 h-6 rounded-full" />}
                   <span className="text-sm text-gray-900">{submitter?.name || '—'}</span>
                 </div>
+              </div>
+              <div>
+                <span className="block text-xs font-medium text-gray-500 uppercase mb-1">Department</span>
+                {canEditTicket ? (
+                  <DepartmentSelect
+                    value={departmentId}
+                    onChange={handleDepartmentChange}
+                    departments={departments}
+                    noneLabel="Not routed to a department"
+                  />
+                ) : departmentId ? (
+                  <span className="text-sm text-gray-900">{departmentName(departments, departmentId)}</span>
+                ) : (
+                  <span className="text-sm text-gray-500 italic">None</span>
+                )}
+                {departmentId && (
+                  <p className="mt-1 text-xs text-gray-500">
+                    Everyone in this department can see the ticket and pick it up.
+                  </p>
+                )}
               </div>
               <div>
                 <span className="block text-xs font-medium text-gray-500 uppercase mb-1">Assignees</span>

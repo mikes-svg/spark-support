@@ -86,8 +86,14 @@ service cloud.firestore {
       // prevents is "reassign to a User, then take yourself off", which is just
       // as bad when a Manager does it. An empty list is allowed: unassigned is
       // a normal state and the triage queue depends on it.
+      //
+      // A ticket routed to a department is accountable to that department, so
+      // the individual-Manager requirement is waived for it. Without the
+      // waiver a department member who is a User could never pick a ticket
+      // up: adding themselves as its only assignee would be refused.
       function keepsAManager() {
         return request.resource.data.assigneeIds.size() == 0
+          || hasDepartment(request.resource.data)
           // If meta/adminIds has not been built yet, get() on the missing doc
           // would throw and DENY every ticket update — locking the whole team
           // out over a deploy-ordering mistake. Fall back to the old behaviour
@@ -101,6 +107,23 @@ service cloud.firestore {
         return isSignedIn() && resource.data.assigneeIds.hasAny([request.auth.uid]);
       }
 
+      // A ticket routed to a department. Old tickets have no such field at
+      // all, so the key check comes first — reading a missing field is an
+      // error, and an error here would deny the update.
+      function hasDepartment(data) {
+        return 'departmentId' in data && data.departmentId is string && data.departmentId != '';
+      }
+
+      // A member of the department the ticket is routed to may work it, the
+      // same as an individual assignee can. The department doc is read live
+      // rather than trusting participants[], because participants is written
+      // by the client and the whole point of the check is who may write.
+      function isDepartmentMember() {
+        return isSignedIn() && hasDepartment(resource.data)
+          && exists(/databases/$(database)/documents/departments/$(resource.data.departmentId))
+          && get(/databases/$(database)/documents/departments/$(resource.data.departmentId)).data.memberIds.hasAny([request.auth.uid]);
+      }
+
       allow read: if isSignedIn() && (
         resource.data.participants.hasAny([request.auth.uid]) || isAdmin()
       );
@@ -110,8 +133,10 @@ service cloud.firestore {
         (request.resource.data.status != 'Scheduled' || isSuperAdmin());
       // Managers/Administrators may update any ticket; an assignee of ANY role
       // may update one they are on, so work can actually be delegated to a User
-      // and marked done by them. Both are held to keepsAManager().
-      allow update: if (isAdmin() || isTicketAssignee()) && keepsAManager();
+      // and marked done by them; so may a member of the department it is
+      // routed to, which is what routing to a department is for. All are held
+      // to keepsAManager().
+      allow update: if (isAdmin() || isTicketAssignee() || isDepartmentMember()) && keepsAManager();
       // Superadmins can delete any ticket (this also covers cancelling a
       // not-yet-live scheduled ticket).
       allow delete: if isSuperAdmin();
@@ -151,6 +176,14 @@ service cloud.firestore {
     }
 
     match /requestTypes/{typeId} {
+      allow read: if isSignedIn();
+      allow write: if isSuperAdmin();
+    }
+
+    // Departments a ticket can be routed to. Everyone reads them (every ticket
+    // view shows the name, and the rule above reads membership); only
+    // Administrators shape them, from the Team page.
+    match /departments/{departmentId} {
       allow read: if isSignedIn();
       allow write: if isSuperAdmin();
     }

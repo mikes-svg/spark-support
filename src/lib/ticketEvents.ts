@@ -22,6 +22,7 @@ export type TicketEventType =
   | 'status_changed'
   | 'priority_changed'
   | 'assignees_changed'
+  | 'department_changed'
   | 'commented';
 
 export interface TicketEvent {
@@ -35,6 +36,8 @@ export interface TicketEvent {
   toPriority?: TicketPriority;
   fromAssigneeIds?: string[];
   toAssigneeIds?: string[];
+  fromDepartmentId?: string | null;
+  toDepartmentId?: string | null;
   /** First commenter on a ticket — used to compute time-to-first-response. */
   isFirstResponse?: boolean;
   createdAt: ReturnType<typeof serverTimestamp>;
@@ -133,6 +136,35 @@ export async function updateTicketAssignees(
       actorId,
       fromAssigneeIds,
       toAssigneeIds,
+    });
+  }
+}
+
+/**
+ * Route a ticket to a department (or take it off one). `participants` is the
+ * caller's recomputed list — see ticketParticipants() in src/types.ts — so the
+ * department's members gain (or lose) visibility in the same write.
+ */
+export async function updateTicketDepartment(
+  ticketId: string,
+  fromDepartmentId: string | null,
+  toDepartmentId: string | null,
+  participants: string[],
+  actorId: string,
+): Promise<void> {
+  const database = getDb();
+  await updateDoc(doc(database, 'tickets', ticketId), {
+    departmentId: toDepartmentId,
+    participants,
+    updatedAt: serverTimestamp(),
+  });
+  if (fromDepartmentId !== toDepartmentId) {
+    await logTicketEvent({
+      ticketId,
+      type: 'department_changed',
+      actorId,
+      fromDepartmentId,
+      toDepartmentId,
     });
   }
 }
