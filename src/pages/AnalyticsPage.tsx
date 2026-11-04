@@ -28,7 +28,7 @@ import {
 interface TicketEvent {
   id: string;
   ticketId: string;
-  type: 'created' | 'status_changed' | 'priority_changed' | 'assignees_changed' | 'commented';
+  type: 'created' | 'status_changed' | 'priority_changed' | 'assignees_changed' | 'type_changed' | 'commented';
   actorId: string;
   fromStatus?: TicketStatus;
   toStatus?: TicketStatus;

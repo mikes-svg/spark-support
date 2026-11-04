@@ -155,30 +155,24 @@ const SERIES = [
     carryMode: 'reset', missedPolicy: 'skip-to-next', missedCount: 2 },
 ];
 
-// Departments a ticket can be routed to, and a few tickets to route. The
-// Maintenance department has a User (Greg) in it with no Manager, which is the
-// case department routing exists for: he must be able to see and pick up its
-// tickets even though he could never be their sole individual assignee.
-const DEPARTMENTS = [
-  { id: 'dept-it',    name: 'IT Support',  memberIds: ['u-michael', 'u-jason'] },
-  { id: 'dept-maint', name: 'Maintenance', memberIds: ['u-greg'] },
-  { id: 'dept-hr',    name: 'HR',          memberIds: ['u-chloe', 'u-edita'] },
-];
-
+// Request types and a few tickets to move between them. Default assignees are
+// what a ticket is handed to when it is submitted under the type, or moved to
+// it later. Maintenance defaults to a User on purpose: moving an
+// individually-assigned ticket there keeps its Manager on as well.
 const REQUEST_TYPES = [
-  { id: 'rt-it',    name: 'IT Support',  defaultDepartmentId: 'dept-it' },
-  { id: 'rt-maint', name: 'Maintenance', defaultDepartmentId: 'dept-maint' },
-  { id: 'rt-hr',    name: 'HR',          defaultDepartmentId: 'dept-hr' },
-  { id: 'rt-other', name: 'Other',       defaultDepartmentId: null },
+  { id: 'rt-it',    name: 'IT Support',  defaultAssigneeIds: ['u-michael'] },
+  { id: 'rt-maint', name: 'Maintenance', defaultAssigneeIds: ['u-greg'] },
+  { id: 'rt-hr',    name: 'HR',          defaultAssigneeIds: ['u-chloe'] },
+  { id: 'rt-other', name: 'Other',       defaultAssigneeIds: [] },
 ];
 
 const TICKETS = [
   { id: 'TKT-0001', type: 'IT Support',  title: 'Laptop will not connect to the office Wi-Fi', priority: 'High',
-    status: 'Open', submitterId: 'u-edita', assigneeIds: [], departmentId: 'dept-it' },
+    status: 'Open', submitterId: 'u-edita', assigneeIds: ['u-michael'] },
   { id: 'TKT-0002', type: 'Maintenance', title: 'Leak under the break-room sink', priority: 'Urgent',
-    status: 'Open', submitterId: 'u-chloe', assigneeIds: [], departmentId: 'dept-maint' },
+    status: 'Open', submitterId: 'u-chloe', assigneeIds: [] },
   { id: 'TKT-0003', type: 'Other',       title: 'Order business cards for the new hires', priority: 'Low',
-    status: 'In Progress', submitterId: 'u-jason', assigneeIds: ['u-chloe'], departmentId: null },
+    status: 'In Progress', submitterId: 'u-jason', assigneeIds: ['u-chloe'] },
 ];
 
 async function main() {
@@ -282,24 +276,20 @@ async function main() {
   await batch.commit();
   console.log('  tasks: ' + TASKS.length + ', series: ' + SERIES.length);
 
-  for (const d of DEPARTMENTS) {
-    await db.collection('departments').doc(d.id).set({ name: d.name, memberIds: d.memberIds, createdAt: admin.firestore.FieldValue.serverTimestamp() });
-  }
   for (const rt of REQUEST_TYPES) {
-    await db.collection('requestTypes').doc(rt.id).set({ name: rt.name, defaultAssigneeIds: [], defaultDepartmentId: rt.defaultDepartmentId, active: true, createdAt: admin.firestore.FieldValue.serverTimestamp() });
+    await db.collection('requestTypes').doc(rt.id).set({ name: rt.name, defaultAssigneeIds: rt.defaultAssigneeIds, active: true, createdAt: admin.firestore.FieldValue.serverTimestamp() });
   }
   for (const t of TICKETS) {
-    const members = (DEPARTMENTS.find((d) => d.id === t.departmentId) || { memberIds: [] }).memberIds;
     await db.collection('tickets').doc(t.id).set({
       type: t.type, title: t.title, description: t.title + '. Seeded for the emulator walkthrough.',
       priority: t.priority, status: t.status,
-      assigneeIds: t.assigneeIds, departmentId: t.departmentId, submitterId: t.submitterId,
-      participants: [...new Set([t.submitterId, ...t.assigneeIds, ...members])],
+      assigneeIds: t.assigneeIds, submitterId: t.submitterId,
+      participants: [...new Set([t.submitterId, ...t.assigneeIds])],
       createdAt: admin.firestore.FieldValue.serverTimestamp(),
       updatedAt: admin.firestore.FieldValue.serverTimestamp(),
     });
   }
-  console.log('  departments: ' + DEPARTMENTS.length + ', request types: ' + REQUEST_TYPES.length + ', tickets: ' + TICKETS.length);
+  console.log('  request types: ' + REQUEST_TYPES.length + ', tickets: ' + TICKETS.length);
 
   // Fixed ids, not .add(): everything else here is keyed, so re-running the
   // seed is idempotent — auto-ids would quietly double the comment thread on
