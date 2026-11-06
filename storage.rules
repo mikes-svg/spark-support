@@ -9,9 +9,13 @@ service firebase.storage {
       allow read: if false;
       // Uploads stay client-side; size + type are enforced here. (Participation
       // can't be checked in Storage rules — they can't read Firestore.)
+      // PNG/JPG/GIF (not WebP or HEIC, which do not open everywhere), PDF,
+      // Office documents (application/msword for legacy .doc, application/vnd.*
+      // for .xls/.ppt and all OpenXML .docx/.xlsx/.pptx) and text such as CSV.
+      // Mirrors ACCEPTED_FILE_TYPE_PATTERN in src/lib/attachments.ts.
       allow write: if request.auth != null
-        && request.resource.size < 10 * 1024 * 1024
-        && request.resource.contentType.matches('image/.*|application/pdf');
+        && request.resource.size < 25 * 1024 * 1024
+        && request.resource.contentType.matches('image/(png|jpeg|gif)|text/.*|application/pdf|application/msword|application/vnd\\..*');
     }
 
     // Task attachments. Tasks carry real work product — walkthrough videos,

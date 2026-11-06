@@ -1,17 +1,27 @@
 import { zipSync } from 'fflate';
 
-/** Attachment constraints, mirrored by the storage.rules write check. */
-export const MAX_FILE_BYTES = 10 * 1024 * 1024; // 10 MB
-export const ACCEPTED_FILE_TYPES = ['image/png', 'image/jpeg', 'application/pdf'];
-export const ATTACHMENT_HINT = 'Allowed: PNG, JPG, PDF up to 10MB.';
+/**
+ * Attachment constraints, mirrored by the storage.rules write check.
+ *
+ * PNG, JPG and GIF images (not WebP or HEIC, which do not open on every
+ * computer), PDF, Office documents (Word, Excel, PowerPoint: the legacy
+ * `application/msword` type plus everything under `application/vnd.`, which
+ * covers both the old .xls/.ppt types and the OpenXML .docx/.xlsx/.pptx ones)
+ * and text files such as CSV. The browser reports a file's type from its
+ * extension, so a file with an unknown extension arrives with an empty type
+ * and is rejected.
+ */
+export const MAX_FILE_BYTES = 25 * 1024 * 1024; // 25 MB
+export const ACCEPTED_FILE_TYPE_PATTERN = /^(image\/(png|jpeg|gif)$|text\/|application\/(pdf$|msword$|vnd\.))/;
+export const ATTACHMENT_HINT = 'Allowed: PNG, JPG, GIF, PDF, Word, Excel, PowerPoint, CSV and text files up to 25MB.';
 
 /** Split files into accepted ones and human-readable rejection reasons. */
 export function partitionFiles(files: File[]): { accepted: File[]; rejected: string[] } {
   const accepted: File[] = [];
   const rejected: string[] = [];
   for (const file of files) {
-    if (!ACCEPTED_FILE_TYPES.includes(file.type)) rejected.push(`${file.name} (unsupported type)`);
-    else if (file.size > MAX_FILE_BYTES) rejected.push(`${file.name} (over 10MB)`);
+    if (!ACCEPTED_FILE_TYPE_PATTERN.test(file.type)) rejected.push(`${file.name} (unsupported type)`);
+    else if (file.size > MAX_FILE_BYTES) rejected.push(`${file.name} (over 25MB)`);
     else accepted.push(file);
   }
   return { accepted, rejected };
@@ -27,8 +37,9 @@ export function attachmentsZipName(ticketId: string): string {
 
 /**
  * Build a zip of already-fetched attachment bytes. Stored, not deflated: the
- * only types tickets accept (PNG, JPEG, PDF) are compressed formats already,
- * so deflate would spend CPU on the main thread for no size win.
+ * bulk of what tickets carry (images, PDF, Office files, which are zips
+ * themselves) is compressed already, so deflate would spend CPU on the main
+ * thread for no real size win; a CSV or text file is small either way.
  */
 export function buildAttachmentsZip(entries: { name: string; data: Uint8Array }[]): Uint8Array {
   const files: Record<string, Uint8Array> = {};
