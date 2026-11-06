@@ -176,10 +176,10 @@ export function SubmitRequestPage() {
                     <span className="relative cursor-pointer bg-white rounded-md font-medium text-brand-dark hover:text-brand-gold">Upload files</span>
                     <p className="pl-1">or drag and drop</p>
                   </div>
-                  <p className="text-xs text-gray-500">PNG, JPG, PDF up to 10MB</p>
+                  <p className="text-xs text-gray-500">PNG, JPG, GIF, PDF, Word, Excel, PowerPoint, CSV or text up to 25MB</p>
                 </div>
               </div>
-              <input ref={fileInputRef} type="file" accept=".png,.jpg,.jpeg,.pdf,image/png,image/jpeg,application/pdf" className="hidden" multiple onChange={(e) => { if (e.target.files && e.target.files.length > 0) addFiles(e.target.files); e.target.value = ''; }} />
+              <input ref={fileInputRef} type="file" accept=".png,.jpg,.jpeg,.gif,image/png,image/jpeg,image/gif,text/*,.pdf,.doc,.docx,.xls,.xlsx,.xlsm,.ppt,.pptx,.csv,.txt,application/pdf,application/msword,application/vnd.ms-excel,application/vnd.ms-powerpoint,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.openxmlformats-officedocument.presentationml.presentation" className="hidden" multiple onChange={(e) => { if (e.target.files && e.target.files.length > 0) addFiles(e.target.files); e.target.value = ''; }} />
               {fileError && <p className="mt-2 text-xs text-red-600" role="alert">{fileError}</p>}
               {files.length > 0 && (
                 <ul className="mt-3 space-y-1">

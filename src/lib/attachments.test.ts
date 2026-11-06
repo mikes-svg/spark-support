@@ -22,13 +22,40 @@ describe('attachments zip', () => {
 describe('partitionFiles', () => {
   const file = (name: string, type: string, size = 10) => ({ name, type, size }) as File;
 
-  it('accepts images and PDFs under the limit and explains each rejection', () => {
+  it('accepts PNG/JPG/GIF, PDF, Office documents and text', () => {
     const { accepted, rejected } = partitionFiles([
       file('a.png', 'image/png'),
+      file('a2.jpg', 'image/jpeg'),
+      file('a3.gif', 'image/gif'),
       file('b.docx', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'),
-      file('c.pdf', 'application/pdf', 11 * 1024 * 1024),
+      file('c.xlsx', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'),
+      file('d.xls', 'application/vnd.ms-excel'),
+      file('e.doc', 'application/msword'),
+      file('f.pptx', 'application/vnd.openxmlformats-officedocument.presentationml.presentation'),
+      file('g.csv', 'text/csv'),
+      file('h.pdf', 'application/pdf'),
     ]);
-    expect(accepted.map((f) => f.name)).toEqual(['a.png']);
-    expect(rejected).toEqual(['b.docx (unsupported type)', 'c.pdf (over 10MB)']);
+    expect(accepted.map((f) => f.name)).toEqual(['a.png', 'a2.jpg', 'a3.gif', 'b.docx', 'c.xlsx', 'd.xls', 'e.doc', 'f.pptx', 'g.csv', 'h.pdf']);
+    expect(rejected).toEqual([]);
+  });
+
+  it('rejects WebP/HEIC, executables, archives, unknown types and oversized files, with a reason each', () => {
+    const { accepted, rejected } = partitionFiles([
+      file('shot.webp', 'image/webp'),
+      file('IMG_1.heic', 'image/heic'),
+      file('setup.exe', 'application/x-msdownload'),
+      file('bundle.zip', 'application/zip'),
+      file('mystery.bin', ''),
+      file('deck.pptx', 'application/vnd.openxmlformats-officedocument.presentationml.presentation', 26 * 1024 * 1024),
+    ]);
+    expect(accepted).toEqual([]);
+    expect(rejected).toEqual([
+      'shot.webp (unsupported type)',
+      'IMG_1.heic (unsupported type)',
+      'setup.exe (unsupported type)',
+      'bundle.zip (unsupported type)',
+      'mystery.bin (unsupported type)',
+      'deck.pptx (over 25MB)',
+    ]);
   });
 });
