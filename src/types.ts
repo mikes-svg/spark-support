@@ -312,6 +312,13 @@ export interface TaskSpace {
   name: string;
   order: number;
   archived: boolean;
+  /**
+   * Switches off every task notification for this space — immediate mail,
+   * scheduled go-live and stage handoff mail, and the morning brief's task
+   * section. Resolved server-side in functions/taskSpaceNotifications.js.
+   * Absent means on, so spaces that predate the field need no migration.
+   */
+  notificationsMuted?: boolean;
 }
 
 export interface TaskList {

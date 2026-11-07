@@ -27,6 +27,17 @@ export interface TaskRowProps {
   /** `compact` drops the context line and the progress bar for dense views. */
   variant?: 'default' | 'compact';
   className?: string;
+  /**
+   * Bulk selection, opt-in. The checkbox sits beside the link rather than
+   * inside it, so ticking a row never navigates and the row stays a plain
+   * link for every list that doesn't select.
+   */
+  selectable?: boolean;
+  selected?: boolean;
+  /** Disable the checkbox (and explain why in its tooltip) without hiding it,
+   *  so a column of checkboxes stays aligned. */
+  selectDisabledReason?: string;
+  onSelectChange?: (taskId: string, selected: boolean) => void;
 }
 
 /**
@@ -47,6 +58,10 @@ export function TaskRow({
   onOpen,
   variant = 'default',
   className = '',
+  selectable = false,
+  selected = false,
+  selectDisabledReason,
+  onSelectChange,
 }: TaskRowProps) {
   const compact = variant === 'compact';
   const done = isTaskDone(task);
@@ -117,18 +132,34 @@ export function TaskRow({
     </div>
   );
 
-  const shell = `block w-full rounded-lg hover:bg-gray-50 transition-colors ${className}`;
+  const shell = `block w-full min-w-0 rounded-lg hover:bg-gray-50 transition-colors ${selectable ? '' : className}`;
 
-  if (onOpen) {
-    return (
-      <button type="button" onClick={() => onOpen(task.id)} className={shell}>
-        {body}
-      </button>
-    );
-  }
-  return (
+  const row = onOpen ? (
+    <button type="button" onClick={() => onOpen(task.id)} className={shell}>
+      {body}
+    </button>
+  ) : (
     <Link to={to ?? `/tasks/${task.id}`} className={shell}>
       {body}
     </Link>
+  );
+
+  if (!selectable) return row;
+
+  return (
+    <div className={`flex items-center ${selected ? 'bg-brand-dark/5' : ''} ${className}`}>
+      <label className="flex items-center justify-center self-stretch pl-3 pr-1 cursor-pointer">
+        <input
+          type="checkbox"
+          checked={selected}
+          disabled={Boolean(selectDisabledReason)}
+          title={selectDisabledReason}
+          onChange={(e) => onSelectChange?.(task.id, e.target.checked)}
+          aria-label={`Select "${task.title}"`}
+          className="h-4 w-4 rounded border-gray-300 text-brand-dark focus:ring-brand-dark disabled:opacity-40 disabled:cursor-not-allowed"
+        />
+      </label>
+      <div className="min-w-0 flex-1">{row}</div>
+    </div>
   );
 }

@@ -28,6 +28,7 @@ const {
   todayInTimeZone,
   daysBetweenDateStrings,
 } = require('./shared');
+const { mutedListIds } = require('./taskSpaceNotifications');
 
 // One send, one schedule, one timezone for the whole brief. America/Chicago
 // matches generateRecurringTasks' 06:00 run (lane 3) — an hour before this,
@@ -243,13 +244,15 @@ async function carryChainDepth(task, tasksById) {
 async function buildTaskSections(today) {
   const byPerson = new Map();
 
-  const tasksSnap = await db.collection('tasks').get();
+  // Tasks in a muted space stay out of the brief entirely; the mute is the
+  // space's whole notification story, not just its immediate mail.
+  const [tasksSnap, muted] = await Promise.all([db.collection('tasks').get(), mutedListIds(db)]);
   const tasksById = new Map();
   const allTasks = [];
   tasksSnap.docs.forEach((doc) => {
     const t = { id: doc.id, ...doc.data() };
     tasksById.set(doc.id, t);
-    allTasks.push(t);
+    if (!muted.has(t.listId)) allTasks.push(t);
   });
 
   const overdue = allTasks.filter((t) => isOverdue(t, today));

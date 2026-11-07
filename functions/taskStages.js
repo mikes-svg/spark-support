@@ -15,6 +15,7 @@ const { onDocumentUpdated } = require('firebase-functions/v2/firestore');
 const { logger } = require('firebase-functions');
 const { FieldValue } = require('firebase-admin/firestore');
 const { db, REGION, APP_URL, escapeHtml, sendMail } = require('./shared');
+const { isTaskInMutedSpace } = require('./taskSpaceNotifications');
 
 const TASKS = 'tasks';
 const DONE_TYPES = new Set(['done', 'closed']);
@@ -30,6 +31,10 @@ function newlyCompleted(before, after) {
 }
 
 async function notifyStage(taskId, task, stage) {
+  if (await isTaskInMutedSpace(db, task)) {
+    logger.info(`Stage handoff on ${taskId} not mailed: notifications muted for its space`);
+    return;
+  }
   const ids = stage.assigneeIds && stage.assigneeIds.length ? stage.assigneeIds : (task.assigneeIds || []);
   for (const uid of [...new Set(ids.filter(Boolean))]) {
     try {

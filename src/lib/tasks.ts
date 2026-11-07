@@ -10,6 +10,7 @@ import {
   where,
   writeBatch,
   type QueryConstraint,
+  type WriteBatch,
 } from 'firebase/firestore';
 import { db } from './firebase';
 import { isAdminRole } from '../types';
@@ -354,11 +355,17 @@ export async function setStatus(id: string, statusId: string, actorId: string): 
   if (task.statusId === statusId) return;
 
   const def = await resolveStatus(task.listId, statusId);
+  const batch = writeBatch(database);
+  writeStatusChange(batch, task, def, actorId);
+  await batch.commit();
+}
+
+/** The task update plus its audit event, appended to a batch the caller commits. */
+function writeStatusChange(batch: WriteBatch, task: Task, def: TaskStatusDef, actorId: string): void {
+  const database = getDb();
   const wasDone = task.statusType === 'done' || task.statusType === 'closed';
   const isDone = def.type === 'done' || def.type === 'closed';
-
-  const batch = writeBatch(database);
-  batch.update(doc(database, TASKS, id), {
+  batch.update(doc(database, TASKS, task.id), {
     statusId: def.id,
     statusName: def.name,
     statusType: def.type,
@@ -367,7 +374,7 @@ export async function setStatus(id: string, statusId: string, actorId: string): 
     updatedAt: serverTimestamp(),
   });
   batch.set(doc(collection(database, 'taskEvents')), {
-    taskId: id,
+    taskId: task.id,
     type: 'status_changed',
     actorId,
     fromStatusId: task.statusId ?? null,
@@ -376,7 +383,69 @@ export async function setStatus(id: string, statusId: string, actorId: string): 
     toStatusType: def.type,
     createdAt: serverTimestamp(),
   });
-  await batch.commit();
+}
+
+export interface BulkStatusResult {
+  /** Tasks now carrying the new status (including ones that already had it). */
+  changed: Task[];
+  /** Tasks that could not be moved, with a reason a person can read. */
+  failed: { id: string; error: string }[];
+}
+
+/**
+ * setStatus for many tasks at once, from the Team Tasks bulk bar.
+ *
+ * Same resolution and same audit event per task as setStatus, but the list's
+ * status set is fetched once per list rather than once per task, and the
+ * writes go out in batches of 200 tasks (400 operations, under Firestore's
+ * 500 cap). A batch is atomic, so one rejected task fails its whole batch;
+ * the caller pre-filters to tasks the user can edit, which makes that rare,
+ * and a failed batch's tasks are reported individually so nothing goes quiet.
+ */
+export async function setStatusMany(ids: string[], statusId: string, actorId: string): Promise<BulkStatusResult> {
+  const database = getDb();
+  const result: BulkStatusResult = { changed: [], failed: [] };
+  if (ids.length === 0) return result;
+
+  const setCache = new Map<string, Promise<TaskStatusSet | null>>();
+  const setFor = (listId: string) => {
+    let p = setCache.get(listId);
+    if (!p) { p = loadStatusSetForList(listId); setCache.set(listId, p); }
+    return p;
+  };
+
+  // Resolve every task first so a bad status id surfaces as a per-task
+  // failure instead of a half-committed run.
+  const pending: { task: Task; def: TaskStatusDef }[] = [];
+  await Promise.all(ids.map(async (id) => {
+    try {
+      const task = await getTask(id);
+      if (!task) { result.failed.push({ id, error: 'That task no longer exists.' }); return; }
+      if (task.statusId === statusId) { result.changed.push(task); return; }
+      const def = statusDefOf(await setFor(task.listId), statusId);
+      if (!def) { result.failed.push({ id, error: "That status isn't in this task's list." }); return; }
+      pending.push({ task, def });
+    } catch (err) {
+      result.failed.push({ id, error: err instanceof Error ? err.message : String(err) });
+    }
+  }));
+
+  const CHUNK = 200;
+  for (let i = 0; i < pending.length; i += CHUNK) {
+    const chunk = pending.slice(i, i + CHUNK);
+    const batch = writeBatch(database);
+    chunk.forEach(({ task, def }) => writeStatusChange(batch, task, def, actorId));
+    try {
+      await batch.commit();
+      chunk.forEach(({ task, def }) => {
+        result.changed.push({ ...task, statusId: def.id, statusName: def.name, statusType: def.type });
+      });
+    } catch (err) {
+      const error = err instanceof Error ? err.message : String(err);
+      chunk.forEach(({ task }) => result.failed.push({ id: task.id, error }));
+    }
+  }
+  return result;
 }
 
 /**
