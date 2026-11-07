@@ -24,6 +24,7 @@ const { onSchedule } = require('firebase-functions/v2/scheduler');
 const { logger } = require('firebase-functions');
 const { admin, db, REGION, APP_URL, escapeHtml, emailsForAssignees, todayInTimeZone } = require('./shared');
 const { DEFAULT_TIMEZONE } = require('./recurrence');
+const { isTaskInMutedSpace } = require('./taskSpaceNotifications');
 // FieldValue comes from the MODULAR entry point, never `admin.firestore.FieldValue`.
 // The Functions emulator wraps the namespaced `admin.firestore` so its calls reach
 // the local Firestore, and that wrapper does not carry FieldValue — so the
@@ -186,7 +187,8 @@ async function buildTaskActivationBatch(batch, taskDoc, cache) {
 
   // Server-side mail only — the client is forbidden from writing to `mail`, and
   // the task title is free text, so it is escaped before it reaches the HTML.
-  const emails = await emailsForAssignees(assigneeIds);
+  // A muted space still goes live on time; it just does so quietly.
+  const emails = (await isTaskInMutedSpace(db, task)) ? [] : await emailsForAssignees(assigneeIds);
   const safeTitle = escapeHtml(task.title);
   for (const email of emails) {
     batch.set(db.collection('mail').doc(), {

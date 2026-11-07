@@ -40,7 +40,7 @@ import { TaskTagPill } from '../../components/tasks/shared/TaskTagPill';
 import type { TaskList, TaskSpace, TaskStatusDef, TaskStatusSet, TaskStatusType, TaskTag } from '../../types';
 import {
   SlidersHorizontal, Plus, Trash2, Edit2, Check, X, ArrowUp, ArrowDown,
-  Archive, ArchiveRestore, Info, Tag as TagIcon,
+  Archive, ArchiveRestore, Bell, BellOff, Info, Tag as TagIcon,
 } from 'lucide-react';
 
 type TabKey = 'lists' | 'statuses' | 'tags';
@@ -236,6 +236,24 @@ function SpacesAndLists({
     }
   }
 
+  /**
+   * Mute or unmute every task notification in a space. The flag is read by
+   * the Cloud Functions that send task mail (see TaskSpace.notificationsMuted);
+   * nothing client-side changes, which is why the toggle is a single field.
+   */
+  async function toggleMuteSpace(space: TaskSpace) {
+    if (!db) return;
+    const next = !space.notificationsMuted;
+    setSpaces((prev) => prev.map((s) => s.id === space.id ? { ...s, notificationsMuted: next } : s));
+    try {
+      await updateDoc(doc(db, TASK_SPACES, space.id), { notificationsMuted: next });
+    } catch (err) {
+      console.error('Failed to update space notifications:', err);
+      setSpaces((prev) => prev.map((s) => s.id === space.id ? { ...s, notificationsMuted: space.notificationsMuted } : s));
+      setActionError('Could not update notifications for the space. Please try again.');
+    }
+  }
+
   async function requestDeleteSpace(space: TaskSpace) {
     if (!db) return;
     setActionError('');
@@ -384,10 +402,27 @@ function SpacesAndLists({
                   <button onClick={() => setEditingSpaceId(null)} className="text-gray-400 hover:text-gray-600 p-1"><X className="h-4 w-4" /></button>
                 </div>
               ) : (
-                <span className={`text-sm font-medium ${space.archived ? 'text-gray-400 line-through' : 'text-gray-900'}`}>{space.name}</span>
+                <span className="flex items-center gap-2 min-w-0">
+                  <span className={`text-sm font-medium truncate ${space.archived ? 'text-gray-400 line-through' : 'text-gray-900'}`}>{space.name}</span>
+                  {space.notificationsMuted && (
+                    <span className="inline-flex items-center gap-1 flex-shrink-0 px-2 py-0.5 rounded-full bg-gray-100 text-[11px] font-medium text-gray-600">
+                      <BellOff className="h-3 w-3" aria-hidden="true" />
+                      Notifications off
+                    </span>
+                  )}
+                </span>
               )}
               <div className="flex items-center gap-1 text-gray-400">
                 <span className="text-xs text-gray-400 mr-2">{lists.filter((l) => l.spaceId === space.id).length} list(s)</span>
+                <button
+                  onClick={() => toggleMuteSpace(space)}
+                  aria-label={space.notificationsMuted ? `Turn on task notifications for ${space.name}` : `Turn off task notifications for ${space.name}`}
+                  title={space.notificationsMuted ? 'Task notifications are off for this space. Click to turn them on.' : 'Turn off task notifications for this space (emails and the morning brief).'}
+                  aria-pressed={Boolean(space.notificationsMuted)}
+                  className={`p-2 hover:text-brand-dark ${space.notificationsMuted ? 'text-amber-600' : ''}`}
+                >
+                  {space.notificationsMuted ? <BellOff className="h-4 w-4" /> : <Bell className="h-4 w-4" />}
+                </button>
                 <button onClick={() => { setEditingSpaceId(space.id); setEditingSpaceName(space.name); }} aria-label={`Rename ${space.name}`} className="p-2 hover:text-brand-dark"><Edit2 className="h-4 w-4" /></button>
                 <button onClick={() => toggleArchiveSpace(space)} aria-label={space.archived ? `Restore ${space.name}` : `Archive ${space.name}`} className="p-2 hover:text-brand-dark">
                   {space.archived ? <ArchiveRestore className="h-4 w-4" /> : <Archive className="h-4 w-4" />}

@@ -12,6 +12,7 @@
 const { onDocumentCreated, onDocumentUpdated } = require('firebase-functions/v2/firestore');
 const { logger } = require('firebase-functions');
 const { db, REGION, APP_URL, escapeHtml, sendMail } = require('./shared');
+const { isTaskInMutedSpace } = require('./taskSpaceNotifications');
 
 /** Absolute URL to a task detail page. */
 function taskLink(taskId) {
@@ -108,6 +109,10 @@ exports.onTaskCreated = onDocumentCreated(
     const taskId = event.params.taskId;
 
     if (task.statusType === 'scheduled') return;
+    if (await isTaskInMutedSpace(db, task)) {
+      logger.info(`onTaskCreated: notifications muted for the space of ${taskId}`);
+      return;
+    }
 
     try {
       const assigneeIds = Array.isArray(task.assigneeIds) ? task.assigneeIds : [];
@@ -149,6 +154,10 @@ exports.onTaskUpdated = onDocumentUpdated(
     const safeTitle = escapeHtml(after.title);
 
     if (after.statusType === 'scheduled') return;
+    if (await isTaskInMutedSpace(db, after)) {
+      logger.info(`onTaskUpdated: notifications muted for the space of ${taskId}`);
+      return;
+    }
 
     // "Everyone attached" mirrors participantsOf() in src/lib/tasks.ts — kept
     // in sync manually since Cloud Functions don't import client TS source.
@@ -225,6 +234,10 @@ exports.onTaskCommentCreated = onDocumentCreated(
       const taskSnap = await db.collection('tasks').doc(comment.taskId).get();
       if (!taskSnap.exists) return;
       const task = taskSnap.data();
+      if (await isTaskInMutedSpace(db, task)) {
+        logger.info(`onTaskCommentCreated: notifications muted for the space of ${comment.taskId}`);
+        return;
+      }
       const link = taskLink(comment.taskId);
 
       const authorSnap = await db.collection('profiles').doc(comment.userId).get();
