@@ -37,12 +37,13 @@ service cloud.firestore {
          get(/databases/$(database)/documents/profiles/$(request.auth.uid)).data.tasksAccess == true);
     }
 
-    // Edit access to checklist tasks: superadmins always, plus a granted User —
-    // but NOT a Manager (admin), who stays view-only even when granted, so the
-    // isAdmin() branch is excluded here.
+    // Edit access to checklist tasks: superadmins always, plus anyone granted
+    // onboarding access, Manager or User alike. Mirrors canEditOnboarding in
+    // src/types.ts. The template and the property records stay superadmin-only
+    // in their own match blocks below.
     function canEditOnboardingTasks() {
       return isSuperAdmin() ||
-        (isSignedIn() && !isAdmin() &&
+        (isSignedIn() &&
          get(/databases/$(database)/documents/profiles/$(request.auth.uid)).data.onboardingAccess == true);
     }
 
