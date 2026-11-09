@@ -81,12 +81,13 @@ export function hasOnboardingAccess(profile?: { role?: string | null; onboarding
 
 /**
  * True if the user can EDIT onboarding checklists (statuses, notes, dates, rows).
- * Administrators always can. A granted User can edit; a granted Manager is
- * view-only — so a Manager needs the flag to see onboarding, but never edits it.
+ * Administrators always can; anyone else granted onboarding access — Manager
+ * or User — can edit too. (Granted Managers were view-only until 2026-11-09;
+ * the template and the property list themselves stay Administrator-only.)
  */
 export function canEditOnboarding(profile?: { role?: string | null; onboardingAccess?: boolean } | null): boolean {
   if (!profile) return false;
-  return isSuperadminRole(profile.role) || (profile.onboardingAccess === true && !isAdminRole(profile.role));
+  return isSuperadminRole(profile.role) || profile.onboardingAccess === true;
 }
 
 /**

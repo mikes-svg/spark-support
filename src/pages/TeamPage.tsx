@@ -64,7 +64,7 @@ const PERMISSIONS: PermissionSection[] = [
     color: 'bg-purple-50 text-purple-800',
     permissions: [
       { label: 'View checklists & task list', super: true, admin: true, user: true },
-      { label: 'Edit checklist rows & due dates', super: true, admin: false, user: true },
+      { label: 'Edit checklist rows & due dates', super: true, admin: true, user: true },
       { label: 'Manage the checklist template', super: true, admin: false, user: false },
       { label: 'Create & archive properties', super: true, admin: false, user: false },
     ],
@@ -553,7 +553,7 @@ export function TeamPage() {
                       )}
                       {section.title === 'Property Onboarding' && (
                         <p className="mt-2 text-xs text-gray-500">
-                          Toggle Onboarding above to grant access, off to remove it. A granted Manager can view; a granted User can also edit. Managing the template and creating or archiving properties stay Administrator-only.
+                          Toggle Onboarding above to grant access, off to remove it. A granted Manager or User can view and edit the checklists. Managing the template and creating or archiving properties stay Administrator-only.
                         </p>
                       )}
                     </td>
