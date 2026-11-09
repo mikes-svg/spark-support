@@ -44,6 +44,7 @@ export interface Profile {
   role: Role;
   onboardingAccess?: boolean;
   tasksAccess?: boolean;
+  categoriesAccess?: boolean;
   /** How much immediate task mail this person wants; read by taskNotifications.js. */
   notificationPrefs?: 'immediate' | 'mentions-only' | 'digest-only';
 }

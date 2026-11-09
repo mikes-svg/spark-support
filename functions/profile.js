@@ -110,6 +110,10 @@ exports.ensureProfile = onCall({ region: REGION }, async (request) => {
   const tasksAccess = existing.tasksAccess === true ||
     dupes.some((d) => d.data().tasksAccess === true);
 
+  // Same again for the Categories grant (which Managers may edit request types).
+  const categoriesAccess = existing.categoriesAccess === true ||
+    dupes.some((d) => d.data().categoriesAccess === true);
+
   const dupeName = dupes.map((d) => d.data().name).find(Boolean);
   // Prefer the already-stored name over the Google token, so a superadmin's
   // Team-page rename sticks instead of being reset to the Google display name
@@ -118,7 +122,7 @@ exports.ensureProfile = onCall({ region: REGION }, async (request) => {
   const photoURL = token.picture || existing.photoURL ||
     `https://ui-avatars.com/api/?name=${encodeURIComponent(name)}&background=1B4332&color=D4A843`;
 
-  const data = { name, email, photoURL, role, onboardingAccess, tasksAccess };
+  const data = { name, email, photoURL, role, onboardingAccess, tasksAccess, categoriesAccess };
   if (firstTime) data.createdAt = FieldValue.serverTimestamp();
   await profileRef.set(data, { merge: true });
 
@@ -140,7 +144,7 @@ exports.ensureProfile = onCall({ region: REGION }, async (request) => {
     }
   }
 
-  return { id: uid, name, email, photoURL, role, onboardingAccess, tasksAccess };
+  return { id: uid, name, email, photoURL, role, onboardingAccess, tasksAccess, categoriesAccess };
 });
 
 /**
