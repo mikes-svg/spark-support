@@ -46,6 +46,16 @@ service cloud.firestore {
          get(/databases/$(database)/documents/profiles/$(request.auth.uid)).data.onboardingAccess == true);
     }
 
+    // Managing Categories (request types): superadmins always, plus a Manager
+    // (admin) whose categoriesAccess flag a superadmin turned on from the Team
+    // page. The role check is deliberate: the flag means nothing on a User's
+    // profile, so a stray or hand-set flag cannot hand a User the category list.
+    function canEditCategories() {
+      return isSuperAdmin() ||
+        (isSignedIn() && role() == 'admin' &&
+         get(/databases/$(database)/documents/profiles/$(request.auth.uid)).data.categoriesAccess == true);
+    }
+
     // True if the signed-in user is a participant of the given ticket. Used to
     // gate comments / audit events to the people who can see the ticket itself.
     function isTicketParticipant(ticketId) {
@@ -152,7 +162,7 @@ service cloud.firestore {
 
     match /requestTypes/{typeId} {
       allow read: if isSignedIn();
-      allow write: if isSuperAdmin();
+      allow write: if canEditCategories();
     }
 
     match /meta/{docId} {

@@ -65,6 +65,7 @@ export interface Profile {
   role?: Role;
   onboardingAccess?: boolean;
   tasksAccess?: boolean;
+  categoriesAccess?: boolean;
 }
 
 /**
@@ -102,6 +103,22 @@ export function canEditOnboarding(profile?: { role?: string | null; onboardingAc
 export function hasTasksAccess(profile?: { role?: string | null; tasksAccess?: boolean } | null): boolean {
   if (!profile) return false;
   return isSuperadminRole(profile.role) || profile.tasksAccess === true;
+}
+
+/**
+ * True if the user may manage Categories (request types) from Settings: add,
+ * rename, activate, delete them and set their default assignees.
+ *
+ * Administrators always can. A Manager can only once an Administrator turns
+ * the Categories toggle on for them from the Team page; the grant is per
+ * person, not per role, so the team can pick exactly which Managers own the
+ * category list. A User never can — the toggle is not offered for them, and
+ * the Firestore rule (canEditCategories in firestore.rules) ignores the flag
+ * on a User's profile even if one were set by hand.
+ */
+export function canEditCategories(profile?: { role?: string | null; categoriesAccess?: boolean } | null): boolean {
+  if (!profile) return false;
+  return isSuperadminRole(profile.role) || (profile.role === 'admin' && profile.categoriesAccess === true);
 }
 
 // ─── Property onboarding ─────────────────────────────────────────────────────

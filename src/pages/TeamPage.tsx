@@ -9,12 +9,13 @@ import { PageSpinner } from '../components/PageSpinner';
 import { Avatar } from '../components/Avatar';
 import { roleLabel, isSuperadminRole } from '../types';
 
-interface Profile { id: string; name: string; email: string; photoURL: string; role: 'superadmin' | 'admin' | 'user'; onboardingAccess?: boolean; tasksAccess?: boolean; }
+interface Profile { id: string; name: string; email: string; photoURL: string; role: 'superadmin' | 'admin' | 'user'; onboardingAccess?: boolean; tasksAccess?: boolean; categoriesAccess?: boolean; }
 
 interface Permission {
   label: string;
   super: boolean;
-  admin: boolean;
+  /** 'granted' = only once an Administrator toggles it on for that person. */
+  admin: boolean | 'granted';
   user: boolean;
 }
 
@@ -52,10 +53,10 @@ const PERMISSIONS: PermissionSection[] = [
     color: 'bg-emerald-50 text-emerald-800',
     permissions: [
       { label: 'Submit against any category', super: true, admin: true, user: true },
-      { label: 'Add & rename categories', super: true, admin: false, user: false },
-      { label: 'Set default assignees', super: true, admin: false, user: false },
-      { label: 'Activate / deactivate categories', super: true, admin: false, user: false },
-      { label: 'Delete categories', super: true, admin: false, user: false },
+      { label: 'Add & rename categories', super: true, admin: 'granted', user: false },
+      { label: 'Set default assignees', super: true, admin: 'granted', user: false },
+      { label: 'Activate / deactivate categories', super: true, admin: 'granted', user: false },
+      { label: 'Delete categories', super: true, admin: 'granted', user: false },
     ],
   },
   {
@@ -70,7 +71,11 @@ const PERMISSIONS: PermissionSection[] = [
   },
 ];
 
-function Cell({ allowed }: { allowed: boolean }) {
+/** 'granted' marks a permission a role only has once toggled on per person. */
+function Cell({ allowed }: { allowed: boolean | 'granted' }) {
+  if (allowed === 'granted') {
+    return <span className="text-xs font-medium text-emerald-700">If granted</span>;
+  }
   return allowed ? (
     <span className="inline-flex items-center justify-center w-6 h-6 rounded bg-emerald-500 text-white">
       <Check className="h-4 w-4" strokeWidth={3} />
@@ -237,6 +242,22 @@ export function TeamPage() {
     }
   };
 
+  // Only a Manager can be granted the category list: Administrators always
+  // have it and Users are never offered it, which the Firestore rule mirrors.
+  const toggleCategoriesAccess = async (profile: Profile) => {
+    if (profile.role !== 'admin' || !db) return;
+    const next = !profile.categoriesAccess;
+    setActionError('');
+    setProfiles((prev) => prev.map((p) => p.id === profile.id ? { ...p, categoriesAccess: next } : p));
+    try {
+      await updateDoc(doc(db, 'profiles', profile.id), { categoriesAccess: next });
+    } catch (err) {
+      console.error('Failed to update categories access:', err);
+      setProfiles((prev) => prev.map((p) => p.id === profile.id ? { ...p, categoriesAccess: profile.categoriesAccess } : p));
+      setActionError('Could not update categories access. Please try again.');
+    }
+  };
+
   const handleInviteUser = async () => {
     if (!inviteForm.name.trim() || !inviteForm.email.trim()) return;
     setInviting(true);
@@ -376,6 +397,30 @@ export function TeamPage() {
     </button>
   );
 
+  const renderCategoriesToggle = (profile: Profile) => {
+    const isSuper = isSuperadminRole(profile.role);
+    const isManager = profile.role === 'admin';
+    const on = isSuper || (isManager && profile.categoriesAccess === true);
+    const title = isSuper
+      ? 'Administrators always manage categories'
+      : !isManager
+        ? 'Only Managers can be given category access'
+        : on ? 'Click to remove category access' : 'Click to let this Manager manage categories';
+    return (
+      <button
+        onClick={() => toggleCategoriesAccess(profile)}
+        disabled={!isManager}
+        title={title}
+        aria-label={`Categories access for ${profile.name}: ${on ? 'on' : 'off'}`}
+        className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium transition-colors ${
+          on ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'
+        } ${isManager ? 'cursor-pointer hover:opacity-80' : 'cursor-not-allowed opacity-70'}`}
+      >
+        {on ? 'On' : 'Off'}
+      </button>
+    );
+  };
+
   const renderRowActions = (profile: Profile) => (
     <>
       <button onClick={() => { setEditingUser(profile.id); setEditUserName(profile.name); }} className="text-gray-400 hover:text-brand-dark transition-colors inline-block">
@@ -442,6 +487,10 @@ export function TeamPage() {
                 {renderTasksToggle(profile)}
               </div>
               <div className="flex items-center justify-between gap-3">
+                <span className="text-xs font-medium text-gray-500 uppercase tracking-wider">Categories</span>
+                {renderCategoriesToggle(profile)}
+              </div>
+              <div className="flex items-center justify-between gap-3">
                 <span className="text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</span>
                 <span className="space-x-3 text-sm font-medium">{renderRowActions(profile)}</span>
               </div>
@@ -451,11 +500,11 @@ export function TeamPage() {
         <div className="hidden sm:block overflow-x-auto">
           <table className="min-w-full divide-y divide-gray-200">
             <thead className="bg-white">
-              <tr>{['Name', 'Email', 'Role', 'Onboarding', 'Tasks', 'Actions'].map((h) => <th key={h} scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">{h}</th>)}</tr>
+              <tr>{['Name', 'Email', 'Role', 'Onboarding', 'Tasks', 'Categories', 'Actions'].map((h) => <th key={h} scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">{h}</th>)}</tr>
             </thead>
             <tbody className="bg-white divide-y divide-gray-200">
               {profiles.length === 0 && (
-                <tr><td colSpan={5} className={`px-6 py-12 text-center text-sm ${loadError ? 'text-red-600' : 'text-gray-500'}`}>{emptyMessage}</td></tr>
+                <tr><td colSpan={7} className={`px-6 py-12 text-center text-sm ${loadError ? 'text-red-600' : 'text-gray-500'}`}>{emptyMessage}</td></tr>
               )}
               {profiles.map((profile) => (
                 <tr key={profile.id}>
@@ -464,6 +513,7 @@ export function TeamPage() {
                   <td className="px-6 py-4 whitespace-nowrap">{renderRoleSelect(profile)}</td>
                   <td className="px-6 py-4 whitespace-nowrap">{renderOnboardingToggle(profile)}</td>
                   <td className="px-6 py-4 whitespace-nowrap">{renderTasksToggle(profile)}</td>
+                  <td className="px-6 py-4 whitespace-nowrap">{renderCategoriesToggle(profile)}</td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm font-medium space-x-3">{renderRowActions(profile)}</td>
                 </tr>
               ))}
@@ -496,6 +546,11 @@ export function TeamPage() {
                       <span className={`inline-block px-2.5 py-0.5 rounded-full text-xs font-semibold uppercase tracking-wider ${section.color}`}>
                         {section.title}
                       </span>
+                      {section.title === 'Categories' && (
+                        <p className="mt-2 text-xs text-gray-500">
+                          Toggle Categories above to let a Manager manage the category list from Settings; toggle it off to take that back. Users cannot be granted it.
+                        </p>
+                      )}
                       {section.title === 'Property Onboarding' && (
                         <p className="mt-2 text-xs text-gray-500">
                           Toggle Onboarding above to grant access, off to remove it. A granted Manager can view; a granted User can also edit. Managing the template and creating or archiving properties stay Administrator-only.

@@ -7,7 +7,7 @@ import {
   Link,
 } from 'react-router-dom';
 import { AuthProvider, useAuth } from './context/AuthContext';
-import { isAdminRole, isSuperadminRole, hasOnboardingAccess, hasTasksAccess } from './types';
+import { isAdminRole, isSuperadminRole, hasOnboardingAccess, hasTasksAccess, canEditCategories } from './types';
 import { Layout } from './components/Layout';
 import { LoginPage } from './pages/LoginPage';
 import { DashboardPage } from './pages/DashboardPage';
@@ -45,12 +45,14 @@ function ProtectedRoute({
   requireSuperadmin = false,
   requireOnboarding = false,
   requireTasks = false,
+  requireCategories = false,
 }: {
   children: React.ReactNode;
   requireAdmin?: boolean;
   requireSuperadmin?: boolean;
   requireOnboarding?: boolean;
   requireTasks?: boolean;
+  requireCategories?: boolean;
 }) {
   const { user, loading } = useAuth();
 
@@ -75,6 +77,9 @@ function ProtectedRoute({
     return <Navigate to="/" replace />;
   }
   if (requireOnboarding && !hasOnboardingAccess(user)) {
+    return <Navigate to="/" replace />;
+  }
+  if (requireCategories && !canEditCategories(user)) {
     return <Navigate to="/" replace />;
   }
   return <>{children}</>;
@@ -152,7 +157,7 @@ export function App() {
             <Route
               path="admin/settings"
               element={
-                <ProtectedRoute requireSuperadmin>
+                <ProtectedRoute requireCategories>
                   <AdminSettingsPage />
                 </ProtectedRoute>
               }

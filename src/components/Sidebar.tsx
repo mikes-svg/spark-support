@@ -23,7 +23,7 @@ import {
   UserMinus,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
-import { roleLabel, isAdminRole, isSuperadminRole, hasOnboardingAccess, hasTasksAccess } from '../types';
+import { roleLabel, isAdminRole, isSuperadminRole, hasOnboardingAccess, hasTasksAccess, canEditCategories } from '../types';
 
 interface SidebarProps {
   isOpen: boolean;
@@ -132,6 +132,7 @@ function SidebarContent({ onClose }: { onClose: () => void }) {
   const isSuperadmin = isSuperadminRole(user?.role);
   const canOnboard = hasOnboardingAccess(user);
   const canUseTasks = hasTasksAccess(user);
+  const canManageCategories = canEditCategories(user);
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>(readCollapsed);
   const toggleSection = useCallback((key: string) => {
     setCollapsed((prev) => {
@@ -167,7 +168,13 @@ function SidebarContent({ onClose }: { onClose: () => void }) {
     ...(isSuperadmin ? [
       { to: '/admin/team', icon: Users, label: 'Team' },
       { to: '/admin/analytics', icon: BarChart3, label: 'Analytics' },
+    ] : []),
+    // Settings holds the category list. Administrators always see it; a Manager
+    // sees it once granted the Categories toggle on the Team page.
+    ...(canManageCategories ? [
       { to: '/admin/settings', icon: Settings, label: 'Settings' },
+    ] : []),
+    ...(isSuperadmin ? [
       { to: '/admin/tasks', icon: SlidersHorizontal, label: 'Task Settings' },
       { to: '/admin/reassign', icon: UserMinus, label: 'Reassign Work' },
     ] : []),
