@@ -1,8 +1,8 @@
 import { useState, useRef, useEffect } from 'react';
 import { Plus, Trash2, ChevronUp, ChevronDown, GitBranch, Building2, Users, X } from 'lucide-react';
-import type { OnboardingProperty, Profile, Subtask } from '../../types';
+import type { PortfolioProperty, Profile, Subtask } from '../../types';
 import { AssigneeSelector } from '../AssigneeSelector';
-import { fetchProperties } from '../../lib/onboarding';
+import { listPortfolioProperties } from '../../lib/portfolioProperties';
 import { applyToSubtasks, namesAlreadyAdded, subtasksFromNames } from '../../lib/subtasks';
 
 /**
@@ -41,10 +41,11 @@ export function SubtaskEditor({ subtasks, canEdit, people, onToggle, onChange }:
   const [openAssigneeId, setOpenAssigneeId] = useState<string | null>(null);
   const assigneeRef = useRef<HTMLDivElement>(null);
 
-  // "One subtask per property": the property list is fetched the first time
-  // the picker opens, not on mount, since most tasks never use it.
+  // "One subtask per property": the portfolio list (Task Settings →
+  // Properties) is fetched the first time the picker opens, not on mount,
+  // since most tasks never use it.
   const [propertiesOpen, setPropertiesOpen] = useState(false);
-  const [properties, setProperties] = useState<OnboardingProperty[] | null>(null);
+  const [properties, setProperties] = useState<PortfolioProperty[] | null>(null);
   const [propertiesLoading, setPropertiesLoading] = useState(false);
   const [propertiesError, setPropertiesError] = useState('');
   const [pickedNames, setPickedNames] = useState<string[]>([]);
@@ -116,7 +117,7 @@ export function SubtaskEditor({ subtasks, canEdit, people, onToggle, onChange }:
     setPropertiesLoading(true);
     setPropertiesError('');
     try {
-      setProperties(await fetchProperties());
+      setProperties(await listPortfolioProperties());
     } catch (err) {
       console.error('Failed to load properties for subtasks:', err);
       setPropertiesError('Could not load the property list. Please try again.');
@@ -125,7 +126,7 @@ export function SubtaskEditor({ subtasks, canEdit, people, onToggle, onChange }:
     }
   };
 
-  // Live properties only, by name; archived ones are past needing signs.
+  // Live properties only, by name; archived ones (sold, etc.) are left out.
   const propertyNames = (properties ?? [])
     .filter((p) => !p.archived)
     .map((p) => p.name)
@@ -343,7 +344,7 @@ export function SubtaskEditor({ subtasks, canEdit, people, onToggle, onChange }:
           ) : propertiesError ? (
             <p className="text-xs text-red-600" role="alert">{propertiesError}</p>
           ) : propertyNames.length === 0 ? (
-            <p className="text-xs text-gray-500">No properties yet.</p>
+            <p className="text-xs text-gray-500">No properties yet. An Administrator can add the portfolio under Task Settings → Properties.</p>
           ) : (
             <>
               <div className="flex items-center gap-3 text-xs">

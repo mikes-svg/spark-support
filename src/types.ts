@@ -389,6 +389,18 @@ export interface TaskTag {
 }
 
 /**
+ * A property in the managed portfolio, by name only. Kept separate from
+ * OnboardingProperty (deals in flight, with dates and checklists); see
+ * src/lib/portfolioProperties.ts. Archived ones stay on record but leave
+ * the pickers.
+ */
+export interface PortfolioProperty {
+  id: string;
+  name: string;
+  archived: boolean;
+}
+
+/**
  * A checklist item on a task. Stored as an array field on the task, not a
  * subcollection — subtasks are always read and written with their parent.
  */
