@@ -76,6 +76,17 @@ const TAGS = [
   { id: 'tg-vendor',     name: 'Vendor',     color: '#0891B2' },
 ];
 
+// The managed portfolio (Task Settings → Properties); the subtask editor's
+// "one subtask per property" draws from this, not from onboarding.
+const PORTFOLIO = [
+  { id: 'pp-aura',      name: 'Aura',                      archived: false },
+  { id: 'pp-windsor',   name: 'Windsor',                   archived: false },
+  { id: 'pp-axis',      name: 'The Axis at Rocket City',   archived: false },
+  { id: 'pp-grandview', name: 'Grand View',                archived: false },
+  { id: 'pp-stone',     name: 'Stone Ridge',               archived: false },
+  { id: 'pp-sold',      name: 'Sold Building',             archived: true },
+];
+
 const sub = (n, title, done) => ({
   id: 's' + n, title, done: !!done, order: n * 100,
   doneAt: done ? admin.firestore.Timestamp.now() : null,
@@ -215,7 +226,8 @@ async function main() {
     await db.collection('taskLists').doc(l.id).set({ ...l, archived: false, defaultStatusSetId: 'set-default' });
   }
   for (const t of TAGS) await db.collection('taskTags').doc(t.id).set(t);
-  console.log('  spaces: ' + SPACES.length + ', lists: ' + LISTS.length + ', tags: ' + TAGS.length + ', 1 status set');
+  for (const p of PORTFOLIO) await db.collection('portfolioProperties').doc(p.id).set({ name: p.name, archived: p.archived });
+  console.log('  spaces: ' + SPACES.length + ', lists: ' + LISTS.length + ', tags: ' + TAGS.length + ', 1 status set, portfolio properties: ' + PORTFOLIO.length);
 
   const batch = db.batch();
   for (const t of TASKS) {

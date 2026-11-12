@@ -200,11 +200,7 @@ service cloud.firestore {
     }
 
     match /onboardingProperties/{propertyId} {
-      // Tasks users read the list too: the subtask editor offers "one subtask
-      // per property" (e.g. order freeze signs for every building), and the
-      // names are the only thing it uses. Onboarding detail stays behind
-      // canReadOnboarding() on the checklist collections below.
-      allow read: if canReadOnboarding() || canUseTasks();
+      allow read: if canReadOnboarding();
       allow write: if isSuperAdmin();
     }
 
@@ -391,6 +387,15 @@ service cloud.firestore {
 
     match /taskTags/{tagId} {
       allow read: if canUseTasks();
+      allow write: if isSuperAdmin();
+    }
+
+    // The managed portfolio, as a name list (see src/lib/portfolioProperties.ts).
+    // Readable by anyone signed in: it is just the buildings the company runs,
+    // and the subtask editor's "one subtask per property" needs the whole
+    // list, not only the deals in onboarding. Maintained from Task Settings.
+    match /portfolioProperties/{propertyId} {
+      allow read: if isSignedIn();
       allow write: if isSuperAdmin();
     }
 

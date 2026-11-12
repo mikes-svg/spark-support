@@ -32,18 +32,22 @@ import { db } from '../../lib/firebase';
 import { TASKS, TASK_LISTS, TASK_SPACES } from '../../lib/tasks';
 import { STATUS_SETS_COLLECTION, getOrSeedStatusSets } from '../../lib/taskStatuses';
 import { listTaskTags, createTaskTag, updateTaskTag, deleteTaskTag } from '../../lib/taskTags';
+import {
+  listPortfolioProperties, addPortfolioProperties, renamePortfolioProperty,
+  setPortfolioPropertyArchived, deletePortfolioProperty, importFromOnboarding, parsePropertyNames,
+} from '../../lib/portfolioProperties';
 import { Modal } from '../../components/Modal';
 import { ConfirmModal } from '../../components/ConfirmModal';
 import { PageSpinner } from '../../components/PageSpinner';
 import { TaskStatusPill } from '../../components/tasks/shared/TaskStatusPill';
 import { TaskTagPill } from '../../components/tasks/shared/TaskTagPill';
-import type { TaskList, TaskSpace, TaskStatusDef, TaskStatusSet, TaskStatusType, TaskTag } from '../../types';
-import {
+import type { PortfolioProperty, TaskList, TaskSpace, TaskStatusDef, TaskStatusSet, TaskStatusType, TaskTag } from '../../types';
+import { Building2, Download,
   SlidersHorizontal, Plus, Trash2, Edit2, Check, X, ArrowUp, ArrowDown,
   Archive, ArchiveRestore, Bell, BellOff, Info, Tag as TagIcon,
 } from 'lucide-react';
 
-type TabKey = 'lists' | 'statuses' | 'tags';
+type TabKey = 'lists' | 'statuses' | 'tags' | 'properties';
 
 const STATUS_TYPE_INFO: { value: TaskStatusType; label: string; hint: string }[] = [
   { value: 'todo', label: 'To Do', hint: 'Open work, not started yet.' },
@@ -83,22 +87,25 @@ export function TaskSettingsPage() {
   const [lists, setLists] = useState<TaskList[]>([]);
   const [statusSets, setStatusSets] = useState<TaskStatusSet[]>([]);
   const [tags, setTags] = useState<TaskTag[]>([]);
+  const [properties, setProperties] = useState<PortfolioProperty[]>([]);
   const [loading, setLoading] = useState(true);
   const [actionError, setActionError] = useState('');
 
   async function load() {
     if (!db) { setLoading(false); return; }
     try {
-      const [spacesSnap, listsSnap, sets, tagRows] = await Promise.all([
+      const [spacesSnap, listsSnap, sets, tagRows, propertyRows] = await Promise.all([
         getDocs(query(collection(db, TASK_SPACES), orderBy('order'))),
         getDocs(query(collection(db, TASK_LISTS), orderBy('order'))),
         getOrSeedStatusSets(),
         listTaskTags(),
+        listPortfolioProperties(),
       ]);
       setSpaces(spacesSnap.docs.map((d) => ({ id: d.id, ...d.data() } as TaskSpace)));
       setLists(listsSnap.docs.map((d) => ({ id: d.id, ...d.data() } as TaskList)));
       setStatusSets(sets);
       setTags(tagRows);
+      setProperties(propertyRows);
     } catch (err) {
       console.error('Failed to load task settings:', err);
     } finally {
@@ -116,7 +123,7 @@ export function TaskSettingsPage() {
         <SlidersHorizontal className="h-6 w-6 text-brand-dark" aria-hidden="true" />
         <div>
           <h1 className="text-xl font-serif font-semibold text-gray-900">Task Settings</h1>
-          <p className="text-sm text-gray-500">Spaces, lists, status sets, and tags.</p>
+          <p className="text-sm text-gray-500">Spaces, lists, status sets, tags, and the property portfolio.</p>
         </div>
       </div>
 
@@ -125,7 +132,7 @@ export function TaskSettingsPage() {
       )}
 
       <div className="flex gap-1 border-b border-gray-200 overflow-x-auto">
-        {([['lists', 'Spaces & Lists'], ['statuses', 'Status Sets'], ['tags', 'Tags']] as [TabKey, string][]).map(([key, label]) => (
+        {([['lists', 'Spaces & Lists'], ['statuses', 'Status Sets'], ['tags', 'Tags'], ['properties', 'Properties']] as [TabKey, string][]).map(([key, label]) => (
           <button
             key={key}
             onClick={() => setTab(key)}
@@ -153,6 +160,187 @@ export function TaskSettingsPage() {
       {tab === 'tags' && (
         <Tags tags={tags} setTags={setTags} setActionError={setActionError} />
       )}
+      {tab === 'properties' && (
+        <Properties properties={properties} setProperties={setProperties} setActionError={setActionError} />
+      )}
+    </div>
+  );
+}
+
+// ─── Properties (the portfolio) ─────────────────────────────────────────────
+
+const byName = (a: PortfolioProperty, b: PortfolioProperty) => a.name.localeCompare(b.name);
+
+function Properties({ properties, setProperties, setActionError }: {
+  properties: PortfolioProperty[];
+  setProperties: React.Dispatch<React.SetStateAction<PortfolioProperty[]>>;
+  setActionError: (msg: string) => void;
+}) {
+  const [showAdd, setShowAdd] = useState(false);
+  const [newNames, setNewNames] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [importing, setImporting] = useState(false);
+  const [notice, setNotice] = useState('');
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editingName, setEditingName] = useState('');
+  const [deleteTarget, setDeleteTarget] = useState<PortfolioProperty | null>(null);
+
+  const parsed = parsePropertyNames(newNames, properties.map((p) => p.name));
+  const live = properties.filter((p) => !p.archived).length;
+
+  async function addProperties() {
+    if (parsed.length === 0) return;
+    setSaving(true);
+    setActionError('');
+    try {
+      const created = await addPortfolioProperties(parsed);
+      setProperties((prev) => [...prev, ...created].sort(byName));
+      setNotice(`Added ${created.length} propert${created.length === 1 ? 'y' : 'ies'}.`);
+      setShowAdd(false);
+      setNewNames('');
+    } catch (err) {
+      console.error('Failed to add properties:', err);
+      setActionError('Could not add the properties. Please try again.');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function importOnboarding() {
+    setImporting(true);
+    setActionError('');
+    try {
+      const created = await importFromOnboarding(properties);
+      setProperties((prev) => [...prev, ...created].sort(byName));
+      setNotice(created.length === 0
+        ? 'Every onboarding property is already in the portfolio.'
+        : `Imported ${created.length} propert${created.length === 1 ? 'y' : 'ies'} from onboarding.`);
+    } catch (err) {
+      console.error('Failed to import onboarding properties:', err);
+      setActionError('Could not import from onboarding. Please try again.');
+    } finally {
+      setImporting(false);
+    }
+  }
+
+  async function rename(property: PortfolioProperty) {
+    const name = editingName.trim();
+    setEditingId(null);
+    if (!name || name === property.name) return;
+    setActionError('');
+    setProperties((prev) => prev.map((p) => p.id === property.id ? { ...p, name } : p).sort(byName));
+    try {
+      await renamePortfolioProperty(property.id, name);
+    } catch (err) {
+      console.error('Failed to rename property:', err);
+      setProperties((prev) => prev.map((p) => p.id === property.id ? { ...p, name: property.name } : p).sort(byName));
+      setActionError('Could not rename the property. Please try again.');
+    }
+  }
+
+  async function toggleArchive(property: PortfolioProperty) {
+    const next = !property.archived;
+    setActionError('');
+    setProperties((prev) => prev.map((p) => p.id === property.id ? { ...p, archived: next } : p));
+    try {
+      await setPortfolioPropertyArchived(property.id, next);
+    } catch (err) {
+      console.error('Failed to archive property:', err);
+      setProperties((prev) => prev.map((p) => p.id === property.id ? { ...p, archived: property.archived } : p));
+      setActionError('Could not update the property. Please try again.');
+    }
+  }
+
+  async function confirmDelete() {
+    const target = deleteTarget;
+    setDeleteTarget(null);
+    if (!target) return;
+    setActionError('');
+    setProperties((prev) => prev.filter((p) => p.id !== target.id));
+    try {
+      await deletePortfolioProperty(target.id);
+    } catch (err) {
+      console.error('Failed to delete property:', err);
+      setProperties((prev) => [...prev, target].sort(byName));
+      setActionError('Could not delete the property. Please try again.');
+    }
+  }
+
+  return (
+    <div className="bg-white shadow-sm rounded-xl border border-gray-200 overflow-hidden">
+      <div className="px-6 py-4 border-b border-gray-200 bg-gray-50/50 flex flex-wrap justify-between items-center gap-3">
+        <div className="flex items-center gap-2">
+          <Building2 className="h-4 w-4 text-gray-400" aria-hidden="true" />
+          <div>
+            <h2 className="text-base font-serif font-semibold text-gray-900">Properties</h2>
+            <p className="text-xs text-gray-500">The whole portfolio. "Add a subtask per property" on tasks picks from this list; archived ones are left out.</p>
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          <button onClick={importOnboarding} disabled={importing} title="Copy any onboarding property names not already here" className="inline-flex items-center justify-center px-3 py-2 min-h-[44px] border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 shadow-sm disabled:opacity-50">
+            <Download className="h-4 w-4 mr-1.5" />{importing ? 'Importing…' : 'Import from onboarding'}
+          </button>
+          <button onClick={() => { setNewNames(''); setShowAdd(true); }} className="inline-flex items-center justify-center px-3 py-2 min-h-[44px] border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 shadow-sm">
+            <Plus className="h-4 w-4 mr-1.5" />Add Properties
+          </button>
+        </div>
+      </div>
+      {notice && (
+        <p className="px-6 py-2 text-xs text-emerald-700 bg-emerald-50 border-b border-emerald-100" role="status">{notice}</p>
+      )}
+      <ul className="divide-y divide-gray-200">
+        {properties.length === 0 && (
+          <li className="px-6 py-12 text-center text-sm text-gray-500">No properties yet. Add them one per line, or import the ones in onboarding.</li>
+        )}
+        {properties.map((property) => (
+          <li key={property.id} className="px-6 py-3 flex items-center justify-between gap-3">
+            {editingId === property.id ? (
+              <div className="flex items-center gap-2 flex-1">
+                <input value={editingName} onChange={(e) => setEditingName(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') rename(property); }} autoFocus aria-label="Property name" className="border border-gray-300 rounded px-2 py-1.5 text-sm flex-1 max-w-xs" />
+                <button onClick={() => rename(property)} aria-label="Save name" className="text-emerald-600 hover:text-emerald-800 p-1"><Check className="h-4 w-4" /></button>
+                <button onClick={() => setEditingId(null)} aria-label="Cancel rename" className="text-gray-400 hover:text-gray-600 p-1"><X className="h-4 w-4" /></button>
+              </div>
+            ) : (
+              <span className={`text-sm ${property.archived ? 'text-gray-400 line-through' : 'text-gray-900'}`}>{property.name}</span>
+            )}
+            <div className="flex items-center gap-2 text-gray-400">
+              <button onClick={() => toggleArchive(property)} className={`px-2.5 py-0.5 rounded-full text-xs font-medium ${property.archived ? 'bg-gray-100 text-gray-700' : 'bg-green-100 text-green-800'}`} title={property.archived ? 'Archived: hidden from pickers. Click to restore.' : 'Active: shown in pickers. Click to archive.'}>
+                {property.archived ? 'Archived' : 'Active'}
+              </button>
+              <button onClick={() => { setEditingId(property.id); setEditingName(property.name); }} aria-label={`Rename ${property.name}`} className="p-2 hover:text-brand-dark"><Edit2 className="h-4 w-4" /></button>
+              <button onClick={() => setDeleteTarget(property)} aria-label={`Delete ${property.name}`} className="p-2 hover:text-red-600"><Trash2 className="h-4 w-4" /></button>
+            </div>
+          </li>
+        ))}
+      </ul>
+      {properties.length > 0 && (
+        <p className="px-6 py-3 text-xs text-gray-400 border-t border-gray-100">{live} active, {properties.length - live} archived.</p>
+      )}
+
+      <Modal open={showAdd} onClose={() => setShowAdd(false)} labelledBy="add-properties-title" widthClass="max-w-md">
+        <div className="px-6 py-5 border-b border-gray-200"><h3 id="add-properties-title" className="text-lg font-serif font-semibold text-gray-900">Add Properties</h3></div>
+        <div className="p-6 space-y-3">
+          <label htmlFor="new-property-names" className="block text-sm font-medium text-gray-700">Property names, one per line</label>
+          <textarea id="new-property-names" value={newNames} onChange={(e) => setNewNames(e.target.value)} autoFocus rows={8} placeholder={'Aura\nWindsor\nThe Axis at Rocket City'} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-dark" />
+          <p className="text-xs text-gray-500">
+            {parsed.length === 0 ? 'Paste or type the list. Names already in the portfolio are skipped.' : `${parsed.length} new propert${parsed.length === 1 ? 'y' : 'ies'} will be added.`}
+          </p>
+        </div>
+        <div className="px-6 py-4 border-t border-gray-200 flex justify-end gap-3 bg-gray-50/50">
+          <button onClick={() => setShowAdd(false)} className="px-4 py-2 text-sm font-medium text-gray-700 hover:text-gray-900">Cancel</button>
+          <button onClick={addProperties} disabled={saving || parsed.length === 0} className="px-5 py-2 text-sm font-medium rounded-lg bg-brand-dark text-white hover:bg-[#05391B] disabled:opacity-50">{saving ? 'Adding…' : `Add ${parsed.length || ''}`.trim()}</button>
+        </div>
+      </Modal>
+
+      <ConfirmModal
+        open={!!deleteTarget}
+        title="Delete Property"
+        message={deleteTarget ? `Delete "${deleteTarget.name}" from the portfolio? Existing subtasks named after it are not changed. If it was sold, archiving keeps it on record instead.` : ''}
+        confirmLabel="Delete"
+        danger
+        onConfirm={confirmDelete}
+        onCancel={() => setDeleteTarget(null)}
+      />
     </div>
   );
 }
