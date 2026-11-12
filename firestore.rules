@@ -200,7 +200,11 @@ service cloud.firestore {
     }
 
     match /onboardingProperties/{propertyId} {
-      allow read: if canReadOnboarding();
+      // Tasks users read the list too: the subtask editor offers "one subtask
+      // per property" (e.g. order freeze signs for every building), and the
+      // names are the only thing it uses. Onboarding detail stays behind
+      // canReadOnboarding() on the checklist collections below.
+      allow read: if canReadOnboarding() || canUseTasks();
       allow write: if isSuperAdmin();
     }
 

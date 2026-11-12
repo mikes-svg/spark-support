@@ -1,7 +1,9 @@
 import { useState, useRef, useEffect } from 'react';
-import { Plus, Trash2, ChevronUp, ChevronDown, GitBranch } from 'lucide-react';
-import type { Profile, Subtask } from '../../types';
+import { Plus, Trash2, ChevronUp, ChevronDown, GitBranch, Building2, Users, X } from 'lucide-react';
+import type { OnboardingProperty, Profile, Subtask } from '../../types';
 import { AssigneeSelector } from '../AssigneeSelector';
+import { fetchProperties } from '../../lib/onboarding';
+import { applyToSubtasks, namesAlreadyAdded, subtasksFromNames } from '../../lib/subtasks';
 
 /**
  * Checklist editor — Phase 1. Stub with its final prop shape.
@@ -38,6 +40,20 @@ export function SubtaskEditor({ subtasks, canEdit, people, onToggle, onChange }:
   const [newTitle, setNewTitle] = useState('');
   const [openAssigneeId, setOpenAssigneeId] = useState<string | null>(null);
   const assigneeRef = useRef<HTMLDivElement>(null);
+
+  // "One subtask per property": the property list is fetched the first time
+  // the picker opens, not on mount, since most tasks never use it.
+  const [propertiesOpen, setPropertiesOpen] = useState(false);
+  const [properties, setProperties] = useState<OnboardingProperty[] | null>(null);
+  const [propertiesLoading, setPropertiesLoading] = useState(false);
+  const [propertiesError, setPropertiesError] = useState('');
+  const [pickedNames, setPickedNames] = useState<string[]>([]);
+
+  // Bulk assignees / due date across every row.
+  const [bulkOpen, setBulkOpen] = useState(false);
+  const [bulkAssigneeIds, setBulkAssigneeIds] = useState<string[]>([]);
+  const [bulkDueDate, setBulkDueDate] = useState('');
+  const [bulkOnlyOpen, setBulkOnlyOpen] = useState(true);
 
   useEffect(() => {
     if (!openAssigneeId) return;
@@ -91,6 +107,60 @@ export function SubtaskEditor({ subtasks, canEdit, people, onToggle, onChange }:
 
   const handleDueDateChange = (id: string, dueDate: string) => {
     commit(sorted.map((s) => (s.id === id ? { ...s, dueDate: dueDate || null } : s)));
+  };
+
+  const openProperties = async () => {
+    setPropertiesOpen(true);
+    setPickedNames([]);
+    if (properties !== null || propertiesLoading) return;
+    setPropertiesLoading(true);
+    setPropertiesError('');
+    try {
+      setProperties(await fetchProperties());
+    } catch (err) {
+      console.error('Failed to load properties for subtasks:', err);
+      setPropertiesError('Could not load the property list. Please try again.');
+    } finally {
+      setPropertiesLoading(false);
+    }
+  };
+
+  // Live properties only, by name; archived ones are past needing signs.
+  const propertyNames = (properties ?? [])
+    .filter((p) => !p.archived)
+    .map((p) => p.name)
+    .sort((a, b) => a.localeCompare(b));
+  const alreadyAdded = namesAlreadyAdded(sorted, propertyNames);
+  const selectableNames = propertyNames.filter((n) => !alreadyAdded.has(n));
+  const allPicked = selectableNames.length > 0 && selectableNames.every((n) => pickedNames.includes(n));
+
+  const togglePicked = (name: string) => {
+    setPickedNames((prev) => (prev.includes(name) ? prev.filter((n) => n !== name) : [...prev, name]));
+  };
+
+  const handleAddProperties = () => {
+    // Keep the list's alphabetical order regardless of click order.
+    const names = selectableNames.filter((n) => pickedNames.includes(n));
+    if (names.length === 0) return;
+    commit(subtasksFromNames(sorted, names, localId));
+    setPickedNames([]);
+    setPropertiesOpen(false);
+  };
+
+  const bulkTargets = bulkOnlyOpen ? sorted.filter((s) => !s.done) : sorted;
+  const bulkHasChange = bulkAssigneeIds.length > 0 || Boolean(bulkDueDate);
+
+  const handleBulkApply = () => {
+    if (!bulkHasChange || bulkTargets.length === 0) return;
+    // A blank field means "leave what each row has", so only set what was chosen.
+    const patch = {
+      ...(bulkAssigneeIds.length > 0 ? { assigneeIds: bulkAssigneeIds } : {}),
+      ...(bulkDueDate ? { dueDate: bulkDueDate } : {}),
+    };
+    commit(applyToSubtasks(sorted, patch, bulkOnlyOpen));
+    setBulkOpen(false);
+    setBulkAssigneeIds([]);
+    setBulkDueDate('');
   };
 
   return (
@@ -232,6 +302,143 @@ export function SubtaskEditor({ subtasks, canEdit, people, onToggle, onChange }:
           >
             Add
           </button>
+        </div>
+      )}
+
+      {canEdit && (
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 pt-1 pl-6">
+          <button
+            type="button"
+            onClick={() => (propertiesOpen ? setPropertiesOpen(false) : openProperties())}
+            className="inline-flex items-center gap-1 text-xs font-medium text-brand-dark hover:text-[#05391B]"
+            aria-expanded={propertiesOpen}
+          >
+            <Building2 className="h-3.5 w-3.5" />
+            Add a subtask per property
+          </button>
+          {sorted.length > 1 && people && people.length > 0 && (
+            <button
+              type="button"
+              onClick={() => setBulkOpen((v) => !v)}
+              className="inline-flex items-center gap-1 text-xs font-medium text-brand-dark hover:text-[#05391B]"
+              aria-expanded={bulkOpen}
+            >
+              <Users className="h-3.5 w-3.5" />
+              Set assignees or due date for all
+            </button>
+          )}
+        </div>
+      )}
+
+      {canEdit && propertiesOpen && (
+        <div className="rounded-lg border border-gray-200 bg-gray-50 p-3 space-y-2" role="group" aria-label="Add a subtask per property">
+          <div className="flex items-center justify-between gap-2">
+            <p className="text-xs font-medium text-gray-700">Pick properties. Each becomes a subtask named after it.</p>
+            <button type="button" onClick={() => setPropertiesOpen(false)} aria-label="Close property list" className="p-1 text-gray-400 hover:text-gray-700">
+              <X className="h-3.5 w-3.5" />
+            </button>
+          </div>
+          {propertiesLoading ? (
+            <p className="text-xs text-gray-500">Loading properties…</p>
+          ) : propertiesError ? (
+            <p className="text-xs text-red-600" role="alert">{propertiesError}</p>
+          ) : propertyNames.length === 0 ? (
+            <p className="text-xs text-gray-500">No properties yet.</p>
+          ) : (
+            <>
+              <div className="flex items-center gap-3 text-xs">
+                <button
+                  type="button"
+                  onClick={() => setPickedNames(allPicked ? [] : selectableNames)}
+                  disabled={selectableNames.length === 0}
+                  className="font-medium text-brand-dark hover:text-[#05391B] disabled:opacity-40"
+                >
+                  {allPicked ? 'Select none' : 'Select all'}
+                </button>
+                <span className="text-gray-400">
+                  {pickedNames.length} of {selectableNames.length} selected
+                  {alreadyAdded.size > 0 ? ` · ${alreadyAdded.size} already added` : ''}
+                </span>
+              </div>
+              <ul className="max-h-56 overflow-y-auto space-y-1">
+                {propertyNames.map((name) => {
+                  const added = alreadyAdded.has(name);
+                  return (
+                    <li key={name}>
+                      <label className={`flex items-center gap-2 text-sm ${added ? 'text-gray-400' : 'text-gray-800'}`}>
+                        <input
+                          type="checkbox"
+                          checked={added || pickedNames.includes(name)}
+                          disabled={added}
+                          onChange={() => togglePicked(name)}
+                          className="h-4 w-4 rounded border-gray-300 text-brand-dark focus:ring-brand-dark disabled:opacity-50"
+                        />
+                        <span className="truncate">{name}</span>
+                        {added && <span className="text-[10px] uppercase tracking-wide text-gray-400">added</span>}
+                      </label>
+                    </li>
+                  );
+                })}
+              </ul>
+              <div className="flex items-center gap-2 pt-1">
+                <button
+                  type="button"
+                  onClick={handleAddProperties}
+                  disabled={pickedNames.length === 0}
+                  className="px-3 py-1.5 text-xs font-medium rounded-md bg-brand-dark text-white hover:bg-[#05391B] disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  Add {pickedNames.length || ''} subtask{pickedNames.length === 1 ? '' : 's'}
+                </button>
+                <button type="button" onClick={() => setPropertiesOpen(false)} className="px-3 py-1.5 text-xs font-medium text-gray-600 hover:text-gray-900">
+                  Cancel
+                </button>
+              </div>
+            </>
+          )}
+        </div>
+      )}
+
+      {canEdit && bulkOpen && people && people.length > 0 && (
+        <div className="rounded-lg border border-gray-200 bg-gray-50 p-3 space-y-2" role="group" aria-label="Set assignees or due date for all subtasks">
+          <div className="flex items-center justify-between gap-2">
+            <p className="text-xs font-medium text-gray-700">Applies to every subtask. Leave a field blank to keep what each one has.</p>
+            <button type="button" onClick={() => setBulkOpen(false)} aria-label="Close bulk edit" className="p-1 text-gray-400 hover:text-gray-700">
+              <X className="h-3.5 w-3.5" />
+            </button>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs text-gray-500 mb-1">Assignees</label>
+              <AssigneeSelector value={bulkAssigneeIds} onChange={setBulkAssigneeIds} admins={people} variant="compact" />
+            </div>
+            <div>
+              <label htmlFor="bulk-subtask-due" className="block text-xs text-gray-500 mb-1">Due date</label>
+              <input
+                id="bulk-subtask-due"
+                type="date"
+                value={bulkDueDate}
+                onChange={(e) => setBulkDueDate(e.target.value)}
+                className="w-full border border-gray-300 rounded-md px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-dark"
+              />
+            </div>
+          </div>
+          <label className="flex items-center gap-2 text-xs text-gray-600">
+            <input type="checkbox" checked={bulkOnlyOpen} onChange={(e) => setBulkOnlyOpen(e.target.checked)} className="h-4 w-4 rounded border-gray-300 text-brand-dark focus:ring-brand-dark" />
+            Skip subtasks already marked complete
+          </label>
+          <div className="flex items-center gap-2 pt-1">
+            <button
+              type="button"
+              onClick={handleBulkApply}
+              disabled={!bulkHasChange || bulkTargets.length === 0}
+              className="px-3 py-1.5 text-xs font-medium rounded-md bg-brand-dark text-white hover:bg-[#05391B] disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              Apply to {bulkTargets.length} subtask{bulkTargets.length === 1 ? '' : 's'}
+            </button>
+            <button type="button" onClick={() => setBulkOpen(false)} className="px-3 py-1.5 text-xs font-medium text-gray-600 hover:text-gray-900">
+              Cancel
+            </button>
+          </div>
         </div>
       )}
     </div>
