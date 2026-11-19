@@ -13,7 +13,7 @@ const STATUS_STYLES: Record<DdStatus, string> = {
   Outstanding: 'bg-gray-100 text-gray-700 border-gray-200',
   'To Review': 'bg-amber-100 text-amber-800 border-amber-200',
   Complete: 'bg-emerald-100 text-emerald-800 border-emerald-200',
-  'N/A': 'bg-slate-100 text-slate-500 border-slate-200',
+  'N/A': 'bg-gray-700 text-white border-gray-700',
 };
 
 /**
